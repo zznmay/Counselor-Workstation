@@ -86,10 +86,23 @@ function decodeToken(token) {
 }
 
 /** 路由守卫：校验 Bearer token 并挂载 req.user */
-function authMiddleware(req, res, next) {
+/** 收集候选令牌：优先 X-Auth-Token，其次 Authorization
+ *（部分反向代理会覆盖 Authorization，故自定义头优先） */
+function candidateTokens(req) {
+  const list = [];
+  const custom = req.headers['x-auth-token'];
+  if (custom) list.push(Array.isArray(custom) ? custom[0] : String(custom));
   const header = req.headers.authorization || '';
-  const token = header.startsWith('Bearer ') ? header.slice(7) : '';
-  const payload = decodeToken(token);
+  if (header.startsWith('Bearer ')) list.push(header.slice(7));
+  return list;
+}
+
+function authMiddleware(req, res, next) {
+  let payload = null;
+  for (const token of candidateTokens(req)) {
+    payload = decodeToken(token);
+    if (payload) break;
+  }
   if (!payload) return res.status(401).json({ message: '未登录或登录已过期' });
   const user = findActiveUser(payload.uid);
   if (!user) return res.status(401).json({ message: '账号已失效或被停用' });

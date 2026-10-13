@@ -3,13 +3,19 @@ import { clearAuth, getToken } from '@/lib/auth';
 
 export const BASE_URL = '/api';
 
+/** 令牌头：Authorization 为主，X-Auth-Token 为备选（部分反向代理不透传 Authorization） */
+function authHeaders(token: string | null): Record<string, string> {
+  if (!token) return {};
+  return { Authorization: `Bearer ${token}`, 'X-Auth-Token': token };
+}
+
 export async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
   const res = await fetch(BASE_URL + path, {
     ...options,
     headers: {
       ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
-      ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}),
+      ...authHeaders(getToken()),
       ...(options.headers ?? {}),
     },
   });
@@ -36,7 +42,7 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
 /** 下载二进制（带鉴权） */
 export async function requestBlob(path: string): Promise<Blob> {
   const res = await fetch(BASE_URL + path, {
-    headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {},
+    headers: authHeaders(getToken()),
   });
   if (!res.ok) {
     let message = `下载失败（HTTP ${res.status}）`;

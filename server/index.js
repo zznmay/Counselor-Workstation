@@ -50,26 +50,39 @@ if (fs.existsSync(config.DIST_DIR)) {
   console.warn('[warn] 未找到前端构建目录 dist/，请先在项目根目录执行 npm run build');
 }
 
-// ---- HTTPS（自签证书，首次启动自动生成） ----
-const keyPath = path.join(config.CERT_DIR, 'key.pem');
-const certPath = path.join(config.CERT_DIR, 'cert.pem');
-if (!fs.existsSync(keyPath) || !fs.existsSync(certPath)) {
-  console.log('[cert] 未发现证书，正在生成自签证书…');
-  require('./scripts/gen-cert').generate();
+// ---- 监听层：默认 HTTPS（内网自签证书）；ENABLE_HTTPS=0 时走 HTTP（云平台反向代理场景） ----
+const useTls = String(process.env.ENABLE_HTTPS ?? '1') !== '0';
+const scheme = useTls ? 'https' : 'http';
+
+let server;
+if (useTls) {
+  const keyPath = path.join(config.CERT_DIR, 'key.pem');
+  const certPath = path.join(config.CERT_DIR, 'cert.pem');
+  if (!fs.existsSync(keyPath) || !fs.existsSync(certPath)) {
+    console.log('[cert] 未发现证书，正在生成自签证书…');
+    require('./scripts/gen-cert').generate();
+  }
+  server = https.createServer(
+    { key: fs.readFileSync(keyPath), cert: fs.readFileSync(certPath) },
+    app,
+  );
+} else {
+  console.log('[net] ENABLE_HTTPS=0，以 HTTP 模式监听（适用于反向代理/云平台部署）');
+  server = require('http').createServer(app);
 }
 
-const server = https.createServer(
-  { key: fs.readFileSync(keyPath), cert: fs.readFileSync(certPath) },
-  app,
-);
+server.on('error', (err) => {
+  console.error('[net] 监听失败:', err && err.message);
+});
 
 server.listen(config.PORT, '0.0.0.0', () => {
   const ips = config.lanIps();
+  console.error(`[net] 已监听 0.0.0.0:${config.PORT} (${scheme})`);
   console.log('==============================================');
   console.log('  辅导员工作台 · 本地化服务端已启动');
-  console.log(`  本机访问:    https://localhost:${config.PORT}`);
-  ips.forEach((ip) => console.log(`  局域网访问:  https://${ip}:${config.PORT}`));
-  console.log('  首次访问浏览器会提示证书不受信任，属自签证书正常现象');
+  console.log(`  本机访问:    ${scheme}://localhost:${config.PORT}`);
+  ips.forEach((ip) => console.log(`  局域网访问:  ${scheme}://${ip}:${config.PORT}`));
+  if (useTls) console.log('  首次访问浏览器会提示证书不受信任，属自签证书正常现象');
   console.log('  数据目录:   ', config.DATA_DIR);
   console.log('==============================================');
 });

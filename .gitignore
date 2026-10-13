@@ -33,6 +33,10 @@ Thumbs.db
 # ===== AI 辅助工具缓存（本仓库无关）=====
 .mimosa/
 .zcode/
+.workbuddy/
+
+# ===== WorkBuddy 应用发布标记（本地生成，与源码无关）=====
+.wbapp_*.genie
 
 # ===== 临时文件 =====
 tmp/
