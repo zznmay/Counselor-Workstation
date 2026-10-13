@@ -1,0 +1,149 @@
+import type {
+  ApprovalStatus,
+  ApprovalType,
+  Gender,
+  NoticeStatus,
+  NoticeType,
+  StudentStatus,
+  TalkType,
+  TalkWay,
+  TodoPriority,
+  TodoStatus,
+  TodoType,
+  WarningLevel,
+  WarningStatus,
+  WarningType,
+} from '@/types';
+
+/** 年级选项 */
+export const GRADES = ['2024级', '2025级', '2026级'] as const;
+
+/** 专业选项 */
+export const MAJORS = [
+  '计算机应用技术',
+  '大数据技术',
+  '电子商务',
+  '学前教育',
+  '机电一体化技术',
+] as const;
+
+/** 通知发布范围选项 */
+export const NOTICE_SCOPES = [
+  '全部学生',
+  '2024级',
+  '2025级',
+  '2026级',
+  '计应2401',
+  '计应2402',
+  '大数2401',
+  '电商2401',
+  '计应2501',
+  '大数2501',
+  '学前2501',
+  '机电2501',
+  '计应2601',
+  '电商2601',
+  '学前2601',
+] as const;
+
+/** 政治面貌选项 */
+export const POLITICAL_STATUSES = ['中共党员', '中共预备党员', '共青团员', '群众'] as const;
+
+export const GENDERS: Gender[] = ['男', '女'];
+export const STUDENT_STATUSES: StudentStatus[] = ['在读', '休学', '退学'];
+export const TALK_TYPES: TalkType[] = ['学业指导', '心理疏导', '生活关怀', '就业指导', '违纪教育', '资助帮扶'];
+export const TALK_WAYS: TalkWay[] = ['面对面', '电话', '线上'];
+export const TALK_TYPE_COLOR: Record<TalkType, string> = {
+  学业指导: 'blue',
+  心理疏导: 'purple',
+  生活关怀: 'green',
+  就业指导: 'cyan',
+  违纪教育: 'volcano',
+  资助帮扶: 'gold',
+};
+export const WARNING_TYPES: WarningType[] = ['学业预警', '心理预警', '行为预警', '经济困难预警'];
+export const WARNING_LEVELS: WarningLevel[] = ['红色', '橙色', '黄色'];
+export const WARNING_STATUSES: WarningStatus[] = ['待处理', '处理中', '已解除'];
+export const NOTICE_TYPES: NoticeType[] = ['事务通知', '活动通知', '安全提醒', '评奖评优', '其他'];
+export const NOTICE_STATUSES: NoticeStatus[] = ['草稿', '已发布', '已撤回'];
+export const TODO_TYPES: TodoType[] = ['谈话提醒', '材料提交', '会议安排', '宿舍走访', '数据填报', '其他'];
+export const TODO_PRIORITIES: TodoPriority[] = ['高', '中', '低'];
+export const TODO_STATUSES: TodoStatus[] = ['未完成', '已完成'];
+export const APPROVAL_TYPES: ApprovalType[] = ['学生请假', '勤工助学', '奖学金申请', '助学金申请', '活动申请', '其他'];
+export const APPROVAL_STATUSES: ApprovalStatus[] = ['待审批', '已通过', '已驳回'];
+
+/* ==================== 颜色映射 ==================== */
+
+export const STUDENT_STATUS_COLOR: Record<StudentStatus, string> = {
+  在读: 'blue',
+  休学: 'orange',
+  退学: 'red',
+};
+
+export const WARNING_LEVEL_COLOR: Record<WarningLevel, string> = {
+  红色: 'red',
+  橙色: 'orange',
+  黄色: 'gold',
+};
+
+export const WARNING_TYPE_COLOR: Record<WarningType, string> = {
+  学业预警: 'volcano',
+  心理预警: 'purple',
+  行为预警: 'gold',
+  经济困难预警: 'cyan',
+};
+
+export const WARNING_STATUS_COLOR: Record<WarningStatus, string> = {
+  待处理: 'red',
+  处理中: 'blue',
+  已解除: 'green',
+};
+
+export const NOTICE_TYPE_COLOR: Record<NoticeType, string> = {
+  事务通知: 'blue',
+  活动通知: 'cyan',
+  安全提醒: 'red',
+  评奖评优: 'gold',
+  其他: 'default',
+};
+
+export const NOTICE_STATUS_COLOR: Record<NoticeStatus, string> = {
+  草稿: 'default',
+  已发布: 'green',
+  已撤回: 'gray',
+};
+
+export const TODO_PRIORITY_COLOR: Record<TodoPriority, string> = {
+  高: 'red',
+  中: 'orange',
+  低: 'blue',
+};
+
+export const TODO_TYPE_COLOR: Record<TodoType, string> = {
+  谈话提醒: 'purple',
+  材料提交: 'blue',
+  会议安排: 'cyan',
+  宿舍走访: 'green',
+  数据填报: 'gold',
+  其他: 'default',
+};
+
+export const APPROVAL_TYPE_COLOR: Record<ApprovalType, string> = {
+  学生请假: 'blue',
+  勤工助学: 'cyan',
+  奖学金申请: 'gold',
+  助学金申请: 'green',
+  活动申请: 'purple',
+  其他: 'default',
+};
+
+export const APPROVAL_STATUS_COLOR: Record<ApprovalStatus, string> = {
+  待审批: 'orange',
+  已通过: 'green',
+  已驳回: 'red',
+};
+
+/** 由选项数组生成 Select 的 options */
+export function toOptions(values: readonly string[]): { value: string; label: string }[] {
+  return values.map((v) => ({ value: v, label: v }));
+}

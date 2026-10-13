@@ -1,0 +1,1250 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sheet 合并工具 — Excel 多表合并</title>
+    <!-- 运行库本地化（与工作台同源伺服，无外网依赖） -->
+    <script src="./vendor/exceljs.min.js"></script>
+    <script src="./vendor/FileSaver.min.js"></script>
+    <style>
+        /* ======================================================================
+           视觉规范与工作台一致：「未来界面蓝」#5F86FF / #A9C2FF / #F4F7FF / #2F3E66
+           支持 light / dark 双主题：由 URL ?theme= 或父页面 postMessage 控制
+           ====================================================================== */
+        :root {
+            --bg: #ffffff;
+            --bg-elevated: #f4f7ff;
+            --bg-card: #ffffff;
+            --bg-input: #f4f7ff;
+            --border: #e3eaf6;
+            --border-focus: #5f86ff;
+            --fg: #2f3e66;
+            --fg-muted: #5a6b8c;
+            --fg-dim: #8a99b5;
+            --accent: #5f86ff;
+            --accent-hover: #4a6fe3;
+            --accent-glow: rgba(95, 134, 255, 0.16);
+            --success: #5ca97f;
+            --success-glow: rgba(92, 169, 127, 0.18);
+            --warning: #c08a3e;
+            --error: #d9645c;
+            --radius: 14px;
+            --radius-sm: 10px;
+            --radius-xs: 8px;
+            --shadow: 0 1px 2px rgba(47, 62, 102, 0.04), 0 8px 22px rgba(47, 62, 102, 0.06);
+            --shadow-lg: 0 16px 44px rgba(47, 62, 102, 0.16);
+            --transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        html[data-theme='dark'] {
+            --bg: #12172a;
+            --bg-elevated: #1f2740;
+            --bg-card: #1b2136;
+            --bg-input: #12172a;
+            --border: #2c3450;
+            --border-focus: #5f86ff;
+            --fg: #e6eaf5;
+            --fg-muted: #9fabc9;
+            --fg-dim: #6c7897;
+            --accent: #5f86ff;
+            --accent-hover: #7d9bff;
+            --accent-glow: rgba(95, 134, 255, 0.24);
+            --success: #5cae8a;
+            --success-glow: rgba(92, 174, 138, 0.24);
+            --warning: #dfa050;
+            --error: #e07a6e;
+            --shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+            --shadow-lg: 0 12px 48px rgba(0, 0, 0, 0.45);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB',
+                'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
+            background: var(--bg);
+            color: var(--fg);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            top: -40%; left: -20%;
+            width: 80vw; height: 80vw;
+            background: radial-gradient(circle, rgba(95,134,255,0.07) 0%, transparent 60%);
+            pointer-events: none; z-index: 0;
+        }
+        body::after {
+            content: '';
+            position: fixed;
+            bottom: -30%; right: -15%;
+            width: 60vw; height: 60vw;
+            background: radial-gradient(circle, rgba(169,194,255,0.1) 0%, transparent 60%);
+            pointer-events: none; z-index: 0;
+        }
+        html[data-theme='dark'] body::before { background: radial-gradient(circle, rgba(95,134,255,0.1) 0%, transparent 60%); }
+        html[data-theme='dark'] body::after { background: radial-gradient(circle, rgba(92,174,138,0.06) 0%, transparent 60%); }
+
+        .app-container {
+            position: relative; z-index: 1;
+            max-width: 1240px;
+            margin: 0 auto;
+            padding: 20px 22px 36px;
+        }
+
+        /* === Header === */
+        .app-header {
+            text-align: center;
+            margin-bottom: 26px;
+            animation: fadeInDown 0.6s ease-out;
+        }
+        .app-header .logo-icon {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 46px; height: 46px;
+            background: linear-gradient(135deg, #5f86ff, #8fa9ff);
+            border-radius: 13px; margin-bottom: 12px; font-size: 22px;
+            box-shadow: 0 8px 24px rgba(95,134,255,0.32);
+        }
+        .app-header h1 {
+            font-size: 1.35rem; font-weight: 600; letter-spacing: 0.02em;
+            color: var(--fg);
+        }
+        .app-header .subtitle { color: var(--fg-dim); font-size: 0.82rem; margin-top: 6px; }
+
+        /* === Card === */
+        .card {
+            background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: var(--radius); padding: 22px 26px; margin-bottom: 18px;
+            box-shadow: var(--shadow); transition: border-color var(--transition);
+        }
+        .card:hover { border-color: rgba(95,134,255,0.35); }
+        .card-title {
+            font-size: 0.98rem; font-weight: 600; margin-bottom: 18px;
+            display: flex; align-items: center; gap: 10px;
+        }
+        .card-title .step-badge {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 26px; height: 26px; background: linear-gradient(135deg, #5f86ff, #7d9bff);
+            color: #fff;
+            border-radius: 50%; font-size: 0.78rem; font-weight: 600; flex-shrink: 0;
+            box-shadow: 0 4px 10px rgba(95,134,255,0.3);
+        }
+
+        /* === Upload zone === */
+        .upload-zone {
+            border: 1.5px dashed var(--border); border-radius: var(--radius);
+            padding: 40px 24px; text-align: center; cursor: pointer;
+            transition: all var(--transition); position: relative; overflow: hidden;
+        }
+        .upload-zone::before {
+            content: ''; position: absolute; inset: 0;
+            background: linear-gradient(135deg, rgba(95,134,255,0.04), transparent);
+            opacity: 0; transition: opacity var(--transition);
+        }
+        .upload-zone:hover, .upload-zone.dragover {
+            border-color: var(--accent); background: rgba(95,134,255,0.05);
+        }
+        .upload-zone:hover::before, .upload-zone.dragover::before { opacity: 1; }
+        .upload-zone .upload-icon { font-size: 2.2rem; margin-bottom: 10px; opacity: 0.75; }
+        .upload-zone p { color: var(--fg-muted); font-size: 0.92rem; }
+        .upload-zone .hint { color: var(--fg-dim); font-size: 0.8rem; margin-top: 8px; }
+        .upload-zone input[type="file"] { display: none; }
+
+        /* === File info === */
+        .file-info {
+            display: none; align-items: center; gap: 16px;
+            padding: 14px 18px; background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm); margin-top: 16px; animation: fadeIn 0.3s ease-out;
+        }
+        .file-info.visible { display: flex; }
+        .file-info .file-icon {
+            width: 42px; height: 42px;
+            background: linear-gradient(135deg, #1d6f42, #2d9d5a);
+            border-radius: var(--radius-xs);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1rem; font-weight: 700; color: #fff; flex-shrink: 0;
+        }
+        .file-info .file-details { flex: 1; min-width: 0; }
+        .file-info .file-name {
+            font-weight: 600; font-size: 0.92rem;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .file-info .file-meta { color: var(--fg-dim); font-size: 0.8rem; margin-top: 2px; }
+        .file-info .remove-btn {
+            background: none; border: none; color: var(--fg-dim);
+            cursor: pointer; font-size: 1.2rem; padding: 4px 8px;
+            border-radius: var(--radius-xs); transition: all var(--transition);
+        }
+        .file-info .remove-btn:hover { color: var(--error); background: rgba(217,100,92,0.1); }
+
+        /* === Sheet selector === */
+        .sheet-selector-container { display: none; margin-top: 16px; animation: fadeIn 0.3s ease-out; }
+        .sheet-selector-container.visible { display: block; }
+        .sheet-selector-header {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 12px;
+        }
+        .sheet-selector-actions { display: flex; gap: 8px; }
+        .sheet-selector-actions button {
+            background: none; border: 1px solid var(--border); color: var(--fg-muted);
+            font-size: 0.78rem; padding: 4px 12px; border-radius: var(--radius-xs);
+            cursor: pointer; font-family: inherit;
+            transition: all var(--transition);
+        }
+        .sheet-selector-actions button:hover {
+            border-color: var(--accent); color: var(--accent); background: var(--accent-glow);
+        }
+        .sheet-checkbox-list {
+            display: flex; flex-direction: column; gap: 6px;
+            max-height: 260px; overflow-y: auto;
+            padding: 4px;
+        }
+        .sheet-checkbox-item {
+            display: flex; align-items: center; gap: 12px;
+            padding: 10px 14px; background: var(--bg-input);
+            border: 1px solid var(--border); border-radius: var(--radius-sm);
+            cursor: pointer; transition: all var(--transition);
+            user-select: none;
+        }
+        .sheet-checkbox-item:hover { border-color: rgba(95,134,255,0.45); }
+        .sheet-checkbox-item.selected { border-color: var(--accent); background: rgba(95,134,255,0.07); }
+        .sheet-checkbox-item input[type="checkbox"] { display: none; }
+        .sheet-checkbox-item .check-box {
+            width: 19px; height: 19px; border: 1.5px solid var(--border);
+            border-radius: 5px; display: flex; align-items: center; justify-content: center;
+            transition: all var(--transition); flex-shrink: 0;
+        }
+        .sheet-checkbox-item.selected .check-box {
+            background: var(--accent); border-color: var(--accent);
+        }
+        .sheet-checkbox-item .check-box::after {
+            content: '✓'; color: #fff; font-size: 0.7rem; font-weight: 700;
+            opacity: 0; transition: opacity var(--transition);
+        }
+        .sheet-checkbox-item.selected .check-box::after { opacity: 1; }
+        .sheet-checkbox-item .sheet-info { flex: 1; min-width: 0; }
+        .sheet-checkbox-item .sheet-name {
+            font-weight: 500; font-size: 0.9rem;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .sheet-checkbox-item .sheet-meta { color: var(--fg-dim); font-size: 0.78rem; margin-top: 2px; }
+        .sheet-checkbox-item .preview-btn {
+            background: none; border: 1px solid var(--border); color: var(--fg-dim);
+            font-size: 0.75rem; padding: 4px 12px; border-radius: var(--radius-xs);
+            cursor: pointer; font-family: inherit;
+            transition: all var(--transition); white-space: nowrap;
+        }
+        .sheet-checkbox-item .preview-btn:hover {
+            border-color: var(--accent); color: var(--accent); background: var(--accent-glow);
+        }
+        .selected-count {
+            font-size: 0.82rem; color: var(--fg-dim); margin-top: 8px;
+        }
+        .selected-count strong { color: var(--accent); }
+
+        /* === Form controls === */
+        .form-group { margin-bottom: 20px; }
+        .form-group:last-child { margin-bottom: 0; }
+        .form-label {
+            display: block; font-size: 0.86rem; font-weight: 500;
+            color: var(--fg-muted); margin-bottom: 8px;
+        }
+        .form-input {
+            width: 100%; padding: 11px 15px; background: var(--bg-input);
+            border: 1px solid var(--border); border-radius: var(--radius-sm);
+            color: var(--fg); font-size: 0.92rem; font-family: inherit;
+            transition: all var(--transition); outline: none;
+        }
+        .form-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+        .form-input::placeholder { color: var(--fg-dim); }
+        .form-hint { font-size: 0.78rem; color: var(--fg-dim); margin-top: 6px; line-height: 1.6; }
+        .input-with-suffix { position: relative; }
+        .input-with-suffix .form-input { padding-right: 80px; }
+        .input-with-suffix .suffix {
+            position: absolute; right: 16px; top: 50%; transform: translateY(-50%);
+            color: var(--fg-dim); font-size: 0.85rem; pointer-events: none;
+        }
+
+        /* === Buttons === */
+        .btn {
+            display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+            padding: 11px 26px; border: none; border-radius: var(--radius-sm);
+            font-size: 0.92rem; font-weight: 500; font-family: inherit;
+            cursor: pointer; transition: all var(--transition); text-decoration: none;
+        }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none !important; }
+        .btn-primary {
+            background: linear-gradient(135deg, #5f86ff, #7d9bff); color: #fff;
+            box-shadow: 0 6px 16px rgba(95,134,255,0.32);
+        }
+        .btn-primary:not(:disabled):hover {
+            background: linear-gradient(135deg, #4a74f0, #6e92ff);
+            transform: translateY(-1px); box-shadow: 0 8px 22px rgba(95,134,255,0.4);
+        }
+        .btn-primary:not(:disabled):active { transform: translateY(0); }
+        .btn-success {
+            background: linear-gradient(135deg, #5ca97f, #74bb95); color: #fff;
+            box-shadow: 0 6px 16px rgba(92,169,127,0.3);
+        }
+        .btn-success:not(:disabled):hover { transform: translateY(-1px); box-shadow: 0 8px 22px rgba(92,169,127,0.38); }
+        .btn-outline {
+            background: transparent; color: var(--fg-muted); border: 1px solid var(--border);
+        }
+        .btn-outline:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-glow); }
+        .btn-sm { padding: 8px 16px; font-size: 0.8rem; }
+        .btn-group { display: flex; gap: 12px; margin-top: 20px; }
+
+        /* === Progress === */
+        .progress-container { display: none; margin-top: 20px; animation: fadeIn 0.3s ease-out; }
+        .progress-container.visible { display: block; }
+        .progress-bar-track {
+            width: 100%; height: 6px; background: var(--bg-input);
+            border-radius: 3px; overflow: hidden;
+        }
+        .progress-bar-fill {
+            height: 100%; background: linear-gradient(90deg, #5f86ff, #a9c2ff);
+            border-radius: 3px; width: 0%; transition: width 0.3s ease-out;
+        }
+        .progress-text { font-size: 0.8rem; color: var(--fg-muted); margin-top: 8px; text-align: center; }
+
+        /* === Result === */
+        .result-container { display: none; animation: fadeIn 0.4s ease-out; }
+        .result-container.visible { display: block; }
+        .result-stats {
+            display: grid; grid-template-columns: repeat(3, 1fr);
+            gap: 14px; margin-bottom: 20px;
+        }
+        .stat-item { text-align: center; padding: 18px 12px; background: var(--bg-input); border-radius: var(--radius-sm); }
+        .stat-value {
+            font-size: 1.7rem; font-weight: 600;
+            color: var(--accent);
+        }
+        .stat-label { font-size: 0.78rem; color: var(--fg-dim); margin-top: 4px; }
+
+        /* === Preview Modal === */
+        .modal-overlay {
+            display: none; position: fixed; inset: 0;
+            background: rgba(15, 23, 42, 0.5); backdrop-filter: blur(4px);
+            z-index: 1000; align-items: center; justify-content: center;
+            animation: fadeIn 0.2s ease-out;
+        }
+        .modal-overlay.visible { display: flex; }
+        .modal {
+            background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: var(--radius); width: 90vw; max-width: 1000px;
+            max-height: 85vh; display: flex; flex-direction: column;
+            box-shadow: var(--shadow-lg); animation: modalIn 0.3s ease-out;
+        }
+        @keyframes modalIn {
+            from { opacity: 0; transform: scale(0.95) translateY(10px); }
+            to { opacity: 1; transform: scale(1) translateY(0); }
+        }
+        .modal-header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 18px 22px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+        }
+        .modal-header h3 { font-size: 1rem; font-weight: 600; }
+        .modal-header .modal-subtitle { font-size: 0.8rem; color: var(--fg-dim); margin-top: 2px; }
+        .modal-close {
+            background: none; border: none; color: var(--fg-dim); font-size: 1.3rem;
+            cursor: pointer; padding: 4px 8px; border-radius: var(--radius-xs);
+            transition: all var(--transition); line-height: 1;
+        }
+        .modal-close:hover { color: var(--error); background: rgba(217,100,92,0.1); }
+        .modal-body { padding: 0; flex: 1; overflow: auto; }
+        .preview-table-wrapper {
+            overflow: auto; max-height: calc(85vh - 140px);
+        }
+        .preview-table {
+            width: 100%; border-collapse: collapse; font-size: 0.82rem;
+        }
+        .preview-table th, .preview-table td {
+            padding: 8px 12px; border: 1px solid var(--border);
+            text-align: left; white-space: nowrap; max-width: 280px;
+            overflow: hidden; text-overflow: ellipsis;
+        }
+        .preview-table thead th {
+            background: var(--bg-input); color: var(--fg-muted);
+            font-weight: 600; position: sticky; top: 0; z-index: 2;
+        }
+        .preview-table tbody tr:hover { background: rgba(95,134,255,0.05); }
+        .preview-table .header-row td {
+            background: rgba(95,134,255,0.09); font-weight: 600; color: var(--accent);
+        }
+        .preview-table .row-num {
+            color: var(--fg-dim); font-size: 0.72rem; text-align: center;
+            width: 40px; min-width: 40px; background: var(--bg-elevated);
+            position: sticky; left: 0; z-index: 1;
+        }
+        .preview-table thead .row-num { z-index: 3; }
+        .preview-info {
+            padding: 12px 22px; background: var(--bg-elevated);
+            border-bottom: 1px solid var(--border); font-size: 0.8rem;
+            color: var(--fg-dim); display: flex; gap: 20px; flex-wrap: wrap; flex-shrink: 0;
+        }
+        .preview-info span strong { color: var(--fg-muted); }
+        .preview-empty {
+            padding: 60px 24px; text-align: center; color: var(--fg-dim);
+        }
+
+        /* === Guide === */
+        .guide-toggle {
+            display: flex; align-items: center; gap: 8px;
+            background: none; border: none; color: var(--fg-muted);
+            font-size: 0.9rem; font-family: inherit;
+            cursor: pointer; padding: 6px 0; transition: color var(--transition);
+        }
+        .guide-toggle:hover { color: var(--accent); }
+        .guide-toggle .arrow {
+            display: inline-block; transition: transform var(--transition); font-size: 0.7rem;
+        }
+        .guide-toggle.open .arrow { transform: rotate(90deg); }
+        .guide-content { max-height: 0; overflow: hidden; transition: max-height 0.4s ease-out; }
+        .guide-content.open { max-height: 2000px; }
+        .guide-steps { padding: 18px 0 0; display: flex; flex-direction: column; gap: 16px; }
+        .guide-step { display: flex; gap: 14px; align-items: flex-start; }
+        .guide-step .step-num {
+            width: 30px; height: 30px; background: var(--bg-input);
+            border: 1px solid var(--border); border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 0.8rem; font-weight: 600; color: var(--accent); flex-shrink: 0;
+        }
+        .guide-step .step-text { flex: 1; padding-top: 4px; }
+        .guide-step .step-text strong { color: var(--fg); display: block; margin-bottom: 4px; font-size: 0.88rem; }
+        .guide-step .step-text span { color: var(--fg-muted); font-size: 0.82rem; line-height: 1.6; }
+        .guide-note {
+            margin-top: 16px; padding: 13px 18px;
+            background: var(--accent-bg, #fdf6e7); border-left: 3px solid var(--warning);
+            border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
+            font-size: 0.82rem; color: var(--warning); line-height: 1.6;
+        }
+        html[data-theme='dark'] .guide-note { background: rgba(223, 160, 80, 0.1); }
+
+        /* === Toast === */
+        .toast-container {
+            position: fixed; top: 20px; right: 20px; z-index: 9999;
+            display: flex; flex-direction: column; gap: 8px;
+        }
+        .toast {
+            padding: 12px 18px; background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: var(--radius-sm); box-shadow: var(--shadow-lg);
+            font-size: 0.86rem; color: var(--fg); animation: slideInRight 0.3s ease-out;
+            display: flex; align-items: center; gap: 10px; max-width: 380px;
+        }
+        .toast.success { border-color: var(--success); }
+        .toast.success::before { content: '✓'; color: var(--success); font-weight: 700; }
+        .toast.error { border-color: var(--error); }
+        .toast.error::before { content: '✕'; color: var(--error); font-weight: 700; }
+        .toast.info { border-color: var(--accent); }
+        .toast.info::before { content: 'ℹ'; color: var(--accent); font-weight: 700; }
+
+        /* === Animations === */
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes fadeInDown { from { opacity: 0; transform: translateY(-16px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes slideInRight { from { opacity: 0; transform: translateX(40px); } to { opacity: 1; transform: translateX(0); } }
+
+        .card:nth-child(2) { animation: fadeIn 0.5s ease-out 0.1s both; }
+        .card:nth-child(3) { animation: fadeIn 0.5s ease-out 0.2s both; }
+        .card:nth-child(4) { animation: fadeIn 0.5s ease-out 0.3s both; }
+        .card:nth-child(5) { animation: fadeIn 0.5s ease-out 0.4s both; }
+
+        /* === Responsive === */
+        @media (max-width: 640px) {
+            .app-container { padding: 16px 14px 32px; }
+            .app-header h1 { font-size: 1.25rem; }
+            .card { padding: 18px 16px; }
+            .result-stats { grid-template-columns: 1fr; }
+            .btn-group { flex-direction: column; }
+            .btn-group .btn { width: 100%; }
+            .modal { width: 96vw; max-height: 90vh; }
+        }
+
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--fg-dim); }
+    </style>
+</head>
+<body>
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Preview Modal -->
+    <div class="modal-overlay" id="previewModal">
+        <div class="modal">
+            <div class="modal-header">
+                <div>
+                    <h3 id="previewTitle">数据预览</h3>
+                    <div class="modal-subtitle" id="previewSubtitle"></div>
+                </div>
+                <button class="modal-close" id="previewClose">✕</button>
+            </div>
+            <div class="preview-info" id="previewInfo"></div>
+            <div class="modal-body">
+                <div class="preview-table-wrapper" id="previewTableWrapper"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="logo-icon">📊</div>
+            <h1>Sheet 合并工具</h1>
+            <p class="subtitle">快速合并 Excel 文件中多张相同格式的 Sheet 表，完整保留格式、合并单元格与表头</p>
+        </header>
+
+        <!-- Step 1: Upload -->
+        <div class="card">
+            <div class="card-title">
+                <span class="step-badge">1</span>
+                上传 Excel 文件
+            </div>
+            <div class="upload-zone" id="uploadZone">
+                <div class="upload-icon">📁</div>
+                <p>点击或拖拽 Excel 文件到此处</p>
+                <p class="hint">支持 .xlsx 格式</p>
+                <input type="file" id="fileInput" accept=".xlsx,.xls">
+            </div>
+            <div class="file-info" id="fileInfo">
+                <div class="file-icon">XLSX</div>
+                <div class="file-details">
+                    <div class="file-name" id="fileName"></div>
+                    <div class="file-meta" id="fileMeta"></div>
+                </div>
+                <button class="remove-btn" id="removeBtn" title="移除文件">✕</button>
+            </div>
+        </div>
+
+        <!-- Step 2: Select Sheets -->
+        <div class="card">
+            <div class="card-title">
+                <span class="step-badge">2</span>
+                选择要合并的工作表
+            </div>
+            <div class="sheet-selector-container" id="sheetSelectorContainer">
+                <div class="sheet-selector-header">
+                    <div class="form-label" style="margin-bottom:0;">勾选需要合并的工作表：</div>
+                    <div class="sheet-selector-actions">
+                        <button id="selectAllBtn">全选</button>
+                        <button id="deselectAllBtn">取消全选</button>
+                    </div>
+                </div>
+                <div class="sheet-checkbox-list" id="sheetCheckboxList"></div>
+                <div class="selected-count" id="selectedCount"></div>
+            </div>
+            <div id="noFileHint" style="color: var(--fg-dim); font-size: 0.88rem;">
+                请先上传 Excel 文件
+            </div>
+        </div>
+
+        <!-- Step 3: Settings -->
+        <div class="card">
+            <div class="card-title">
+                <span class="step-badge">3</span>
+                合并设置
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="headerRows">表头行数</label>
+                <input type="number" class="form-input" id="headerRows" value="1" min="1" max="20" placeholder="请输入表头行数">
+                <div class="form-hint">表头行数决定了哪些行会被保留在合并后的表格顶部。例如输入 1 表示第一行是表头，输入 2 表示前两行都是表头。合并单元格的表头也会被完整保留。</div>
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="outputName">输出文件名</label>
+                <div class="input-with-suffix">
+                    <input type="text" class="form-input" id="outputName" value="Merged_Data" placeholder="请输入文件名">
+                    <span class="suffix">.xlsx</span>
+                </div>
+                <div class="form-hint">合并后的文件将以此名称保存，您下载时可自由选择保存路径。</div>
+            </div>
+        </div>
+
+        <!-- Step 4: Merge -->
+        <div class="card">
+            <div class="card-title">
+                <span class="step-badge">4</span>
+                执行合并与预览
+            </div>
+            <div class="btn-group">
+                <button class="btn btn-primary" id="mergeBtn" disabled>
+                    <span>⚡</span> 开始合并
+                </button>
+                <button class="btn btn-outline" id="resetBtn" style="display:none;">
+                    <span>↺</span> 重新开始
+                </button>
+            </div>
+            <div class="progress-container" id="progressContainer">
+                <div class="progress-bar-track">
+                    <div class="progress-bar-fill" id="progressBar"></div>
+                </div>
+                <div class="progress-text" id="progressText">准备中...</div>
+            </div>
+            <div class="result-container" id="resultContainer">
+                <div class="result-stats">
+                    <div class="stat-item">
+                        <div class="stat-value" id="statSheets">0</div>
+                        <div class="stat-label">合并工作表数</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="statRows">0</div>
+                        <div class="stat-label">总数据行数</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="statCols">0</div>
+                        <div class="stat-label">列数</div>
+                    </div>
+                </div>
+                <div class="btn-group">
+                    <button class="btn btn-outline btn-sm" id="previewMergedBtn">
+                        <span>👁</span> 预览合并结果
+                    </button>
+                    <button class="btn btn-success" id="downloadBtn">
+                        <span>💾</span> 下载合并文件
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Guide -->
+        <div class="card">
+            <button class="guide-toggle" id="guideToggle">
+                <span class="arrow">▶</span>
+                📖 操作指南
+            </button>
+            <div class="guide-content" id="guideContent">
+                <div class="guide-steps">
+                    <div class="guide-step">
+                        <div class="step-num">1</div>
+                        <div class="step-text">
+                            <strong>上传文件</strong>
+                            <span>点击上传区域或将 Excel 文件拖拽到上传区域。工具会自动识别文件中包含的所有工作表（Sheet）。</span>
+                        </div>
+                    </div>
+                    <div class="guide-step">
+                        <div class="step-num">2</div>
+                        <div class="step-text">
+                            <strong>选择工作表</strong>
+                            <span>在列表中勾选您需要合并的工作表。您可以点击"预览"按钮查看每张表的数据，确认无误后再勾选。支持全选和取消全选。</span>
+                        </div>
+                    </div>
+                    <div class="guide-step">
+                        <div class="step-num">3</div>
+                        <div class="step-text">
+                            <strong>设置表头行数</strong>
+                            <span>表头行数决定了合并时哪些行作为表头保留。例如：如果您的表格有 2 行表头（如标题行 + 列名行），请输入 2。合并后，表头只会出现在合并结果的最顶部一次。合并单元格也会被完整保留。</span>
+                        </div>
+                    </div>
+                    <div class="guide-step">
+                        <div class="step-num">4</div>
+                        <div class="step-text">
+                            <strong>设置文件名并合并</strong>
+                            <span>输入您想要的文件名（无需输入 .xlsx 后缀），然后点击"开始合并"。合并完成后可先预览结果确认正确性。</span>
+                        </div>
+                    </div>
+                    <div class="guide-step">
+                        <div class="step-num">5</div>
+                        <div class="step-text">
+                            <strong>预览与下载</strong>
+                            <span>合并完成后，建议先点击"预览合并结果"确认数据无误，再点击"下载合并文件"。浏览器会弹出保存对话框，您可以在此时自由选择保存路径和文件名。</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="guide-note">
+                    ⚠️ 注意：请确保所选 Sheet 的格式相同（列数、列顺序一致），否则合并结果可能出现错位。合并操作完全在浏览器本地完成，您的数据不会上传到任何服务器。合并单元格、字体、颜色、边框等格式均会被完整保留。
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // === State ===
+        let uploadedWorkbook = null;
+        let uploadedFileName = '';
+        let mergedBlob = null;
+        let mergedWorkbook = null; // Keep for preview
+        let selectedSheetIndices = new Set();
+
+        // === DOM refs ===
+        const uploadZone = document.getElementById('uploadZone');
+        const fileInput = document.getElementById('fileInput');
+        const fileInfo = document.getElementById('fileInfo');
+        const fileName = document.getElementById('fileName');
+        const fileMeta = document.getElementById('fileMeta');
+        const removeBtn = document.getElementById('removeBtn');
+        const sheetSelectorContainer = document.getElementById('sheetSelectorContainer');
+        const sheetCheckboxList = document.getElementById('sheetCheckboxList');
+        const selectedCount = document.getElementById('selectedCount');
+        const noFileHint = document.getElementById('noFileHint');
+        const selectAllBtn = document.getElementById('selectAllBtn');
+        const deselectAllBtn = document.getElementById('deselectAllBtn');
+        const headerRowsInput = document.getElementById('headerRows');
+        const outputNameInput = document.getElementById('outputName');
+        const mergeBtn = document.getElementById('mergeBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        const progressContainer = document.getElementById('progressContainer');
+        const progressBar = document.getElementById('progressBar');
+        const progressText = document.getElementById('progressText');
+        const resultContainer = document.getElementById('resultContainer');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const previewMergedBtn = document.getElementById('previewMergedBtn');
+        const guideToggle = document.getElementById('guideToggle');
+        const guideContent = document.getElementById('guideContent');
+        const previewModal = document.getElementById('previewModal');
+        const previewClose = document.getElementById('previewClose');
+        const previewTitle = document.getElementById('previewTitle');
+        const previewSubtitle = document.getElementById('previewSubtitle');
+        const previewInfo = document.getElementById('previewInfo');
+        const previewTableWrapper = document.getElementById('previewTableWrapper');
+
+        // === Toast ===
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.textContent = message;
+            container.appendChild(toast);
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateX(40px)';
+                toast.style.transition = '0.3s ease-out';
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        // === Guide toggle ===
+        guideToggle.addEventListener('click', () => {
+            guideToggle.classList.toggle('open');
+            guideContent.classList.toggle('open');
+        });
+
+        // === Upload zone events ===
+        uploadZone.addEventListener('click', () => fileInput.click());
+        uploadZone.addEventListener('dragover', (e) => { e.preventDefault(); uploadZone.classList.add('dragover'); });
+        uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
+        uploadZone.addEventListener('drop', (e) => {
+            e.preventDefault(); uploadZone.classList.remove('dragover');
+            if (e.dataTransfer.files.length > 0) handleFile(e.dataTransfer.files[0]);
+        });
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) handleFile(e.target.files[0]);
+        });
+        removeBtn.addEventListener('click', resetAll);
+
+        // === Select all / deselect ===
+        selectAllBtn.addEventListener('click', () => {
+            if (!uploadedWorkbook) return;
+            uploadedWorkbook.worksheets.forEach((_, idx) => selectedSheetIndices.add(idx));
+            renderSheetSelector();
+        });
+        deselectAllBtn.addEventListener('click', () => {
+            selectedSheetIndices.clear();
+            renderSheetSelector();
+        });
+
+        // === Preview modal ===
+        previewClose.addEventListener('click', () => previewModal.classList.remove('visible'));
+        previewModal.addEventListener('click', (e) => {
+            if (e.target === previewModal) previewModal.classList.remove('visible');
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && previewModal.classList.contains('visible')) {
+                previewModal.classList.remove('visible');
+            }
+        });
+
+        // === Handle file ===
+        async function handleFile(file) {
+            const ext = file.name.split('.').pop().toLowerCase();
+            if (ext !== 'xlsx') {
+                showToast('请上传 .xlsx 格式的 Excel 文件', 'error');
+                return;
+            }
+
+            uploadedFileName = file.name;
+            showToast('正在读取文件...', 'info');
+
+            try {
+                const arrayBuffer = await file.arrayBuffer();
+                const workbook = new ExcelJS.Workbook();
+                await workbook.xlsx.load(arrayBuffer);
+
+                if (workbook.worksheets.length < 2) {
+                    showToast('该文件只有 1 张工作表，无需合并', 'error');
+                    return;
+                }
+
+                uploadedWorkbook = workbook;
+
+                // Show file info
+                fileName.textContent = file.name;
+                const sizeMB = (file.size / 1024 / 1024).toFixed(2);
+                fileMeta.textContent = `${workbook.worksheets.length} 张工作表 · ${sizeMB} MB`;
+                fileInfo.classList.add('visible');
+
+                // Default: select all sheets
+                selectedSheetIndices.clear();
+                workbook.worksheets.forEach((_, idx) => selectedSheetIndices.add(idx));
+
+                // Show sheet selector
+                noFileHint.style.display = 'none';
+                sheetSelectorContainer.classList.add('visible');
+                renderSheetSelector();
+
+                showToast(`成功加载 ${workbook.worksheets.length} 张工作表`, 'success');
+
+            } catch (err) {
+                console.error(err);
+                showToast('文件读取失败：' + err.message, 'error');
+            }
+        }
+
+        // === Render sheet selector ===
+        function renderSheetSelector() {
+            if (!uploadedWorkbook) return;
+            sheetCheckboxList.innerHTML = '';
+
+            uploadedWorkbook.worksheets.forEach((ws, idx) => {
+                const isSelected = selectedSheetIndices.has(idx);
+                const rowCount = ws.rowCount;
+                const colCount = ws.columnCount;
+                const mergeCount = ws._merges ? Object.keys(ws._merges).length : 0;
+
+                const item = document.createElement('label');
+                item.className = 'sheet-checkbox-item' + (isSelected ? ' selected' : '');
+                item.innerHTML = `
+                    <input type="checkbox" ${isSelected ? 'checked' : ''}>
+                    <div class="check-box"></div>
+                    <div class="sheet-info">
+                        <div class="sheet-name">${ws.name}</div>
+                        <div class="sheet-meta">${rowCount} 行 × ${colCount} 列${mergeCount > 0 ? ' · ' + mergeCount + ' 个合并单元格' : ''}</div>
+                    </div>
+                    <button class="preview-btn" data-sheet-idx="${idx}">预览</button>
+                `;
+
+                const checkbox = item.querySelector('input[type="checkbox"]');
+                checkbox.addEventListener('change', () => {
+                    if (checkbox.checked) selectedSheetIndices.add(idx);
+                    else selectedSheetIndices.delete(idx);
+                    renderSheetSelector();
+                });
+
+                const previewBtn = item.querySelector('.preview-btn');
+                previewBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    showSheetPreview(idx);
+                });
+
+                sheetCheckboxList.appendChild(item);
+            });
+
+            // Update count
+            const count = selectedSheetIndices.size;
+            selectedCount.innerHTML = `已选择 <strong>${count}</strong> / ${uploadedWorkbook.worksheets.length} 张工作表`;
+
+            // Enable/disable merge button
+            mergeBtn.disabled = count < 2;
+        }
+
+        // === Show single sheet preview ===
+        function showSheetPreview(sheetIdx) {
+            if (!uploadedWorkbook) return;
+            const ws = uploadedWorkbook.worksheets[sheetIdx];
+            const headerRows = parseInt(headerRowsInput.value) || 1;
+
+            previewTitle.textContent = `预览：${ws.name}`;
+            previewSubtitle.textContent = `工作表 #${sheetIdx + 1}`;
+
+            const totalRows = ws.rowCount;
+            const totalCols = ws.columnCount;
+            const mergeCount = ws._merges ? Object.keys(ws._merges).length : 0;
+            previewInfo.innerHTML = `
+                <span>总行数：<strong>${totalRows}</strong></span>
+                <span>总列数：<strong>${totalCols}</strong></span>
+                <span>合并单元格：<strong>${mergeCount}</strong></span>
+                <span>表头行数：<strong>${headerRows}</strong></span>
+            `;
+
+            renderPreviewTable(ws, headerRows, totalRows, totalCols);
+            previewModal.classList.add('visible');
+        }
+
+        // === Render preview table from worksheet ===
+        function renderPreviewTable(ws, headerRows, totalRows, totalCols, maxPreviewRows = 100) {
+            const displayRows = Math.min(totalRows, maxPreviewRows);
+            let html = '<table class="preview-table"><thead><tr><th class="row-num">#</th>';
+
+            // Column headers
+            for (let c = 1; c <= totalCols; c++) {
+                html += `<th>${getColLetter(c)}</th>`;
+            }
+            html += '</tr></thead><tbody>';
+
+            for (let r = 1; r <= displayRows; r++) {
+                const isHeader = r <= headerRows;
+                html += `<tr class="${isHeader ? 'header-row' : ''}">`;
+                html += `<td class="row-num">${r}</td>`;
+                for (let c = 1; c <= totalCols; c++) {
+                    const cell = ws.getCell(r, c);
+                    const val = formatCellValue(cell.value);
+                    // Check if this cell is the master of a merge
+                    const isMaster = isMergeMaster(ws, r, c);
+                    const isHidden = isMergeHidden(ws, r, c);
+                    if (isHidden) {
+                        html += `<td style="display:none;"></td>`;
+                    } else {
+                        const colspan = getMergeColspan(ws, r, c);
+                        const rowspan = getMergeRowspan(ws, r, c);
+                        let attrs = '';
+                        if (colspan > 1) attrs += ` colspan="${colspan}"`;
+                        if (rowspan > 1) attrs += ` rowspan="${rowspan}"`;
+                        html += `<td${attrs}>${val}</td>`;
+                    }
+                }
+                html += '</tr>';
+            }
+
+            html += '</tbody></table>';
+            if (totalRows > maxPreviewRows) {
+                html += `<div class="preview-empty">仅显示前 ${maxPreviewRows} 行（共 ${totalRows} 行）</div>`;
+            }
+            previewTableWrapper.innerHTML = html;
+        }
+
+        // === Merge cell helpers ===
+        function getMerges(ws) {
+            // ExcelJS stores merges in ws._merges as { 'A1:B3': { ... }, ... }
+            if (!ws._merges) return [];
+            return Object.keys(ws._merges).map(key => {
+                const m = ws._merges[key];
+                return {
+                    top: m.top, left: m.left,
+                    bottom: m.bottom, right: m.right,
+                    key: key
+                };
+            });
+        }
+
+        function isMergeMaster(ws, row, col) {
+            const merges = getMerges(ws);
+            return merges.some(m => m.top === row && m.left === col);
+        }
+
+        function isMergeHidden(ws, row, col) {
+            const merges = getMerges(ws);
+            return merges.some(m =>
+                row >= m.top && row <= m.bottom &&
+                col >= m.left && col <= m.right &&
+                !(row === m.top && col === m.left)
+            );
+        }
+
+        function getMergeColspan(ws, row, col) {
+            const merges = getMerges(ws);
+            const m = merges.find(m => m.top === row && m.left === col);
+            return m ? (m.right - m.left + 1) : 1;
+        }
+
+        function getMergeRowspan(ws, row, col) {
+            const merges = getMerges(ws);
+            const m = merges.find(m => m.top === row && m.left === col);
+            return m ? (m.bottom - m.top + 1) : 1;
+        }
+
+        function getColLetter(col) {
+            let letter = '';
+            while (col > 0) {
+                const mod = (col - 1) % 26;
+                letter = String.fromCharCode(65 + mod) + letter;
+                col = Math.floor((col - 1) / 26);
+            }
+            return letter;
+        }
+
+        function formatCellValue(value) {
+            if (value === null || value === undefined) return '';
+            if (typeof value === 'object') {
+                if (value instanceof Date) {
+                    return value.toLocaleDateString('zh-CN');
+                }
+                if (value.richText) {
+                    return value.richText.map(rt => rt.text).join('');
+                }
+                if (value.result !== undefined) {
+                    return String(value.result);
+                }
+                if (value.formula) {
+                    return `[${value.formula}]`;
+                }
+                return JSON.stringify(value);
+            }
+            return String(value);
+        }
+
+        // === Merge ===
+        mergeBtn.addEventListener('click', async () => {
+            if (!uploadedWorkbook) return;
+
+            const headerRows = parseInt(headerRowsInput.value);
+            if (isNaN(headerRows) || headerRows < 1) {
+                showToast('请输入有效的表头行数（至少为 1）', 'error');
+                return;
+            }
+
+            if (selectedSheetIndices.size < 2) {
+                showToast('请至少选择 2 张工作表进行合并', 'error');
+                return;
+            }
+
+            // UI: show progress
+            mergeBtn.disabled = true;
+            progressContainer.classList.add('visible');
+            resultContainer.classList.remove('visible');
+            resetBtn.style.display = 'none';
+            mergedBlob = null;
+            mergedWorkbook = null;
+
+            try {
+                const selectedIndices = Array.from(selectedSheetIndices).sort((a, b) => a - b);
+                const totalSheets = selectedIndices.length;
+
+                // Create a new workbook for the merged result
+                const newWorkbook = new ExcelJS.Workbook();
+                const mergedSheet = newWorkbook.addWorksheet('合并结果');
+
+                let totalDataRows = 0;
+                let maxCols = 0;
+                let isFirst = true;
+
+                for (let si = 0; si < totalSheets; si++) {
+                    const i = selectedIndices[si];
+                    const ws = uploadedWorkbook.worksheets[i];
+                    const progress = Math.round(((si + 1) / totalSheets) * 100);
+                    progressBar.style.width = progress + '%';
+                    progressText.textContent = `正在合并：${ws.name}（${si + 1}/${totalSheets}）`;
+
+                    await new Promise(r => setTimeout(r, 30));
+
+                    const rowCount = ws.rowCount;
+                    const colCount = ws.columnCount;
+                    if (colCount > maxCols) maxCols = colCount;
+
+                    if (rowCount === 0) continue;
+
+                    if (isFirst) {
+                        // First sheet: copy ALL rows (header + data) with styles and merges
+                        copySheetContent(ws, mergedSheet, 1, rowCount, 1, colCount, 1, 1);
+                        totalDataRows = Math.max(0, rowCount - headerRows);
+                        isFirst = false;
+                    } else {
+                        // Subsequent sheets: skip header rows, copy data rows only
+                        const dataStartRow = headerRows + 1;
+                        const destStartRow = mergedSheet.rowCount + 1;
+                        copySheetContent(ws, mergedSheet, dataStartRow, rowCount, 1, colCount, destStartRow, 1);
+                        totalDataRows += Math.max(0, rowCount - headerRows);
+                    }
+                }
+
+                // Copy column widths from the first selected sheet
+                const firstWs = uploadedWorkbook.worksheets[selectedIndices[0]];
+                firstWs.columns.forEach((col, idx) => {
+                    if (col.width) {
+                        mergedSheet.getColumn(idx + 1).width = col.width;
+                    }
+                });
+
+                // Generate blob
+                progressBar.style.width = '100%';
+                progressText.textContent = '正在生成文件...';
+                await new Promise(r => setTimeout(r, 50));
+
+                mergedBlob = await newWorkbook.xlsx.writeBuffer();
+                mergedWorkbook = newWorkbook;
+
+                // Show result
+                progressContainer.classList.remove('visible');
+                resultContainer.classList.add('visible');
+                resetBtn.style.display = '';
+
+                document.getElementById('statSheets').textContent = totalSheets;
+                document.getElementById('statRows').textContent = totalDataRows.toLocaleString();
+                document.getElementById('statCols').textContent = maxCols;
+
+                showToast('合并完成！建议先预览确认数据正确性', 'success');
+
+            } catch (err) {
+                console.error(err);
+                progressContainer.classList.remove('visible');
+                mergeBtn.disabled = false;
+                showToast('合并失败：' + err.message, 'error');
+            }
+        });
+
+        // === Copy sheet content with styles and merged cells ===
+        function copySheetContent(srcWs, destWs, srcRowStart, srcRowEnd, srcColStart, srcColEnd, destRowStart, destColStart) {
+            const rowOffset = destRowStart - srcRowStart;
+            const colOffset = destColStart - srcColStart;
+
+            // Collect merges that fall within the source range
+            const merges = getMerges(srcWs);
+            const relevantMerges = merges.filter(m =>
+                m.bottom >= srcRowStart && m.top <= srcRowEnd &&
+                m.right >= srcColStart && m.left <= srcColEnd
+            );
+
+            // Copy cell values and styles row by row
+            for (let r = srcRowStart; r <= srcRowEnd; r++) {
+                const srcRow = srcWs.getRow(r);
+                const destRowNum = r + rowOffset;
+                const destRow = destWs.getRow(destRowNum);
+                if (srcRow.height) destRow.height = srcRow.height;
+
+                for (let c = srcColStart; c <= srcColEnd; c++) {
+                    const srcCell = srcRow.getCell(c);
+                    const destCell = destRow.getCell(c + colOffset);
+
+                    // Copy value
+                    destCell.value = cloneCellValue(srcCell.value);
+
+                    // Copy style
+                    const style = {};
+                    if (srcCell.font) style.font = JSON.parse(JSON.stringify(srcCell.font));
+                    if (srcCell.border) style.border = JSON.parse(JSON.stringify(srcCell.border));
+                    if (srcCell.fill) style.fill = JSON.parse(JSON.stringify(srcCell.fill));
+                    if (srcCell.alignment) style.alignment = JSON.parse(JSON.stringify(srcCell.alignment));
+                    if (srcCell.numFmt) style.numFmt = srcCell.numFmt;
+                    if (srcCell.protection) style.protection = JSON.parse(JSON.stringify(srcCell.protection));
+                    destCell.style = style;
+                }
+                destRow.commit();
+            }
+
+            // Apply merged cells with offset
+            for (const m of relevantMerges) {
+                const newTop = m.top + rowOffset;
+                const newLeft = m.left + colOffset;
+                const newBottom = m.bottom + rowOffset;
+                const newRight = m.right + colOffset;
+
+                // Only apply merge if the master cell is within source range
+                if (m.top >= srcRowStart && m.left >= srcColStart) {
+                    try {
+                        destWs.mergeCells(newTop, newLeft, newBottom, newRight);
+                    } catch (e) {
+                        // Skip conflicting merges silently
+                        console.warn('Merge conflict skipped:', e.message);
+                    }
+                }
+            }
+        }
+
+        // === Deep clone cell value ===
+        function cloneCellValue(value) {
+            if (value === null || value === undefined) return value;
+            if (typeof value !== 'object') return value;
+
+            // Handle rich text
+            if (value.richText) {
+                return {
+                    richText: value.richText.map(rt => ({
+                        text: rt.text,
+                        font: rt.font ? JSON.parse(JSON.stringify(rt.font)) : undefined
+                    }))
+                };
+            }
+            // Handle formula
+            if (value.formula !== undefined) {
+                const cloned = {};
+                if (value.formula) cloned.formula = value.formula;
+                if (value.result !== undefined) cloned.result = value.result;
+                if (value.sharedFormula) cloned.sharedFormula = value.sharedFormula;
+                return cloned;
+            }
+            // Handle Date
+            if (value instanceof Date) return new Date(value.getTime());
+            // Handle hyperlink
+            if (value.hyperlink) {
+                return {
+                    hyperlink: value.hyperlink,
+                    text: value.text,
+                    tooltip: value.tooltip
+                };
+            }
+            // Fallback
+            return JSON.parse(JSON.stringify(value));
+        }
+
+        // === Preview merged result ===
+        previewMergedBtn.addEventListener('click', () => {
+            if (!mergedWorkbook) return;
+            const ws = mergedWorkbook.worksheets[0];
+            const headerRows = parseInt(headerRowsInput.value) || 1;
+
+            previewTitle.textContent = '预览合并结果';
+            previewSubtitle.textContent = '合并后的数据';
+
+            const totalRows = ws.rowCount;
+            const totalCols = ws.columnCount;
+            const mergeCount = ws._merges ? Object.keys(ws._merges).length : 0;
+            previewInfo.innerHTML = `
+                <span>总行数：<strong>${totalRows}</strong></span>
+                <span>总列数：<strong>${totalCols}</strong></span>
+                <span>合并单元格：<strong>${mergeCount}</strong></span>
+                <span>表头行数：<strong>${headerRows}</strong></span>
+            `;
+
+            renderPreviewTable(ws, headerRows, totalRows, totalCols);
+            previewModal.classList.add('visible');
+        });
+
+        // === Download ===
+        downloadBtn.addEventListener('click', () => {
+            if (!mergedBlob) return;
+            const outputName = (outputNameInput.value.trim() || 'Merged_Data') + '.xlsx';
+            const blob = new Blob([mergedBlob], {
+                type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            });
+            saveAs(blob, outputName);
+            showToast('文件已开始下载', 'success');
+        });
+
+        // === Reset ===
+        resetBtn.addEventListener('click', resetAll);
+
+        function resetAll() {
+            uploadedWorkbook = null;
+            uploadedFileName = '';
+            mergedBlob = null;
+            mergedWorkbook = null;
+            selectedSheetIndices.clear();
+            fileInput.value = '';
+            fileInfo.classList.remove('visible');
+            sheetSelectorContainer.classList.remove('visible');
+            noFileHint.style.display = '';
+            progressContainer.classList.remove('visible');
+            resultContainer.classList.remove('visible');
+            mergeBtn.disabled = true;
+            resetBtn.style.display = 'none';
+            progressBar.style.width = '0%';
+            progressText.textContent = '准备中...';
+        }
+
+        // ============ THEME BRIDGE（与工作台亮/暗主题联动） ============
+        (function () {
+            var params = new URLSearchParams(location.search);
+            var theme = params.get('theme') === 'dark' ? 'dark' : 'light';
+            document.documentElement.dataset.theme = theme;
+            window.addEventListener('message', function (e) {
+                var d = e.data || {};
+                if (d.type === 'tool-theme' && (d.theme === 'light' || d.theme === 'dark')) {
+                    document.documentElement.dataset.theme = d.theme;
+                }
+            });
+            try { window.parent.postMessage({ type: 'tool-ready', tool: 'sheet-merger' }, '*'); } catch (err) { /* ignore */ }
+        })();
+    </script>
+</body>
+</html>

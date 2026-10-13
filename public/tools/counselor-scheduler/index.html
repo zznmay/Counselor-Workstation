@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>辅导员智能排班系统</title>
+    <link rel="stylesheet" href="styles.css">
+    <!-- xlsx 运行库（本地化，与工作台同源伺服，无外网依赖） -->
+    <script src="../vendor/xlsx.full.min.js"></script>
+    <script>
+        // 主题桥接：与工作台亮/暗主题联动（URL ?theme= 或父页面 postMessage）
+        (function () {
+            var params = new URLSearchParams(location.search);
+            var theme = params.get('theme') === 'dark' ? 'dark' : 'light';
+            document.documentElement.dataset.theme = theme;
+            window.addEventListener('message', function (e) {
+                var d = e.data || {};
+                if (d.type === 'tool-theme' && (d.theme === 'light' || d.theme === 'dark')) {
+                    document.documentElement.dataset.theme = d.theme;
+                }
+            });
+            try { window.parent.postMessage({ type: 'tool-ready', tool: 'counselor-scheduler' }, '*'); } catch (err) { /* ignore */ }
+        })();
+    </script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>辅导员智能排班系统</h1>
+        </header>
+
+        <nav class="nav-tabs">
+            <button class="nav-btn active" data-tab="counselors">辅导员管理</button>
+            <button class="nav-btn" data-tab="holidays">法定节假日</button>
+            <button class="nav-btn" data-tab="rules">排班规则</button>
+            <button class="nav-btn" data-tab="schedule">排班结果</button>
+        </nav>
+
+        <!-- 辅导员管理页面 -->
+        <section id="counselors" class="tab-content active">
+            <div class="section-header">
+                <h2>辅导员名单管理</h2>
+                <p class="desc">管理辅导员信息，设置是否参与值班</p>
+            </div>
+            <div class="add-form">
+                <input type="text" id="counselorName" placeholder="输入辅导员姓名" maxlength="20">
+                <button onclick="addCounselor()" class="btn-primary">添加辅导员</button>
+                <button onclick="resetDefaultCounselors()" class="btn-secondary">恢复默认名单</button>
+            </div>
+            <div class="list-container">
+                <table id="counselorTable">
+                    <thead>
+                        <tr>
+                            <th>序号</th>
+                            <th>姓名</th>
+                            <th>参与值班</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="counselorList"></tbody>
+                </table>
+                <div id="emptyCounselors" class="empty-state">暂无辅导员，请添加</div>
+            </div>
+        </section>
+
+        <!-- 法定节假日管理页面 -->
+        <section id="holidays" class="tab-content">
+            <div class="section-header">
+                <h2>法定节假日值班管理</h2>
+                <p class="desc">设置法定节假日的值班人员（如不设置则由系统按规则自动排班）</p>
+            </div>
+            <div class="add-form holiday-form">
+                <div class="date-range">
+                    <label>开始日期：</label>
+                    <input type="date" id="holidayStartDate">
+                    <label>结束日期：</label>
+                    <input type="date" id="holidayEndDate">
+                </div>
+                <input type="text" id="holidayName" placeholder="节日名称（如：劳动节）" maxlength="20">
+                <div class="counselor-multi-select">
+                    <label>选择值班人员（可多选）：</label>
+                    <div id="holidayCounselorList" class="checkbox-list"></div>
+                </div>
+                <button onclick="addHoliday()" class="btn-primary">添加节假日</button>
+            </div>
+            <div class="list-container">
+                <table id="holidayTable">
+                    <thead>
+                        <tr>
+                            <th>日期范围</th>
+                            <th>节日名称</th>
+                            <th>指定值班人员</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="holidayList"></tbody>
+                </table>
+                <div id="emptyHolidays" class="empty-state">暂无节假日设置</div>
+            </div>
+        </section>
+
+        <!-- 排班规则管理页面 -->
+        <section id="rules" class="tab-content">
+            <div class="section-header">
+                <h2>排班规则管理</h2>
+                <p class="desc">设置排班遵循的规则和限制条件</p>
+            </div>
+
+            <!-- 基础规则说明 -->
+            <div class="base-rules">
+                <h3>基础排班规则（系统自动执行）</h3>
+                <ol>
+                    <li>星期五、星期六、星期日为同一人值班（不含法定节假日）</li>
+                    <li>法定节假日前一天需和法定节假日开始日期的值班人员保持一致，且节假日前一天+节假日总天数在指定值班人员中平均分配、连续值班</li>
+                    <li>原则上每天安排一人值班，除非另有规则限定某天需至少两人值班</li>
+                    <li>在值班周期内，辅导员值班天数严格平均安排（差值不超过1天）</li>
+                    <li>星期五、星期六、星期日有值班的辅导员，本周四和下周一不安排值班</li>
+                    <li>周末值班按顺序轮流安排，避免同一辅导员连续两周值班，值班次数尽量平均分配</li>
+                </ol>
+            </div>
+
+            <!-- 多人值班设置 -->
+            <div class="rules-section">
+                <h3>多人值班设置</h3>
+                <p class="desc">设置特定日期需要多人值班</p>
+                <div class="add-form multi-duty-form">
+                    <div class="form-row">
+                        <label>值班日期：</label>
+                        <input type="date" id="multiDutyDate">
+                    </div>
+                    <div class="form-row">
+                        <label>值班人数：</label>
+                        <input type="number" id="multiDutyCount" value="2" min="1" max="10" style="width: 60px;" onchange="updateMultiDutyCheckboxLimit()">
+                        <span id="multiDutyHint" style="color: #666; font-size: 13px; margin-left: 10px;">已选择 0/2 人</span>
+                    </div>
+                    <div class="form-row counselor-select-row">
+                        <label>选择值班人员：</label>
+                        <div id="multiDutyCounselorList" class="checkbox-list"></div>
+                    </div>
+                    <button onclick="addMultiDuty()" class="btn-primary">添加多人值班</button>
+                </div>
+                <div class="list-container">
+                    <table id="multiDutyTable">
+                        <thead>
+                            <tr>
+                                <th>值班日期</th>
+                                <th>值班人数</th>
+                                <th>指定值班人员</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="multiDutyList"></tbody>
+                    </table>
+                    <div id="emptyMultiDuty" class="empty-state">暂无多人值班设置</div>
+                </div>
+            </div>
+
+            <!-- 老带新值班设置 -->
+            <div class="rules-section">
+                <h3>老带新值班设置</h3>
+                <p class="desc">设置新人辅导员及其值班搭档，在选定日期范围内，新人于普通工作日值班时将自动安排搭档陪同</p>
+                <div class="add-form mentorship-form">
+                    <div class="form-row">
+                        <label>新人辅导员：</label>
+                        <select id="mentorshipNewbie">
+                            <option value="">-- 选择新人 --</option>
+                        </select>
+                    </div>
+                    <div class="form-row">
+                        <label>开始日期：</label>
+                        <input type="date" id="mentorshipStartDate">
+                    </div>
+                    <div class="form-row">
+                        <label>结束日期：</label>
+                        <input type="date" id="mentorshipEndDate">
+                    </div>
+                    <div class="form-row counselor-select-row">
+                        <label>值班搭档：</label>
+                        <div id="mentorshipPartnerList" class="checkbox-list"></div>
+                    </div>
+                    <button onclick="addMentorship()" class="btn-primary">添加老带新设置</button>
+                </div>
+                <div class="list-container">
+                    <table id="mentorshipTable">
+                        <thead>
+                            <tr>
+                                <th>新人辅导员</th>
+                                <th>日期范围</th>
+                                <th>值班搭档</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="mentorshipList"></tbody>
+                    </table>
+                    <div id="emptyMentorship" class="empty-state">暂无老带新设置</div>
+                </div>
+            </div>
+
+            <!-- 辅导员不可值班时间设置 -->
+            <div class="rules-section">
+                <h3>辅导员不可值班时间设置</h3>
+                <div class="counselor-select">
+                    <label>选择辅导员：</label>
+                    <select id="restrictionCounselor" onchange="loadRestrictions()">
+                        <option value="">-- 请选择 --</option>
+                    </select>
+                </div>
+
+                <div id="restrictionPanel" class="restriction-panel" style="display:none;">
+                    <!-- 不可值班的星期 -->
+                    <div class="restriction-group">
+                        <h4>不可值班的星期</h4>
+                        <div class="weekday-checkboxes">
+                            <label><input type="checkbox" value="1" data-type="weekday"> 周一</label>
+                            <label><input type="checkbox" value="2" data-type="weekday"> 周二</label>
+                            <label><input type="checkbox" value="3" data-type="weekday"> 周三</label>
+                            <label><input type="checkbox" value="4" data-type="weekday"> 周四</label>
+                            <label><input type="checkbox" value="5" data-type="weekday"> 周五</label>
+                            <label><input type="checkbox" value="6" data-type="weekday"> 周六</label>
+                            <label><input type="checkbox" value="0" data-type="weekday"> 周日</label>
+                        </div>
+                    </div>
+
+                    <!-- 不可值班的日期 -->
+                    <div class="restriction-group">
+                        <h4>不可值班的日期</h4>
+                        <div class="add-form">
+                            <input type="date" id="restrictedDate">
+                            <button onclick="addRestrictedDate()" class="btn-secondary">添加日期</button>
+                        </div>
+                        <div id="restrictedDatesList" class="tag-list"></div>
+                    </div>
+
+                    <!-- 不可值班的时间段 -->
+                    <div class="restriction-group">
+                        <h4>不可值班的时间段</h4>
+                        <div class="add-form">
+                            <input type="date" id="periodStart">
+                            <span>至</span>
+                            <input type="date" id="periodEnd">
+                            <button onclick="addRestrictedPeriod()" class="btn-secondary">添加时间段</button>
+                        </div>
+                        <div id="restrictedPeriodsList" class="tag-list"></div>
+                    </div>
+
+                    <div class="restriction-actions">
+                        <button onclick="saveRestrictions()" class="btn-primary save-btn">保存限制设置</button>
+                        <button onclick="resetRestrictions()" class="btn-danger">重置所有限制</button>
+                    </div>
+                </div>
+
+                <!-- 限制记录汇总 -->
+                <div class="restriction-summary">
+                    <h4>已设置的限制记录</h4>
+                    <div class="list-container">
+                        <table id="restrictionSummaryTable">
+                            <thead>
+                                <tr>
+                                    <th>辅导员</th>
+                                    <th>不可值班星期</th>
+                                    <th>不可值班日期</th>
+                                    <th>不可值班时间段</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="restrictionSummaryList"></tbody>
+                        </table>
+                        <div id="emptyRestrictionSummary" class="empty-state">暂无限制记录</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 辅导员最大值班天数设置 -->
+            <div class="rules-section">
+                <h3>辅导员最大值班天数设置</h3>
+                <p class="desc">限制某位辅导员在排班周期内的最大值班天数，剩余天数由其他辅导员平均分配</p>
+                <div class="add-form max-duty-form">
+                    <select id="maxDutyCounselor">
+                        <option value="">-- 选择辅导员 --</option>
+                    </select>
+                    <label>最大值班天数：</label>
+                    <input type="number" id="maxDutyCount" value="1" min="1" max="31" style="width: 60px;">
+                    <button onclick="addMaxDuty()" class="btn-primary">添加限制</button>
+                </div>
+                <div class="list-container">
+                    <table id="maxDutyTable">
+                        <thead>
+                            <tr>
+                                <th>辅导员</th>
+                                <th>最大值班天数</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="maxDutyList"></tbody>
+                    </table>
+                    <div id="emptyMaxDuty" class="empty-state">暂无最大值班天数限制</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 排班结果页面 -->
+        <section id="schedule" class="tab-content">
+            <div class="section-header">
+                <h2>排班结果</h2>
+                <p class="desc">生成并查看排班表，支持导出Excel</p>
+            </div>
+
+            <div class="schedule-controls">
+                <div class="form-row">
+                    <label>开始日期：</label>
+                    <input type="date" id="scheduleStartDate">
+                </div>
+                <div class="form-row">
+                    <label>结束日期：</label>
+                    <input type="date" id="scheduleEndDate">
+                </div>
+                <button onclick="generateSchedule()" class="btn-primary generate-btn">生成排班表</button>
+            </div>
+
+            <!-- 排班结果区域 -->
+            <div id="scheduleResult" class="schedule-result" style="display:none;">
+                <div class="result-header">
+                    <h3 id="scheduleTitle">排班表</h3>
+                    <button onclick="downloadExcel()" class="btn-secondary">下载Excel</button>
+                </div>
+                <div class="schedule-table-container">
+                    <table id="scheduleTable">
+                        <thead>
+                            <tr>
+                                <th>值班日期</th>
+                                <th>星期</th>
+                                <th>值班人员</th>
+                                <th>备注</th>
+                            </tr>
+                        </thead>
+                        <tbody id="scheduleList"></tbody>
+                    </table>
+                </div>
+                <div class="schedule-stats">
+                    <h4>值班统计</h4>
+                    <div id="statsContent"></div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

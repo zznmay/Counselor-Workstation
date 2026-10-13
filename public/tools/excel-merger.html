@@ -1,0 +1,1491 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Excel 数据匹配工具</title>
+    <!-- xlsx 运行库（本地化，随工作台同源伺服，无外网依赖） -->
+    <script src="./vendor/xlsx.full.min.js"></script>
+    <style>
+        /* ======================================================================
+           视觉规范与工作台一致：「未来界面蓝」#5F86FF / #A9C2FF / #F4F7FF / #2F3E66
+           支持 light / dark 双主题：由 URL ?theme= 或父页面 postMessage 控制
+           ====================================================================== */
+        :root {
+            --bg-page: #ffffff;
+            --bg-card: #ffffff;
+            --bg-card-hover: #f4f7ff;
+            --bg-deep: #f4f7ff;
+            --border: #e3eaf6;
+            --border-strong: #c9d6f2;
+            --border-active: #5f86ff;
+            --accent: #5f86ff;
+            --accent-strong: #4a6fe3;
+            --accent-light: #4a6fe3;
+            --accent-soft: #a9c2ff;
+            --accent-glow: rgba(95, 134, 255, 0.14);
+            --success: #5ca97f;
+            --success-glow: rgba(92, 169, 127, 0.16);
+            --warning: #b97f2e;
+            --danger: #d9645c;
+            --text-primary: #2f3e66;
+            --text-secondary: #5a6b8c;
+            --text-muted: #8a99b5;
+            --card-shadow: 0 1px 2px rgba(47, 62, 102, 0.04), 0 8px 22px rgba(47, 62, 102, 0.06);
+        }
+
+        html[data-theme='dark'] {
+            --bg-page: #12172a;
+            --bg-card: #1b2136;
+            --bg-card-hover: #232b45;
+            --bg-deep: #12172a;
+            --border: #2c3450;
+            --border-strong: #3a4468;
+            --border-active: #5f86ff;
+            --accent: #5f86ff;
+            --accent-strong: #7d9bff;
+            --accent-light: #8fa9ff;
+            --accent-soft: #3a4468;
+            --accent-glow: rgba(95, 134, 255, 0.22);
+            --success: #5cae8a;
+            --success-glow: rgba(92, 174, 138, 0.2);
+            --warning: #dfa050;
+            --danger: #e07a6e;
+            --text-primary: #e6eaf5;
+            --text-secondary: #9fabc9;
+            --text-muted: #6c7897;
+            --card-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB',
+                'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
+            background: var(--bg-page);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* 与工作台一致的淡蓝水彩底纹（不随滚动跳动） */
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background:
+                radial-gradient(640px 300px at 92% -6%, rgba(169, 194, 255, 0.16), transparent 62%),
+                radial-gradient(520px 260px at -6% 30%, rgba(169, 194, 255, 0.12), transparent 58%);
+            z-index: -1;
+        }
+
+        html[data-theme='dark'] body::before {
+            background:
+                radial-gradient(640px 300px at 92% -6%, rgba(95, 134, 255, 0.12), transparent 62%),
+                radial-gradient(520px 260px at -6% 30%, rgba(95, 134, 255, 0.08), transparent 58%);
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+        .tool-shell {
+            width: 100%;
+            max-width: 1280px;
+            margin: 0 auto;
+            padding: 20px 22px 32px;
+        }
+
+        /* Step indicator */
+        .step-bar {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0;
+            padding: 1.5rem 0 1.25rem;
+        }
+
+        .step-node {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .step-circle {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 0.85rem;
+            border: 1.5px solid var(--border-strong);
+            background: var(--bg-card);
+            color: var(--text-muted);
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .step-node.active .step-circle {
+            border-color: transparent;
+            background: linear-gradient(135deg, #5f86ff 0%, #7d9bff 100%);
+            color: white;
+            box-shadow: 0 6px 16px rgba(95, 134, 255, 0.35);
+        }
+
+        .step-node.done .step-circle {
+            border-color: transparent;
+            background: var(--success);
+            color: white;
+        }
+
+        .step-label {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            transition: color 0.3s;
+            white-space: nowrap;
+        }
+
+        .step-node.active .step-label { color: var(--accent-light); font-weight: 600; }
+        .step-node.done .step-label { color: var(--success); }
+
+        .step-line {
+            width: 56px;
+            height: 2px;
+            background: var(--border);
+            margin: 0 0.75rem;
+            border-radius: 1px;
+            transition: background 0.4s;
+        }
+
+        .step-line.done { background: var(--success); }
+
+        /* Cards */
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.25rem;
+            transition: border-color 0.25s ease, box-shadow 0.25s ease;
+        }
+
+        .card:hover {
+            border-color: rgba(95, 134, 255, 0.35);
+            box-shadow: var(--card-shadow);
+        }
+
+        /* Upload zone */
+        .upload-zone {
+            border: 1.5px dashed var(--border-strong);
+            border-radius: 12px;
+            padding: 2rem 1.5rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.25s ease;
+            background: var(--bg-card);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .upload-zone::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle at center, var(--accent-glow), transparent 70%);
+            opacity: 0;
+            transition: opacity 0.25s;
+        }
+
+        .upload-zone:hover::before,
+        .upload-zone.dragover::before { opacity: 1; }
+
+        .upload-zone:hover,
+        .upload-zone.dragover {
+            border-color: var(--accent);
+            transform: translateY(-1px);
+            box-shadow: 0 8px 20px rgba(95, 134, 255, 0.12);
+        }
+
+        .upload-zone.primary-zone {
+            border-color: rgba(95, 134, 255, 0.45);
+            background: rgba(95, 134, 255, 0.04);
+        }
+
+        /* File tag */
+        .file-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 0.875rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            font-size: 0.8rem;
+            box-shadow: 0 1px 2px rgba(47, 62, 102, 0.04);
+            animation: fadeSlideIn 0.3s ease;
+        }
+
+        .file-tag .remove-btn {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(217, 100, 92, 0.12);
+            color: var(--danger);
+            cursor: pointer;
+            font-size: 0.7rem;
+            transition: all 0.2s;
+            border: none;
+        }
+
+        .file-tag .remove-btn:hover {
+            background: var(--danger);
+            color: white;
+        }
+
+        @keyframes fadeSlideIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Select / Input */
+        .custom-select, .custom-input {
+            width: 100%;
+            padding: 0.55rem 0.875rem;
+            background: var(--bg-deep);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-size: 0.85rem;
+            font-family: inherit;
+            outline: none;
+            transition: border-color 0.2s, box-shadow 0.2s;
+            appearance: none;
+        }
+
+        .custom-select {
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%237686a8' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 0.75rem center;
+            padding-right: 2.5rem;
+            cursor: pointer;
+        }
+
+        .custom-select:focus, .custom-input:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+
+        .custom-select option {
+            background: var(--bg-card);
+            color: var(--text-primary);
+        }
+
+        .custom-input::placeholder { color: var(--text-muted); }
+
+        /* Checkbox grid */
+        .field-checkbox {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.45rem 0.75rem;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.2s;
+            font-size: 0.85rem;
+            border: 1px solid transparent;
+        }
+
+        .field-checkbox:hover { background: var(--bg-card-hover); }
+
+        .field-checkbox:has(input:checked) {
+            background: var(--accent-glow);
+            border-color: rgba(95, 134, 255, 0.3);
+            color: var(--accent-light);
+            font-weight: 500;
+        }
+
+        .field-checkbox input[type="checkbox"] {
+            width: 15px;
+            height: 15px;
+            accent-color: var(--accent);
+            cursor: pointer;
+        }
+
+        /* Buttons */
+        .btn {
+            padding: 0.55rem 1.375rem;
+            border-radius: 8px;
+            font-weight: 500;
+            font-size: 0.85rem;
+            cursor: pointer;
+            border: none;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-family: inherit;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #5f86ff 0%, #7d9bff 100%);
+            color: white;
+            box-shadow: 0 6px 16px rgba(95, 134, 255, 0.32);
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: linear-gradient(135deg, #4a74f0 0%, #6e92ff 100%);
+            box-shadow: 0 8px 20px rgba(95, 134, 255, 0.4);
+            transform: translateY(-1px);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #5ca97f 0%, #74bb95 100%);
+            color: white;
+            box-shadow: 0 6px 16px rgba(92, 169, 127, 0.3);
+        }
+
+        .btn-success:hover:not(:disabled) {
+            box-shadow: 0 8px 20px rgba(92, 169, 127, 0.38);
+            transform: translateY(-1px);
+        }
+
+        .btn-outline {
+            background: var(--bg-card);
+            color: var(--text-secondary);
+            border: 1px solid var(--border);
+        }
+
+        .btn-outline:hover {
+            border-color: var(--accent);
+            color: var(--accent-light);
+            background: var(--bg-card-hover);
+        }
+
+        /* Table */
+        .data-table-wrap {
+            overflow: auto;
+            max-height: 500px;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            background: var(--bg-card);
+        }
+
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.8rem;
+        }
+
+        .data-table thead {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        .data-table th {
+            background: #edf2ff;
+            color: #3d4e7a;
+            font-weight: 600;
+            text-align: left;
+            padding: 0.7rem 1rem;
+            border-bottom: 1px solid var(--border);
+            white-space: nowrap;
+            font-size: 0.78rem;
+            letter-spacing: 0.02em;
+        }
+
+        html[data-theme='dark'] .data-table th {
+            background: #232b45;
+            color: #8fa9ff;
+        }
+
+        .data-table td {
+            padding: 0.55rem 1rem;
+            border-bottom: 1px solid var(--border);
+            max-width: 300px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            color: var(--text-primary);
+        }
+
+        .data-table tbody tr { transition: background 0.15s; }
+        .data-table tbody tr:hover { background: var(--bg-card-hover); }
+        .data-table tbody tr:nth-child(even) { background: rgba(95, 134, 255, 0.03); }
+        .data-table tbody tr:nth-child(even):hover { background: var(--bg-card-hover); }
+
+        /* Toast */
+        .toast-container {
+            position: fixed;
+            top: 1.25rem;
+            right: 1.25rem;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .toast {
+            padding: 0.7rem 1.2rem;
+            border-radius: 10px;
+            font-size: 0.85rem;
+            animation: toastIn 0.3s ease, toastOut 0.3s ease 2.7s forwards;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            box-shadow: 0 12px 32px rgba(47, 62, 102, 0.18);
+        }
+
+        .toast-success { background: var(--success); color: white; }
+        .toast-error { background: var(--danger); color: white; }
+        .toast-info { background: var(--accent); color: white; }
+
+        @keyframes toastIn { from { opacity: 0; transform: translateX(100%); } to { opacity: 1; transform: translateX(0); } }
+        @keyframes toastOut { from { opacity: 1; } to { opacity: 0; transform: translateY(-10px); } }
+
+        /* Section transitions */
+        .step-section {
+            display: none;
+            animation: sectionIn 0.35s ease;
+        }
+
+        .step-section.active { display: block; }
+
+        @keyframes sectionIn {
+            from { opacity: 0; transform: translateY(14px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Stats badge */
+        .stat-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.375rem;
+            padding: 0.2rem 0.7rem;
+            background: var(--bg-deep);
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            white-space: nowrap;
+        }
+
+        .stat-badge .num {
+            color: var(--accent-light);
+            font-weight: 600;
+        }
+
+        /* Mapping card */
+        .mapping-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.1rem 1.25rem;
+            transition: all 0.25s;
+        }
+
+        .mapping-card:hover {
+            border-color: rgba(95, 134, 255, 0.35);
+            box-shadow: var(--card-shadow);
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .step-label { display: none; }
+            .step-line { width: 28px; }
+            .tool-shell { padding: 14px 14px 24px; }
+        }
+
+        /* Select all toggle */
+        .toggle-all-btn {
+            font-size: 0.75rem;
+            color: var(--accent-light);
+            cursor: pointer;
+            background: none;
+            border: none;
+            font-family: inherit;
+            padding: 0.25rem 0.55rem;
+            border-radius: 6px;
+            transition: background 0.2s;
+        }
+
+        .toggle-all-btn:hover { background: var(--accent-glow); }
+
+        /* Sheet selector */
+        .sheet-tab {
+            padding: 0.35rem 0.85rem;
+            border-radius: 8px;
+            font-size: 0.78rem;
+            cursor: pointer;
+            border: 1px solid var(--border);
+            background: transparent;
+            color: var(--text-secondary);
+            transition: all 0.2s;
+            font-family: inherit;
+        }
+
+        .sheet-tab.active {
+            background: var(--accent);
+            color: white;
+            border-color: var(--accent);
+            box-shadow: 0 4px 12px rgba(95, 134, 255, 0.28);
+        }
+
+        .sheet-tab:hover:not(.active) {
+            border-color: var(--accent);
+            color: var(--accent-light);
+        }
+
+        .dot-accent { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
+        .dot-success { width: 6px; height: 6px; border-radius: 50%; background: var(--success); flex-shrink: 0; }
+    </style>
+</head>
+<body>
+    <div class="toast-container" id="toastContainer"></div>
+
+    <div class="tool-shell">
+
+        <!-- Header -->
+        <header style="text-align: center; padding: 0.75rem 0 0.25rem;">
+            <div style="display: inline-flex; align-items: center; gap: 0.75rem; margin-bottom: 0.4rem;">
+                <span style="width: 5px; height: 22px; border-radius: 3px; background: linear-gradient(180deg, #5f86ff, #a9c2ff); box-shadow: 0 4px 10px rgba(95,134,255,0.35); display: inline-block;"></span>
+                <h1 style="font-size: 1.35rem; font-weight: 600; letter-spacing: 0.02em; color: var(--text-primary);">
+                    Excel 数据匹配工具
+                </h1>
+            </div>
+            <p style="color: var(--text-muted); font-size: 0.82rem;">
+                上传多个 Excel 文件，选择匹配字段，一键合并数据
+            </p>
+        </header>
+
+        <!-- Step Bar -->
+        <div class="step-bar">
+            <div class="step-node active" data-step="1" onclick="goToStep(1)">
+                <div class="step-circle">1</div>
+                <span class="step-label">上传文件</span>
+            </div>
+            <div class="step-line" id="line1"></div>
+            <div class="step-node" data-step="2" onclick="goToStep(2)">
+                <div class="step-circle">2</div>
+                <span class="step-label">选择主键</span>
+            </div>
+            <div class="step-line" id="line2"></div>
+            <div class="step-node" data-step="3" onclick="goToStep(3)">
+                <div class="step-circle">3</div>
+                <span class="step-label">选择字段</span>
+            </div>
+            <div class="step-line" id="line3"></div>
+            <div class="step-node" data-step="4" onclick="goToStep(4)">
+                <div class="step-circle">4</div>
+                <span class="step-label">预览下载</span>
+            </div>
+        </div>
+
+        <!-- ============ STEP 1: Upload ============ -->
+        <div class="step-section active" id="step1">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; margin-bottom: 1.25rem;">
+                <!-- Main file -->
+                <div>
+                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.7rem;">
+                        <span class="dot-accent"></span>
+                        <span style="font-weight: 600; font-size: 0.92rem;">主文件</span>
+                        <span style="font-size: 0.75rem; color: var(--text-muted);">（基准数据表）</span>
+                    </div>
+                    <div class="upload-zone primary-zone" id="mainUploadZone"
+                         ondragover="handleDragOver(event, this)"
+                         ondragleave="handleDragLeave(this)"
+                         ondrop="handleDrop(event, 'main')"
+                         onclick="document.getElementById('mainFileInput').click()">
+                        <input type="file" id="mainFileInput" accept=".xlsx,.xls,.csv" style="display:none"
+                               onchange="handleFileSelect(event, 'main')">
+                        <svg width="38" height="38" viewBox="0 0 40 40" fill="none" style="margin: 0 auto 0.7rem; display: block;">
+                            <rect x="4" y="4" width="32" height="32" rx="8" stroke="#5f86ff" stroke-width="1.5" stroke-dasharray="4 3"/>
+                            <path d="M20 14v12M14 20h12" stroke="#7d9bff" stroke-width="1.5" stroke-linecap="round"/>
+                        </svg>
+                        <p style="color: var(--text-secondary); font-size: 0.85rem; position: relative;">
+                            拖拽或点击上传主文件
+                        </p>
+                        <p style="color: var(--text-muted); font-size: 0.75rem; margin-top: 0.25rem; position: relative;">
+                            支持 .xlsx / .xls / .csv
+                        </p>
+                    </div>
+                    <div id="mainFileInfo" style="margin-top: 0.75rem;"></div>
+                </div>
+
+                <!-- Secondary files -->
+                <div>
+                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.7rem;">
+                        <span class="dot-success"></span>
+                        <span style="font-weight: 600; font-size: 0.92rem;">副文件</span>
+                        <span style="font-size: 0.75rem; color: var(--text-muted);">（可上传多个）</span>
+                    </div>
+                    <div class="upload-zone" id="secUploadZone"
+                         ondragover="handleDragOver(event, this)"
+                         ondragleave="handleDragLeave(this)"
+                         ondrop="handleDrop(event, 'secondary')"
+                         onclick="document.getElementById('secFileInput').click()">
+                        <input type="file" id="secFileInput" accept=".xlsx,.xls,.csv" multiple style="display:none"
+                               onchange="handleFileSelect(event, 'secondary')">
+                        <svg width="38" height="38" viewBox="0 0 40 40" fill="none" style="margin: 0 auto 0.7rem; display: block;">
+                            <rect x="4" y="4" width="32" height="32" rx="8" stroke="#5ca97f" stroke-width="1.5" stroke-dasharray="4 3"/>
+                            <path d="M20 14v12M14 20h12" stroke="#7cc9a6" stroke-width="1.5" stroke-linecap="round"/>
+                        </svg>
+                        <p style="color: var(--text-secondary); font-size: 0.85rem; position: relative;">
+                            拖拽或点击上传副文件
+                        </p>
+                        <p style="color: var(--text-muted); font-size: 0.75rem; margin-top: 0.25rem; position: relative;">
+                            支持多选，.xlsx / .xls / .csv
+                        </p>
+                    </div>
+                    <div id="secFileInfo" style="margin-top: 0.75rem; display: flex; flex-wrap: wrap; gap: 0.5rem;"></div>
+                </div>
+            </div>
+
+            <!-- Sheet selector for main file -->
+            <div id="mainSheetSelector" style="display: none; margin-bottom: 1.25rem;">
+                <div class="card">
+                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.7rem;">
+                        <span class="dot-accent"></span>
+                        <span style="font-weight: 500; font-size: 0.85rem;">主文件工作表</span>
+                    </div>
+                    <div id="mainSheetTabs" style="display: flex; gap: 0.5rem; flex-wrap: wrap;"></div>
+                </div>
+            </div>
+
+            <!-- Sheet selectors for secondary files -->
+            <div id="secSheetSelectors" style="display: none; margin-bottom: 1.25rem;"></div>
+
+            <div style="display: flex; justify-content: flex-end;">
+                <button class="btn btn-primary" id="btnStep1Next" onclick="goToStep(2)" disabled>
+                    下一步：选择主键
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                        <path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- ============ STEP 2: Key Selection ============ -->
+        <div class="step-section" id="step2">
+            <div style="margin-bottom: 1rem;">
+                <h2 style="font-size: 1.05rem; font-weight: 600; margin-bottom: 0.25rem;">选择匹配主键</h2>
+                <p style="color: var(--text-muted); font-size: 0.8rem;">
+                    为每个文件选择用于数据匹配的主键字段（字段值需一致才能匹配）
+                </p>
+            </div>
+
+            <div id="keySelectionArea" style="display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1.25rem;"></div>
+
+            <div style="display: flex; justify-content: space-between;">
+                <button class="btn btn-outline" onclick="goToStep(1)">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                        <path d="M10 4l-4 4 4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    上一步
+                </button>
+                <button class="btn btn-primary" id="btnStep2Next" onclick="goToStep(3)" disabled>
+                    下一步：选择字段
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                        <path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- ============ STEP 3: Field Selection ============ -->
+        <div class="step-section" id="step3">
+            <div style="margin-bottom: 1rem;">
+                <h2 style="font-size: 1.05rem; font-weight: 600; margin-bottom: 0.25rem;">选择匹配字段</h2>
+                <p style="color: var(--text-muted); font-size: 0.8rem;">
+                    勾选需要从各副文件中合并到主文件的字段（一对多匹配时，多条数据将以分号；分隔）
+                </p>
+            </div>
+
+            <div id="fieldSelectionArea" style="display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1.25rem;"></div>
+
+            <div style="display: flex; justify-content: space-between;">
+                <button class="btn btn-outline" onclick="goToStep(2)">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                        <path d="M10 4l-4 4 4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    上一步
+                </button>
+                <button class="btn btn-primary" id="btnStep3Next" onclick="performMerge()">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                        <path d="M2 8h12M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    执行合并
+                </button>
+            </div>
+        </div>
+
+        <!-- ============ STEP 4: Preview & Download ============ -->
+        <div class="step-section" id="step4">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.75rem;">
+                <div>
+                    <h2 style="font-size: 1.05rem; font-weight: 600; margin-bottom: 0.25rem;">数据预览</h2>
+                    <div style="display: flex; gap: 0.7rem; margin-top: 0.5rem; flex-wrap: wrap;">
+                        <span class="stat-badge">总行数 <span class="num" id="statRows">0</span></span>
+                        <span class="stat-badge">总列数 <span class="num" id="statCols">0</span></span>
+                        <span class="stat-badge">匹配率 <span class="num" id="statMatch">0%</span></span>
+                    </div>
+                </div>
+                <div style="display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap;">
+                    <input type="text" class="custom-input" id="fileNameInput" placeholder="输入文件名（默认：合并结果）"
+                           style="width: 210px; font-size: 0.8rem;">
+                    <button class="btn btn-success" onclick="downloadExcel()">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                            <path d="M8 2v9M4 7l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                            <path d="M2 12v1a1 1 0 001 1h10a1 1 0 001-1v-1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                        </svg>
+                        下载 Excel
+                    </button>
+                </div>
+            </div>
+
+            <div class="data-table-wrap" id="previewTableWrap">
+                <table class="data-table" id="previewTable">
+                    <thead id="previewThead"></thead>
+                    <tbody id="previewTbody"></tbody>
+                </table>
+            </div>
+
+            <div style="display: flex; justify-content: space-between; margin-top: 1.25rem;">
+                <button class="btn btn-outline" onclick="goToStep(3)">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                        <path d="M10 4l-4 4 4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    返回调整
+                </button>
+                <button class="btn btn-outline" onclick="resetAll()">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                        <path d="M2 8a6 6 0 0111.46-2.5M14 8a6 6 0 01-11.46 2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                        <path d="M13.5 2.5v3h-3M2.5 13.5v-3h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    重新开始
+                </button>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // ============ STATE ============
+        const state = {
+            mainFile: null,       // { name, workbook, sheetName, headers, data }
+            secFiles: [],         // [{ name, workbook, sheetName, headers, data }]
+            secKeys: [],          // [{ fileIndex, key, mainKey }]
+            selectedFields: [],   // [{ fileIndex, fields: [] }]
+            mergedData: null,
+            mergedHeaders: null,
+            currentStep: 1
+        };
+
+        // ============ UTILITIES ============
+        function showToast(msg, type = 'info') {
+            const c = document.getElementById('toastContainer');
+            const t = document.createElement('div');
+            t.className = `toast toast-${type}`;
+            const icons = { success: '✓', error: '✕', info: 'ℹ' };
+            t.innerHTML = `<span>${icons[type] || 'ℹ'}</span><span>${msg}</span>`;
+            c.appendChild(t);
+            setTimeout(() => t.remove(), 3000);
+        }
+
+        function parseFile(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const data = new Uint8Array(e.target.result);
+                        const wb = XLSX.read(data, { type: 'array' });
+                        resolve(wb);
+                    } catch (err) {
+                        reject(err);
+                    }
+                };
+                reader.onerror = reject;
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        function getSheetData(workbook, sheetName) {
+            const ws = workbook.Sheets[sheetName];
+            const json = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+            if (json.length === 0) return { headers: [], data: [] };
+            const headers = json[0].map((h, i) => h === '' || h == null ? `列${i + 1}` : String(h));
+            const data = json.slice(1).map(row => {
+                const obj = {};
+                headers.forEach((h, i) => {
+                    obj[h] = row[i] !== undefined && row[i] !== null ? String(row[i]) : '';
+                });
+                return obj;
+            });
+            return { headers, data };
+        }
+
+        // ============ DRAG & DROP ============
+        function handleDragOver(e, el) {
+            e.preventDefault();
+            el.classList.add('dragover');
+        }
+
+        function handleDragLeave(el) {
+            el.classList.remove('dragover');
+        }
+
+        function handleDrop(e, type) {
+            e.preventDefault();
+            e.currentTarget.classList.remove('dragover');
+            const files = Array.from(e.dataTransfer.files).filter(f =>
+                /\.(xlsx|xls|csv)$/i.test(f.name)
+            );
+            if (files.length === 0) {
+                showToast('请上传 .xlsx / .xls / .csv 格式的文件', 'error');
+                return;
+            }
+            if (type === 'main') {
+                processMainFile(files[0]);
+            } else {
+                processSecFiles(files);
+            }
+        }
+
+        async function handleFileSelect(e, type) {
+            const files = Array.from(e.target.files);
+            if (files.length === 0) return;
+            if (type === 'main') {
+                await processMainFile(files[0]);
+            } else {
+                await processSecFiles(files);
+            }
+            e.target.value = '';
+        }
+
+        // ============ FILE PROCESSING ============
+        async function processMainFile(file) {
+            try {
+                const wb = await parseFile(file);
+                const sheetNames = wb.SheetNames;
+                const sheetName = sheetNames[0];
+                const { headers, data } = getSheetData(wb, sheetName);
+
+                state.mainFile = {
+                    name: file.name,
+                    workbook: wb,
+                    sheetName: sheetName,
+                    headers: headers,
+                    data: data
+                };
+
+                // Show file info
+                document.getElementById('mainFileInfo').innerHTML = `
+                    <div class="file-tag">
+                        <span style="color: var(--accent);">●</span>
+                        <span>${file.name}</span>
+                        <span class="stat-badge" style="margin-left: 0.25rem;">${data.length} 行 · ${headers.length} 列</span>
+                        <button class="remove-btn" onclick="removeMainFile()">✕</button>
+                    </div>
+                `;
+
+                // Show sheet selector if multiple sheets
+                if (sheetNames.length > 1) {
+                    renderSheetSelector('main', sheetNames, sheetName);
+                } else {
+                    document.getElementById('mainSheetSelector').style.display = 'none';
+                }
+
+                checkStep1Ready();
+                showToast(`主文件已加载：${data.length} 行数据`, 'success');
+            } catch (err) {
+                showToast('主文件解析失败：' + err.message, 'error');
+            }
+        }
+
+        async function processSecFiles(files) {
+            for (const file of files) {
+                try {
+                    const wb = await parseFile(file);
+                    const sheetName = wb.SheetNames[0];
+                    const { headers, data } = getSheetData(wb, sheetName);
+
+                    // Check duplicate
+                    if (state.secFiles.some(f => f.name === file.name)) {
+                        showToast(`文件 "${file.name}" 已存在，已跳过`, 'info');
+                        continue;
+                    }
+
+                    state.secFiles.push({
+                        name: file.name,
+                        workbook: wb,
+                        sheetName: sheetName,
+                        headers: headers,
+                        data: data
+                    });
+                } catch (err) {
+                    showToast(`副文件 "${file.name}" 解析失败`, 'error');
+                }
+            }
+            renderSecFileList();
+            renderSecSheetSelectors();
+            checkStep1Ready();
+        }
+
+        function removeMainFile() {
+            state.mainFile = null;
+            document.getElementById('mainFileInfo').innerHTML = '';
+            document.getElementById('mainSheetSelector').style.display = 'none';
+            checkStep1Ready();
+        }
+
+        function removeSecFile(index) {
+            state.secFiles.splice(index, 1);
+            renderSecFileList();
+            renderSecSheetSelectors();
+            checkStep1Ready();
+        }
+
+        function renderSecFileList() {
+            const container = document.getElementById('secFileInfo');
+            container.innerHTML = state.secFiles.map((f, i) => `
+                <div class="file-tag">
+                    <span style="color: var(--success);">●</span>
+                    <span>${f.name}</span>
+                    <span class="stat-badge">${f.data.length} 行</span>
+                    <button class="remove-btn" onclick="removeSecFile(${i})">✕</button>
+                </div>
+            `).join('');
+        }
+
+        // ============ SHEET SELECTORS ============
+        function renderSheetSelector(type, sheetNames, activeSheet) {
+            if (type === 'main') {
+                const container = document.getElementById('mainSheetSelector');
+                container.style.display = 'block';
+                document.getElementById('mainSheetTabs').innerHTML = sheetNames.map(s => `
+                    <button class="sheet-tab ${s === activeSheet ? 'active' : ''}"
+                            onclick="switchMainSheet('${s}')">${s}</button>
+                `).join('');
+            }
+        }
+
+        function renderSecSheetSelectors() {
+            const container = document.getElementById('secSheetSelectors');
+            if (state.secFiles.length === 0) {
+                container.style.display = 'none';
+                return;
+            }
+            container.style.display = 'block';
+            container.innerHTML = state.secFiles.map((f, idx) => {
+                const sheets = f.workbook.SheetNames;
+                if (sheets.length <= 1) return '';
+                return `
+                    <div class="card" style="margin-bottom: 0.75rem;">
+                        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+                            <span style="color: var(--success); font-size: 0.8rem;">●</span>
+                            <span style="font-size: 0.8rem; font-weight: 500;">${f.name}</span>
+                        </div>
+                        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                            ${sheets.map(s => `
+                                <button class="sheet-tab ${s === f.sheetName ? 'active' : ''}"
+                                        onclick="switchSecSheet(${idx}, '${s}')">${s}</button>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function switchMainSheet(sheetName) {
+            const { headers, data } = getSheetData(state.mainFile.workbook, sheetName);
+            state.mainFile.sheetName = sheetName;
+            state.mainFile.headers = headers;
+            state.mainFile.data = data;
+
+            document.getElementById('mainFileInfo').querySelector('.stat-badge').textContent =
+                `${data.length} 行 · ${headers.length} 列`;
+
+            renderSheetSelector('main', state.mainFile.workbook.SheetNames, sheetName);
+            checkStep1Ready();
+        }
+
+        function switchSecSheet(idx, sheetName) {
+            const f = state.secFiles[idx];
+            const { headers, data } = getSheetData(f.workbook, sheetName);
+            f.sheetName = sheetName;
+            f.headers = headers;
+            f.data = data;
+            renderSecFileList();
+            renderSecSheetSelectors();
+            checkStep1Ready();
+        }
+
+        function checkStep1Ready() {
+            const ready = state.mainFile && state.mainFile.data.length > 0 && state.secFiles.length > 0;
+            document.getElementById('btnStep1Next').disabled = !ready;
+        }
+
+        // ============ STEP NAVIGATION ============
+        function goToStep(step) {
+            // Validation
+            if (step >= 2 && (!state.mainFile || state.secFiles.length === 0)) {
+                showToast('请先上传主文件和至少一个副文件', 'error');
+                return;
+            }
+            if (step >= 3 && !validateStep2()) {
+                showToast('请为所有文件选择匹配主键', 'error');
+                return;
+            }
+            if (step >= 4 && !state.mergedData) {
+                showToast('请先执行数据合并', 'error');
+                return;
+            }
+
+            state.currentStep = step;
+
+            // Update step bar
+            document.querySelectorAll('.step-node').forEach(n => {
+                const s = parseInt(n.dataset.step);
+                n.classList.remove('active', 'done');
+                if (s === step) n.classList.add('active');
+                else if (s < step) n.classList.add('done');
+            });
+            document.querySelectorAll('.step-line').forEach((l, i) => {
+                l.classList.toggle('done', i < step - 1);
+            });
+
+            // Show section
+            document.querySelectorAll('.step-section').forEach(s => s.classList.remove('active'));
+            document.getElementById(`step${step}`).classList.add('active');
+
+            // Render step content
+            if (step === 2) renderStep2();
+            if (step === 3) renderStep3();
+        }
+
+        function validateStep2() {
+            if (state.secKeys.length !== state.secFiles.length) return false;
+            return state.secKeys.every(k =>
+                k.key !== null && k.key !== '' && k.mainKey !== null && k.mainKey !== ''
+            );
+        }
+
+        // ============ STEP 2: KEY SELECTION ============
+        function renderStep2() {
+            const area = document.getElementById('keySelectionArea');
+            let html = '';
+
+            // Main file info (no longer needs a key selector)
+            html += `
+                <div class="mapping-card">
+                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; flex-wrap: wrap;">
+                        <span style="width: 8px; height: 8px; border-radius: 50%; background: var(--accent);"></span>
+                        <span style="font-weight: 600; font-size: 0.9rem;">主文件</span>
+                        <span style="color: var(--text-muted); font-size: 0.8rem;">— ${state.mainFile.name}</span>
+                        <span class="stat-badge">${state.mainFile.data.length} 行 · ${state.mainFile.headers.length} 列</span>
+                    </div>
+                    <p style="color: var(--text-muted); font-size: 0.8rem;">
+                        为每个副文件选择主文件中对应的匹配字段
+                    </p>
+                </div>
+            `;
+
+            // Secondary files keys
+            state.secFiles.forEach((f, i) => {
+                const currentKey = state.secKeys[i]?.key || '';
+                const currentMainKey = state.secKeys[i]?.mainKey || '';
+                html += `
+                    <div class="mapping-card">
+                        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; flex-wrap: wrap;">
+                            <span style="width: 8px; height: 8px; border-radius: 50%; background: var(--success);"></span>
+                            <span style="font-weight: 600; font-size: 0.9rem;">副文件 ${i + 1}</span>
+                            <span style="color: var(--text-muted); font-size: 0.8rem;">— ${f.name}</span>
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: start;">
+                            <div>
+                                <label style="display: block; font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 0.375rem;">
+                                    主文件匹配字段
+                                </label>
+                                <select class="custom-select" onchange="updateSecMainKey(${i}, this.value)">
+                                    <option value="">请选择主文件字段</option>
+                                    ${state.mainFile.headers.map(h =>
+                                        `<option value="${h}" ${currentMainKey === h ? 'selected' : ''}>${h}</option>`
+                                    ).join('')}
+                                </select>
+                            </div>
+                            <div>
+                                <label style="display: block; font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 0.375rem;">
+                                    副文件匹配字段
+                                </label>
+                                <select class="custom-select" onchange="updateSecKey(${i}, this.value)">
+                                    <option value="">请选择副文件字段</option>
+                                    ${f.headers.map(h =>
+                                        `<option value="${h}" ${currentKey === h ? 'selected' : ''}>${h}</option>`
+                                    ).join('')}
+                                </select>
+                            </div>
+                        </div>
+                        ${currentMainKey && currentKey ? `
+                            <div style="margin-top: 0.75rem; padding: 0.5rem 0.75rem; background: var(--accent-glow); border: 1px solid rgba(95,134,255,0.25); border-radius: 8px;">
+                                <div style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; color: var(--text-secondary);">
+                                    <span style="color: var(--accent-light); font-weight: 500;">主文件.${currentMainKey}</span>
+                                    <span style="color: var(--text-muted);">↔</span>
+                                    <span style="color: var(--success); font-weight: 500;">${f.name}.${currentKey}</span>
+                                </div>
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            });
+
+            area.innerHTML = html;
+            checkStep2Ready();
+        }
+
+        function updateSecMainKey(idx, value) {
+            if (!state.secKeys[idx]) state.secKeys[idx] = { fileIndex: idx, key: '', mainKey: '' };
+            state.secKeys[idx].mainKey = value;
+            renderStep2();
+        }
+
+        function updateSecKey(idx, value) {
+            if (!state.secKeys[idx]) state.secKeys[idx] = { fileIndex: idx, key: '', mainKey: '' };
+            state.secKeys[idx].key = value;
+            renderStep2();
+        }
+
+        function checkStep2Ready() {
+            const ready = validateStep2();
+            document.getElementById('btnStep2Next').disabled = !ready;
+        }
+
+        // ============ STEP 3: FIELD SELECTION ============
+        function renderStep3() {
+            const area = document.getElementById('fieldSelectionArea');
+            let html = '';
+
+            // Main file: all fields included by default (show as info)
+            html += `
+                <div class="mapping-card">
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem; gap: 0.5rem; flex-wrap: wrap;">
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <span style="width: 8px; height: 8px; border-radius: 50%; background: var(--accent);"></span>
+                            <span style="font-weight: 600; font-size: 0.9rem;">主文件字段</span>
+                            <span style="color: var(--text-muted); font-size: 0.8rem;">— 全部保留</span>
+                        </div>
+                        <span class="stat-badge">${state.mainFile.headers.length} 个字段</span>
+                    </div>
+                    <div style="display: flex; flex-wrap: wrap; gap: 0.3rem;">
+                        ${state.mainFile.headers.map(h => `
+                            <span style="padding: 0.25rem 0.625rem; background: var(--accent-glow); border: 1px solid rgba(95,134,255,0.25); border-radius: 6px; font-size: 0.78rem; color: var(--accent-light);">${h}</span>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+
+            // Secondary files: select fields to merge
+            state.secFiles.forEach((f, i) => {
+                const keyField = state.secKeys[i]?.key || '';
+                const selectableFields = f.headers.filter(h => h !== keyField);
+                const currentSelected = state.selectedFields[i]?.fields || [];
+
+                html += `
+                    <div class="mapping-card">
+                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem; gap: 0.5rem; flex-wrap: wrap;">
+                            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                <span style="width: 8px; height: 8px; border-radius: 50%; background: var(--success);"></span>
+                                <span style="font-weight: 600; font-size: 0.9rem;">副文件 ${i + 1} 字段</span>
+                                <span style="color: var(--text-muted); font-size: 0.8rem;">— ${f.name}</span>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                <span class="stat-badge" id="fieldCount${i}">已选 ${currentSelected.length} 个</span>
+                                <button class="toggle-all-btn" onclick="toggleAllFields(${i})">全选/取消</button>
+                            </div>
+                        </div>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0.25rem;">
+                            ${selectableFields.map(h => `
+                                <label class="field-checkbox">
+                                    <input type="checkbox" value="${h}" ${currentSelected.includes(h) ? 'checked' : ''}
+                                           onchange="updateFieldSelection(${i}, '${h.replace(/'/g, "\\'")}', this.checked)">
+                                    <span>${h}</span>
+                                </label>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            });
+
+            area.innerHTML = html;
+        }
+
+        function updateFieldSelection(fileIdx, field, checked) {
+            if (!state.selectedFields[fileIdx]) {
+                state.selectedFields[fileIdx] = { fileIndex: fileIdx, fields: [] };
+            }
+            const fields = state.selectedFields[fileIdx].fields;
+            if (checked && !fields.includes(field)) {
+                fields.push(field);
+            } else if (!checked) {
+                const idx = fields.indexOf(field);
+                if (idx > -1) fields.splice(idx, 1);
+            }
+            // Update count
+            const countEl = document.getElementById(`fieldCount${fileIdx}`);
+            if (countEl) countEl.textContent = `已选 ${fields.length} 个`;
+        }
+
+        function toggleAllFields(fileIdx) {
+            const f = state.secFiles[fileIdx];
+            const keyField = state.secKeys[fileIdx]?.key || '';
+            const selectableFields = f.headers.filter(h => h !== keyField);
+
+            if (!state.selectedFields[fileIdx]) {
+                state.selectedFields[fileIdx] = { fileIndex: fileIdx, fields: [] };
+            }
+
+            const currentFields = state.selectedFields[fileIdx].fields;
+            const allSelected = selectableFields.every(h => currentFields.includes(h));
+
+            if (allSelected) {
+                state.selectedFields[fileIdx].fields = [];
+            } else {
+                state.selectedFields[fileIdx].fields = [...selectableFields];
+            }
+
+            // Re-render
+            renderStep3();
+        }
+
+        // ============ MERGE LOGIC ============
+        function performMerge() {
+            // Validate field selection
+            let hasSelection = false;
+            state.secFiles.forEach((f, i) => {
+                if (state.selectedFields[i]?.fields?.length > 0) hasSelection = true;
+            });
+
+            if (!hasSelection) {
+                showToast('请至少选择一个需要匹配的字段', 'error');
+                return;
+            }
+
+            // Build merged headers with a field-to-header mapping
+            const mergedHeaders = [...state.mainFile.headers];
+            // fieldMapping[i] = { originalField: finalHeaderName }
+            const fieldMappings = state.secFiles.map((f, i) => {
+                const fields = state.selectedFields[i]?.fields || [];
+                const mapping = {};
+                fields.forEach(field => {
+                    let finalName = field;
+                    let counter = 1;
+                    while (mergedHeaders.includes(finalName)) {
+                        finalName = `${field}_${counter++}`;
+                    }
+                    mergedHeaders.push(finalName);
+                    mapping[field] = finalName;
+                });
+                return mapping;
+            });
+
+            // Build lookup maps for secondary files
+            const lookupMaps = state.secFiles.map((f, i) => {
+                const keyField = state.secKeys[i]?.key;
+                const fields = state.selectedFields[i]?.fields || [];
+                const map = {};
+
+                f.data.forEach(row => {
+                    const keyValue = String(row[keyField] || '').trim();
+                    if (!keyValue) return;
+
+                    if (!map[keyValue]) {
+                        map[keyValue] = {};
+                        fields.forEach(field => { map[keyValue][field] = []; });
+                    }
+
+                    fields.forEach(field => {
+                        const val = row[field] !== undefined ? String(row[field]) : '';
+                        if (val && !map[keyValue][field].includes(val)) {
+                            map[keyValue][field].push(val);
+                        }
+                    });
+                });
+
+                return { keyField, fields, map };
+            });
+
+            // Merge data
+            const mergedData = [];
+            let matchCount = 0;
+
+            state.mainFile.data.forEach(mainRow => {
+                const newRow = {};
+                state.mainFile.headers.forEach(h => { newRow[h] = mainRow[h] || '' });
+
+                let rowMatched = false;
+
+                lookupMaps.forEach((lookup, i) => {
+                    const fields = state.selectedFields[i]?.fields || [];
+                    const mapping = fieldMappings[i];
+                    const mainKeyField = state.secKeys[i]?.mainKey || '';
+                    const mainKeyValue = String(mainRow[mainKeyField] || '').trim();
+                    const matched = lookup.map[mainKeyValue];
+
+                    fields.forEach(field => {
+                        const targetCol = mapping[field];
+                        if (matched && matched[field]) {
+                            newRow[targetCol] = matched[field].join('；');
+                            rowMatched = true;
+                        } else {
+                            newRow[targetCol] = '';
+                        }
+                    });
+
+                    if (matched) rowMatched = true;
+                });
+
+                if (rowMatched) matchCount++;
+                mergedData.push(newRow);
+            });
+
+            state.mergedHeaders = mergedHeaders;
+            state.mergedData = mergedData;
+
+            // Calculate match rate
+            const matchRate = state.mainFile.data.length > 0
+                ? Math.round((matchCount / state.mainFile.data.length) * 100) : 0;
+
+            // Update stats
+            document.getElementById('statRows').textContent = mergedData.length;
+            document.getElementById('statCols').textContent = mergedHeaders.length;
+            document.getElementById('statMatch').textContent = matchRate + '%';
+
+            // Render preview
+            renderPreview();
+
+            // Go to step 4
+            goToStep(4);
+            showToast(`合并完成！共 ${mergedData.length} 行数据，匹配率 ${matchRate}%`, 'success');
+        }
+
+        // ============ PREVIEW ============
+        function renderPreview() {
+            const thead = document.getElementById('previewThead');
+            const tbody = document.getElementById('previewTbody');
+
+            // Headers
+            thead.innerHTML = `<tr>
+                <th style="width: 50px; text-align: center;">#</th>
+                ${state.mergedHeaders.map(h => `<th>${escapeHtml(h)}</th>`).join('')}
+            </tr>`;
+
+            // Body (limit preview to 500 rows for performance)
+            const previewData = state.mergedData.slice(0, 500);
+            tbody.innerHTML = previewData.map((row, i) => `
+                <tr>
+                    <td style="text-align: center; color: var(--text-muted); font-size: 0.75rem;">${i + 1}</td>
+                    ${state.mergedHeaders.map(h => {
+                        const val = row[h] || '';
+                        const hasMulti = val.includes('；');
+                        return `<td title="${escapeHtml(val)}" style="${hasMulti ? 'color: var(--warning);' : ''}">${escapeHtml(val)}</td>`;
+                    }).join('')}
+                </tr>
+            `).join('');
+
+            if (state.mergedData.length > 500) {
+                tbody.innerHTML += `
+                    <tr>
+                        <td colspan="${state.mergedHeaders.length + 1}" style="text-align: center; color: var(--text-muted); padding: 1rem;">
+                            仅预览前 500 行，共 ${state.mergedData.length} 行数据
+                        </td>
+                    </tr>
+                `;
+            }
+        }
+
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        // ============ DOWNLOAD ============
+        function downloadExcel() {
+            if (!state.mergedData || !state.mergedHeaders) {
+                showToast('没有可下载的数据', 'error');
+                return;
+            }
+
+            const fileName = document.getElementById('fileNameInput').value.trim() || '合并结果';
+
+            // Build worksheet data
+            const wsData = [state.mergedHeaders];
+            state.mergedData.forEach(row => {
+                wsData.push(state.mergedHeaders.map(h => row[h] || ''));
+            });
+
+            const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+            // Set column widths
+            ws['!cols'] = state.mergedHeaders.map(h => ({
+                wch: Math.max(h.length * 2, 12)
+            }));
+
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, '合并结果');
+
+            // Trigger download
+            XLSX.writeFile(wb, `${fileName}.xlsx`);
+            showToast(`文件 "${fileName}.xlsx" 已开始下载`, 'success');
+        }
+
+        // ============ RESET ============
+        function resetAll() {
+            state.mainFile = null;
+            state.secFiles = [];
+            state.secKeys = [];
+            state.selectedFields = [];
+            state.mergedData = null;
+            state.mergedHeaders = null;
+            state.currentStep = 1;
+
+            document.getElementById('mainFileInfo').innerHTML = '';
+            document.getElementById('secFileInfo').innerHTML = '';
+            document.getElementById('mainSheetSelector').style.display = 'none';
+            document.getElementById('secSheetSelectors').style.display = 'none';
+            document.getElementById('btnStep1Next').disabled = true;
+            document.getElementById('fileNameInput').value = '';
+
+            goToStep(1);
+            showToast('已重置，可重新开始', 'info');
+        }
+
+        // ============ THEME BRIDGE（与工作台亮/暗主题联动） ============
+        (function () {
+            var params = new URLSearchParams(location.search);
+            var theme = params.get('theme') === 'dark' ? 'dark' : 'light';
+            document.documentElement.dataset.theme = theme;
+            window.addEventListener('message', function (e) {
+                var d = e.data || {};
+                if (d.type === 'tool-theme' && (d.theme === 'light' || d.theme === 'dark')) {
+                    document.documentElement.dataset.theme = d.theme;
+                }
+            });
+            try { window.parent.postMessage({ type: 'tool-ready', tool: 'excel-merger' }, '*'); } catch (err) { /* ignore */ }
+        })();
+    </script>
+</body>
+</html>

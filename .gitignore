@@ -1,0 +1,39 @@
+# ===== 依赖与构建产物 =====
+node_modules/
+dist/
+*.tsbuildinfo
+
+# ===== 服务端运行时数据（含数据库、上传文件、备份，均为敏感/可再生内容）=====
+server/data/
+server/backups/
+
+# ===== 证书与密钥（自签证书可由 npm run gen-cert 重新生成）=====
+server/certs/
+*.pem
+*.key
+*.secret
+
+# ===== 环境变量（只提交 .env.example）=====
+.env
+.env.*
+!.env.example
+
+# ===== 日志 =====
+*.log
+npm-debug.log*
+logs/
+
+# ===== 操作系统 / 编辑器 =====
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# ===== AI 辅助工具缓存（本仓库无关）=====
+.mimosa/
+.zcode/
+
+# ===== 临时文件 =====
+tmp/
+*.tmp
