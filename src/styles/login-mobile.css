@@ -1,0 +1,317 @@
+/* ======================================================================
+   移动端登录页（≤768px）—— 视觉来源 docs/mobile-redesign/prototype/login.html (v3.1)
+   规格来源 docs/mobile-redesign/09 + 10
+   ──────────────────────────────────────────────────────────────────────
+   实现要点：
+   1. 不改动 html 根字号（会影响全站），改用局部单位 --u：
+      --u = 基准画布 432px 下的 1 设计 px，随视口等比缩放，
+      所有尺寸写作 calc(N * var(--u))，与原型 1rem = 10px 完全等价；
+   2. 整份包在 @media (max-width:768px) 内，桌面端零影响；
+   3. 输入框字号 ≥16px（低于 16px iOS Safari 聚焦会强制放大页面），
+      这是相对原型唯一的有意偏差，已同步项目 --fs-input 令牌；
+   4. 输入/按钮高度给 40px 下限，避免窄屏等比缩小后触控区过小；
+   5. 按压反馈用 :active{transform}，不引入 touch 事件；
+   6. 尊重 prefers-reduced-motion：加载指示由旋转环降级为静态文字。
+   ====================================================================== */
+@media (max-width: 768px) {
+  .lg-page {
+    /* 缩放单位只跟视口「宽度」走，绝不跟高度走：
+       若把 100dvh/76.8 纳入 min()，移动端键盘弹出时布局视口高度骤减，
+       --u 随之变小，整卡会肉眼可见地重缩放（用户感知为「输入时页面自动缩放」）。
+       横屏/极矮视口下卡片高度超出时走页面滚动，尺寸保持恒定。 */
+    --u: min(calc(100vw / 43.2), 10px);
+
+    min-height: 100vh;
+    min-height: 100dvh;
+    display: flex;
+    justify-content: center;
+    /* 全屏铺满（2026-10-16 用户要求）：移除原「浮层卡片」四周留白。
+       留白诊断结论：viewport meta、body/html margin、安全区均正常，
+       留白全部来自此处的页面内边距（左右 4.25u、上下 2u）+ 卡片垂直居中空隙，
+       以及页面自身的浅色渐变底。改为 padding:0 后由卡片直接铺满视口。 */
+    padding: 0;
+    background:
+      radial-gradient(122% 44% at 50% 15%, #d7e9fd 0%, #e2eefd 30%, #edf5fe 64%, #f7fbfe 100%)
+      #f7fbfe;
+    font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Noto Sans SC',
+      'Hiragino Sans GB', 'Microsoft YaHei', 'Segoe UI', Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    /* 与全站一致：本页仅浅色，禁止运行环境自动反色 */
+    color-scheme: only light;
+  }
+
+  /* 舞台占满视口：手机上卡片 100% 全屏宽；≥480px 的宽 viewport（平板）
+     收成 480px 居中列，避免表单控件被拉得过宽。 */
+  .lg-stage {
+    width: 100%;
+    min-height: 100vh;
+    min-height: 100dvh;
+    display: flex;
+    justify-content: center;
+  }
+
+  .lg-card {
+    flex: 1 1 auto;
+    width: 100%;
+    max-width: 480px;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    border-radius: 0; /* 全屏铺满：去除浮层圆角 */
+    overflow: hidden;
+    background: #fff;
+  }
+
+  /* ---------- 头图：高 35u，其中 8.85u 压在白面板之后 ---------- */
+  .lg-hero {
+    position: relative;
+    flex: none;
+    height: calc(35 * var(--u));
+    background: url('/login/hero.jpg') center / cover no-repeat;
+  }
+
+  .lg-brand {
+    position: absolute;
+    left: calc(2.2 * var(--u));
+    top: calc(3 * var(--u) + env(safe-area-inset-top, 0px));
+    height: max(28px, calc(2.8 * var(--u)));
+    display: flex;
+    align-items: center;
+  }
+  /* 品牌标：原型 <img class="brand__mark">，直接用原始 PNG，不做任何再设计 */
+  .lg-brand-mark {
+    flex: none;
+    display: block;
+    width: max(27px, calc(2.7 * var(--u)));
+    height: max(26px, calc(2.6 * var(--u)));
+  }
+  .lg-brand-name {
+    margin-left: max(6px, calc(.58 * var(--u)));
+    font-size: max(19px, calc(1.9 * var(--u)));
+    font-weight: 900;
+    color: #fff;
+    letter-spacing: 0.02em;
+  }
+  .lg-brand-sub {
+    margin-left: max(5px, calc(.49 * var(--u)));
+    font-size: max(12px, calc(1.05 * var(--u)));
+    font-weight: 400;
+    color: rgba(255, 255, 255, 0.96);
+  }
+
+  .lg-hero-title {
+    position: absolute;
+    left: calc(2.71 * var(--u));
+    top: calc(10.5 * var(--u) + env(safe-area-inset-top, 0px));
+    margin: 0;
+    font-size: max(27px, calc(2.75 * var(--u)));
+    line-height: 1.3;
+    font-weight: 900;
+    letter-spacing: calc(.27 * var(--u));
+    color: #fff;
+    -webkit-text-stroke: 0.4px #fff; /* 补足设计稿更重的笔画 */
+  }
+  .lg-hero-title span { display: block; }
+  .lg-hero-title .l2 { padding-left: calc(.95 * var(--u)); }
+
+  .lg-hero-sub {
+    position: absolute;
+    left: calc(2.7 * var(--u));
+    top: calc(19.3 * var(--u) + env(safe-area-inset-top, 0px));
+    margin: 0;
+    font-size: max(13px, calc(1.3 * var(--u)));
+    line-height: 1.5;
+    letter-spacing: calc(.05 * var(--u));
+    color: rgba(255, 255, 255, 0.96);
+  }
+
+  /* ---------- 白色面板：左上 3.25u / 右上 8u（设计稿签名圆角） ---------- */
+  .lg-panel {
+    flex: 1 1 auto; /* 撑满头图以下全部剩余高度 → 页面底部不再露出底色留白 */
+    position: relative;
+    z-index: 1;
+    margin-top: calc(-8.85 * var(--u));
+    background: #fff;
+    border-radius: calc(3.25 * var(--u)) calc(8 * var(--u)) 0 0;
+    padding: calc(5.6 * var(--u)) calc(4.05 * var(--u));
+    padding-bottom: calc(5.6 * var(--u) + env(safe-area-inset-bottom, 0px));
+  }
+
+  .lg-h2 {
+    margin: 0;
+    font-size: max(24px, calc(2.45 * var(--u)));
+    line-height: 1.25;
+    font-weight: 800;
+    color: #1a1a1a;
+    letter-spacing: 0.005em;
+  }
+  .lg-sub {
+    margin: max(10px, calc(1.2 * var(--u))) 0 0;
+    font-size: max(13px, calc(1.3 * var(--u)));
+    line-height: 1.5;
+    color: #8a8d93;
+  }
+
+  /* ---------- 表单 ---------- */
+  .lg-fields {
+    margin-top: max(34px, calc(3.8 * var(--u)));
+    display: flex;
+    flex-direction: column;
+    gap: max(12px, calc(1.2 * var(--u)));
+  }
+  .lg-field {
+    position: relative;
+    height: max(44px, calc(4.4 * var(--u))); /* 44px 触控目标下限 */
+    border: 1px solid #ebebed;
+    border-radius: calc(.6 * var(--u));
+    background: #fff;
+    display: flex;
+    align-items: center;
+    transition: border-color 0.15s ease;
+  }
+  .lg-field:focus-within { border-color: #b9c6de; }
+  .lg-field.is-err { border-color: #d9645c; }
+
+  .lg-ico {
+    position: absolute;
+    left: calc(1.28 * var(--u));
+    top: 50%;
+    transform: translateY(-50%);
+    width: calc(1.55 * var(--u));
+    height: calc(1.55 * var(--u));
+    color: #66686c;
+    pointer-events: none;
+  }
+  .lg-inp {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    border: 0;
+    background: none;
+    outline: none;
+    font-family: inherit;
+    font-size: max(16px, calc(1.15 * var(--u))); /* ≥16px：防 iOS 聚焦缩放 */
+    color: #1a1a1a;
+    word-spacing: calc(-.14 * var(--u));
+    padding: 0 calc(3.4 * var(--u)) 0 calc(4.15 * var(--u));
+    border-radius: calc(.6 * var(--u));
+  }
+  .lg-inp::placeholder { color: #9b9b9f; }
+
+  .lg-eye {
+    position: absolute;
+    right: calc(.95 * var(--u));
+    top: 50%;
+    transform: translateY(-50%);
+    width: max(40px, calc(2.4 * var(--u)));
+    height: max(40px, calc(2.4 * var(--u)));
+    padding: 0;
+    border: 0;
+    background: none;
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+    color: #5c5e62;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .lg-eye svg { width: max(17px, calc(1.75 * var(--u))); height: max(17px, calc(1.75 * var(--u))); }
+  .lg-eye:active { opacity: .55; }
+
+  /* ---------- 主按钮 ---------- */
+  .lg-btn {
+    margin-top: max(36px, calc(4 * var(--u)));
+    width: 100%;
+    height: max(46px, calc(4.6 * var(--u)));
+    flex: none;
+    border: 0;
+    border-radius: 999px;
+    background: #0f69e4;
+    color: #fff;
+    font-family: inherit;
+    font-size: max(16px, calc(1.6 * var(--u)));
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: calc(.6 * var(--u));
+    -webkit-tap-highlight-color: transparent;
+    transition: transform 0.12s ease, background 0.15s ease;
+  }
+  .lg-btn:active { transform: scale(.985); background: #0c5ccb; }
+  .lg-btn:disabled { opacity: .72; cursor: default; }
+  .lg-btn:disabled:active { transform: none; background: #0f69e4; }
+
+  /* 加载指示：旋转环；prefers-reduced-motion 下换成静态文字 */
+  .lg-spin {
+    width: max(16px, calc(1.5 * var(--u)));
+    height: max(16px, calc(1.5 * var(--u)));
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, .45);
+    border-top-color: #fff;
+    animation: lg-spin .7s linear infinite;
+  }
+  @keyframes lg-spin { to { transform: rotate(360deg); } }
+  .lg-btn-loading-text { display: none; }
+  @media (prefers-reduced-motion: reduce) {
+    .lg-spin { display: none; }
+    .lg-btn-loading-text { display: inline; }
+    .lg-field, .lg-btn { transition: none; }
+  }
+
+  /* ---------- 协议行 ---------- */
+  .lg-agree {
+    margin-top: max(24px, calc(2.6 * var(--u)));
+    display: flex;
+    align-items: center;
+    min-height: max(20px, calc(1.8 * var(--u)));
+  }
+  .lg-cbx {
+    appearance: none;
+    -webkit-appearance: none;
+    flex: none;
+    width: max(15px, calc(1.4 * var(--u)));
+    height: max(15px, calc(1.4 * var(--u)));
+    margin: 0;
+    border: 1px solid #a8a9ae;
+    border-radius: 4px;
+    background: #fff;
+    cursor: pointer;
+    position: relative;
+  }
+  .lg-cbx:checked { background: #0f69e4; border-color: #0f69e4; }
+  .lg-cbx:checked::after {
+    content: '';
+    position: absolute;
+    left: 4.5px;
+    top: 1.5px;
+    width: 4px;
+    height: 8px;
+    border: solid #fff;
+    border-width: 0 1.6px 1.6px 0;
+    transform: rotate(45deg);
+  }
+  .lg-agree-tx {
+    margin-left: max(8px, calc(.8 * var(--u)));
+    font-size: max(12px, calc(1.15 * var(--u)));
+    line-height: 1.5;
+    color: #5f6167;
+    cursor: pointer;
+  }
+  /* 协议链接：无对应文档，点击给如实说明，不做假跳转 */
+  .lg-link {
+    padding: 0;
+    border: 0;
+    background: none;
+    font-family: inherit;
+    font-size: inherit;
+    line-height: inherit;
+    color: #0f69e4;
+    text-decoration: none;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .lg-link:active { opacity: .6; }
+}

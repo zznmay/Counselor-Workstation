@@ -6,9 +6,11 @@ import { useNavigate } from 'react-router-dom';
 import { request } from '@/api/request';
 import { setSession } from '@/lib/auth';
 import type { AuthUser } from '@/lib/auth';
+import { useIsMobile } from '@/hooks/useIsMobile';
+import LoginMobile from '@/pages/login/mobile';
 
-/** 登录页：自建账号登录 + 首次登录强制改密 */
-export default function Login() {
+/** 登录页（桌面端）：自建账号登录 + 首次登录强制改密 */
+function LoginDesktop() {
   const navigate = useNavigate();
   const { message } = App.useApp();
   const [loading, setLoading] = useState(false);
@@ -29,6 +31,7 @@ export default function Login() {
       const res = await request<{ token: string; user: AuthUser }>('/auth/login', {
         method: 'POST',
         body: JSON.stringify(values),
+        skipAuthRedirect: true, // 口令错误的 401 就地提示，不整页跳转
       });
       setSession(res.token, res.user);
       setLoginPassword(values.password);
@@ -57,6 +60,7 @@ export default function Login() {
       const res = await request<{ token: string; user: AuthUser }>('/auth/change-password', {
         method: 'POST',
         body: JSON.stringify({ oldPassword: loginPassword, newPassword: values.newPassword }),
+        skipAuthRedirect: true, // 旧密码错误的 401 就地提示，不整页跳转
       });
       setSession(res.token, res.user);
       message.success('密码已更新，欢迎加入！');
@@ -92,10 +96,10 @@ export default function Login() {
               boxShadow: '0 8px 20px rgba(95,134,255,0.4)',
             }}
           >
-            杭
+            知
           </span>
           <div style={{ fontSize: 20, fontWeight: 600, color: '#2F3E66', marginTop: 14 }}>
-            杭科院 · 辅导员工作台
+            知行辅导员工作台
           </div>
           <div style={{ fontSize: 13, color: '#7686a8', marginTop: 6 }}>
             内网本地化部署 · 仅限授权教师使用
@@ -157,4 +161,14 @@ export default function Login() {
       </Card>
     </div>
   );
+}
+
+/**
+ * 视口分发：≤768px 走移动端独立渲染层（头图 + 非对称圆角白面板，
+ * 见 docs/mobile-redesign/prototype/login.html），桌面端沿用原组件，样式与行为零改动。
+ * 两端共用同一套登录逻辑（/auth/login → 会话写入 → 首次登录改密），仅呈现层不同。
+ */
+export default function Login() {
+  const isMobile = useIsMobile();
+  return isMobile ? <LoginMobile /> : <LoginDesktop />;
 }

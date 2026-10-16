@@ -28,6 +28,7 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 import { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 
 import { getStudentOptions } from '@/api/student';
 import {
@@ -161,6 +162,14 @@ export default function Conversations() {
     setEditing(record);
     setModalOpen(true);
   };
+
+  /* 从移动端「发起谈心」入口进入时（/conversations?studentId=xxx），自动打开记录表单并预选该学生 */
+  const [searchParams] = useSearchParams();
+  const presetFromUrl = searchParams.get('studentId');
+  useEffect(() => {
+    if (presetFromUrl) openCreate(presetFromUrl);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presetFromUrl]);
 
   const handleSubmit = async () => {
     let values: ConversationFormValues & { studentId: string };

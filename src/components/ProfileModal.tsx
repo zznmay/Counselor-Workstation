@@ -44,7 +44,7 @@ export default function ProfileModal({
 
   return (
     <Modal
-      title={isFirst ? '👋 欢迎使用辅导员工作台' : '修改称呼信息'}
+      title={isFirst ? '👋 欢迎使用知行辅导员工作台' : '修改称呼信息'}
       open={open}
       onOk={handleOk}
       onCancel={onClose}

@@ -2,8 +2,18 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>杭科院辅导员工作台</title>
+    <!-- 视口：禁止一切自动/手动缩放（H5 规范做法）。
+         iOS Safari 自 iOS 10 起忽略 user-scalable=no，但其「聚焦输入框自动放大」
+         由输入字号≥16px 根治（见 global.css / login-mobile.css），双保险缺一不可。 -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <!-- 关闭强制暗色：显式声明本页仅支持浅色，阻止浏览器/平台的自动深色反色 -->
+    <meta name="color-scheme" content="only light" />
+    <meta name="supported-color-schemes" content="only light" />
+    <meta name="theme-color" content="#f7fbfe" />
+    <title>知行辅导员工作台</title>
   </head>
   <body>
     <div id="root"></div>

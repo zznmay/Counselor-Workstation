@@ -3,28 +3,34 @@ import { clearAuth, getToken } from '@/lib/auth';
 
 export const BASE_URL = '/api';
 
+/**
+ * 请求选项。
+ * skipAuthRedirect：登录类接口（/auth/login、/auth/change-password）专用 ——
+ * 那里的 401 表示「用户名或密码错误」，而非会话过期；若不跳过整页跳转，
+ * 页面会在错误提示渲染前被 reload，用户看不到任何反馈。默认 false，
+ * 其余页面行为与此前完全一致。
+ */
+export interface RequestOptions extends RequestInit {
+  skipAuthRedirect?: boolean;
+}
+
 /** 令牌头：Authorization 为主，X-Auth-Token 为备选（部分反向代理不透传 Authorization） */
 function authHeaders(token: string | null): Record<string, string> {
   if (!token) return {};
   return { Authorization: `Bearer ${token}`, 'X-Auth-Token': token };
 }
 
-export async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
+export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const { skipAuthRedirect, ...init } = options;
+  const isFormData = typeof FormData !== 'undefined' && init.body instanceof FormData;
   const res = await fetch(BASE_URL + path, {
-    ...options,
+    ...init,
     headers: {
       ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
       ...authHeaders(getToken()),
-      ...(options.headers ?? {}),
+      ...(init.headers ?? {}),
     },
   });
-
-  if (res.status === 401) {
-    clearAuth();
-    window.location.href = '/login';
-    throw new Error('登录已过期，请重新登录');
-  }
 
   if (!res.ok) {
     let message = `请求失败（HTTP ${res.status}）`;
@@ -32,6 +38,12 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
       const body = await res.json();
       if (body?.message) message = body.message;
     } catch { /* 非 JSON 响应则保留默认消息 */ }
+
+    if (res.status === 401 && !skipAuthRedirect) {
+      clearAuth();
+      window.location.href = '/login';
+      throw new Error('登录已过期，请重新登录');
+    }
     throw new Error(message);
   }
 

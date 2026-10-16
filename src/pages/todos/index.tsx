@@ -27,6 +27,7 @@ import { TODO_PRIORITIES, TODO_PRIORITY_COLOR, TODO_STATUSES, TODO_TYPES, TODO_T
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useList } from '@/hooks/useList';
 import type { StudentOption, Todo, TodoInput, TodoPriority, TodoQuery, TodoStatus, TodoType } from '@/types';
+import TodosMobile from './mobile';
 
 interface TodoFormValues {
   title: string;
@@ -39,7 +40,7 @@ interface TodoFormValues {
 }
 
 /** 待办提醒：列表 / 筛选搜索 / 新增 / 编辑 / 完成切换 / 删除 / 详情 */
-export default function Todos() {
+function TodosDesktop() {
   const isMobile = useIsMobile();
   const { message } = App.useApp();
   const [form] = Form.useForm<TodoFormValues>();
@@ -375,4 +376,13 @@ export default function Todos() {
       </Modal>
     </div>
   );
+}
+
+/**
+ * 视口分发：≤768px 走移动端独立渲染层（卡片化 + 触控优化），
+ * 桌面端沿用原组件，桌面样式与行为零改动。
+ */
+export default function Todos() {
+  const isMobile = useIsMobile();
+  return isMobile ? <TodosMobile /> : <TodosDesktop />;
 }

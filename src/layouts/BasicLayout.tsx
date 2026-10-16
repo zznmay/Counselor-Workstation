@@ -20,6 +20,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 
 import { getDashboardStats } from '@/api/dashboard';
+import TabBar from '@/components/mobile/TabBar';
+import { MIcon } from '@/components/mobile/icons';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import DailyGreeting from '@/components/DailyGreeting';
 import ProfileModal from '@/components/ProfileModal';
@@ -75,12 +77,14 @@ export default function BasicLayout() {
   });
 
   // 每天首次打开弹出问候（同一天内不重复）；称呼未设置时先引导
+  // 移动端改用「轻量问候条」（设计 H4：不弹全屏遮挡首屏），故此处跳过
   useEffect(() => {
+    if (isMobile) return;
     if (!hasGreetedToday()) {
       setGreeting({ open: true, text: pickEncouragement(), emoji: pickGreetingEmoji() });
       markGreetedToday();
     }
-  }, []);
+  }, [isMobile]);
 
   /** 称呼修改：同步到服务端账号（displayName）并更新本地会话 */
   const handleSaveProfile = (next: UserProfile) => {
@@ -209,9 +213,77 @@ export default function BasicLayout() {
   );
 
   const tool = TOOLS.find((t) => t.path === location.pathname);
-  const title = TITLES[location.pathname] ?? tool?.title ?? '辅导员工作台';
+  const detailTitle = location.pathname.startsWith('/students/') ? '学生详情' : null;
+  const title = detailTitle ?? TITLES[location.pathname] ?? tool?.title ?? '知行辅导员工作台';
   const totalAlert = badges.warnings + badges.approvals + badges.todos;
   const roleLabel = authUser?.role === 'admin' ? '管理员' : '辅导员';
+
+  /* ==================== 移动端外壳（≤768px） ====================
+     顶栏（含安全区）+ 唯一滚动容器 + 底部 TabBar；桌面端布局完全不受影响。
+     设计依据：docs/mobile-redesign/prototype/index.html（8 屏） */
+  if (isMobile) {
+    const isDetail = !!detailTitle;
+    return (
+      <>
+        <div className="m-shell">
+          <header className="m-topbar">
+            {isDetail ? (
+              <button type="button" className="m-refresh" aria-label="返回上一页" onClick={() => navigate(-1)}>
+                <MIcon name="chevL" size={20} />
+              </button>
+            ) : (
+              <span className="tb-logo">知</span>
+            )}
+            <span className="tb-title">{title}</span>
+            <span className="tb-right">
+              <button
+                type="button"
+                className="m-refresh"
+                aria-label="刷新当前页"
+                onClick={() => window.location.reload()}
+              >
+                <MIcon name="refresh" size={18} />
+              </button>
+              <button
+                type="button"
+                className="m-refresh"
+                aria-label="账号与称呼"
+                onClick={() => setProfileModal({ open: true, isFirst: false })}
+              >
+                <Avatar size={26} style={{ background: 'var(--app-primary-action)', fontSize: 13 }}>
+                  {shownName.charAt(0)}
+                </Avatar>
+              </button>
+            </span>
+          </header>
+          <main className="m-scroll">
+            <Outlet />
+          </main>
+          <TabBar />
+        </div>
+
+        <ProfileModal
+          open={profileModal.open}
+          isFirst={profileModal.isFirst}
+          initial={authUser ? { realName: authUser.displayName } : null}
+          onSave={handleSaveProfile}
+          onClose={() => setProfileModal({ open: false, isFirst: false })}
+        />
+
+        <DailyGreeting
+          open={greeting.open}
+          name={shownName}
+          encouragement={greeting.text}
+          emoji={greeting.emoji}
+          onClose={() => setGreeting((g) => ({ ...g, open: false }))}
+          onEdit={() => {
+            setGreeting((g) => ({ ...g, open: false }));
+            setProfileModal({ open: true, isFirst: false });
+          }}
+        />
+      </>
+    );
+  }
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -225,8 +297,8 @@ export default function BasicLayout() {
           onCollapse={setCollapsed}
         >
           <div className="sider-logo">
-            <span className="logo-badge">杭</span>
-            {!collapsed && <span>杭科院 · 辅导员工作台</span>}
+            <span className="logo-badge">知</span>
+            {!collapsed && <span>知行辅导员工作台</span>}
           </div>
           {renderMenu('inline')}
         </Sider>
@@ -270,7 +342,7 @@ export default function BasicLayout() {
         </Content>
       </Layout>
       <Drawer
-        title="杭科院 · 辅导员工作台"
+        title="知行辅导员工作台"
         placement="left"
         width={248}
         open={isMobile && mobileOpen}

@@ -5,8 +5,10 @@ import Approvals from '@/pages/approvals';
 import Conversations from '@/pages/conversations';
 import Dashboard from '@/pages/dashboard';
 import Login from '@/pages/login';
+import MorePage from '@/pages/more';
 import Notices from '@/pages/notices';
 import Students from '@/pages/students';
+import StudentDetailMobile from '@/pages/students/mobileDetail';
 import Templates from '@/pages/templates';
 import TodoList from '@/pages/todos';
 import ToolRunner from '@/pages/tools/ToolRunner';
@@ -41,6 +43,10 @@ export const router = createBrowserRouter([
     children: [
       { index: true, element: <Dashboard /> },
       { path: 'students', element: <Students /> },
+      /* 移动端学生详情走全屏页（替代桌面端弹窗）；桌面端仍从列表弹窗进入 */
+      { path: 'students/:id', element: <StudentDetailMobile /> },
+      /* 移动端底部导航第 5 项「更多」收纳页 */
+      { path: 'more', element: <MorePage /> },
       { path: 'conversations', element: <Conversations /> },
       { path: 'warnings', element: <Warnings /> },
       { path: 'notices', element: <Notices /> },

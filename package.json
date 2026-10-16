@@ -2,7 +2,7 @@
   "name": "hangzhou-counselor-workbench",
   "private": true,
   "version": "1.0.0",
-  "description": "杭科院辅导员工作台 —— 高校辅导员学生日常管理系统",
+  "description": "知行辅导员工作台 —— 高校辅导员学生日常管理系统",
   "type": "module",
   "engines": {
     "node": ">=18"

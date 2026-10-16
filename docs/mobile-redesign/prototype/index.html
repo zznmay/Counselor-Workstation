@@ -1,0 +1,1806 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="color-scheme" content="light" />
+<meta name="theme-color" content="#F4F7FF" />
+<title>杭科院辅导员工作台 · 移动端高保真原型（8 屏）</title>
+<!--
+  ============================================================================
+  杭科院辅导员工作台 · 移动端（≤768px）高保真原型
+  ----------------------------------------------------------------------------
+  设计系统来源：docs/mobile-redesign/02-设计令牌.md
+  品牌令牌沿用：--app-primary #5F86FF / --app-primary-strong #4A6FE3
+                --app-primary-soft #A9C2FF / --app-ink #2F3E66
+                --app-ink-secondary #5A6B8C / --app-border #E7EEFB
+  取值纪律参考：《学生考勤平台 · 移动端 UI 设计规范》
+                （sticky 而非 fixed、输入 16px、安全区、语义 token、按压 .08s）
+  ----------------------------------------------------------------------------
+  单文件：无外链、无 CDN、无 JS 业务逻辑。所有交互为纯 CSS 状态
+          （checkbox hack + :has + :active 缩放 + details 折叠）。
+  安全区：原型用 max(44px, env(...)) 模拟 iPhone X 级刘海与底部小黑条，
+          生产环境直接换成 env(safe-area-inset-top / bottom) 即可。
+  ============================================================================
+-->
+<style>
+/* ==========================================================================
+   §0 设计令牌（与 02-设计令牌.md 一一对应）
+   ========================================================================== */
+:root{
+  /* —— 品牌族（锁定，只读） —— */
+  --app-primary:#5F86FF;
+  --app-primary-strong:#4A6FE3;
+  --app-primary-soft:#A9C2FF;
+  --app-ink:#2F3E66;
+  --app-ink-secondary:#5A6B8C;
+  --app-border:#E7EEFB;
+
+  /* —— 主行动色（白字可承载：4.97:1） —— */
+  --app-primary-action:#4568D8;
+  --app-primary-press:#3F66DB;
+  --app-primary-tint:#EDF2FF;
+
+  /* —— 表面与文字 —— */
+  --m-bg:#F4F7FF;
+  --m-surface:#FFFFFF;
+  --m-surface-2:#F7F9FF;
+  --m-sunken:#EDF2FF;
+  --m-text-1:#2F3E66;
+  --m-text-2:#5A6B8C;
+  --m-disabled:#9AA7C2;
+  --m-placeholder:#64718D;              /* on #F7F9FF 4.65:1 PASS / on #FFFFFF 4.90:1 PASS（占位符承载字段说明，非装饰色） */
+  --m-border:#E7EEFB;
+  --m-card-border:rgba(95,134,255,.16);   /* v2：卡片描边（蓝染） */
+  --m-hairline:rgba(95,134,255,.16);      /* v2：TabBar 发丝线 */
+  --m-hairline-strong:rgba(95,134,255,.20); /* v2：顶栏发丝线 */
+  --m-border-strong:#8A94B5;
+  --m-ring:rgba(95,134,255,.34);
+  --m-overlay:rgba(35,42,80,.32);
+
+  /* —— 语义四件套 —— */
+  --success-fg:#25794A; --success-bg:#E3F6EC; --success-bd:#BFE3D0; --success-solid:#25794A;
+  --warning-fg:#A0580D; --warning-bg:#FFF3E2; --warning-bd:#F5DCB8; --warning-solid:#A0580D;
+  --danger-fg:#B8324A;  --danger-bg:#FDE9EE;  --danger-bd:#F7C9D3;  --danger-solid:#B8324A;
+  --info-fg:#3D5CD6;    --info-bg:#E8EFFF;    --info-bd:#CFDDFB;    --info-solid:#3D5CD6;
+  --neutral-fg:#5A6B8C; --neutral-bg:#F0F4FB; --neutral-bd:#E0E8F7;
+
+  /* —— 预警三级（颜色 + 图标 + 文字 三重编码） —— */
+  --warn-red-bg:#FDE9EE;    --warn-red-bd:#F7C9D3;    --warn-red-fg:#B8324A;
+  --warn-orange-bg:#FFF3E2; --warn-orange-bd:#F5DCB8; --warn-orange-fg:#A0580D;
+  --warn-yellow-bg:#FDF6DC; --warn-yellow-bd:#F0E3B4; --warn-yellow-fg:#8A6212;
+
+  /* —— 尺寸 / 圆角 / 阴影 / 动效 —— */
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:20px; --sp-6:24px;
+  --r-sm:8px; --r-md:12px; --r-card:14px; --r-lg:16px; --r-sheet:22px; --r-full:999px;
+  --m-shadow-card:0 1px 2px rgba(47,62,102,.05), 0 10px 26px rgba(47,62,102,.09);  /* v2：一级，蓝调染色 */
+  --m-shadow-float:0 -8px 28px rgba(47,62,102,.14);
+  --t-press:80ms; --t-base:150ms; --t-enter:200ms; --t-sheet:240ms; --t-exit:160ms;
+  --ease-out:cubic-bezier(.22,1,.36,1); --ease-in:cubic-bezier(.4,0,1,1);
+  --touch-min:44px; --h-input:44px; --h-btn:44px; --h-btn-bar:48px; --h-tabbar:56px;
+  --fs-input:16px; --fs-btn:15px; --cb-size:18px;
+
+  /* —— 安全区（原型模拟 iPhone X 级；生产换 env(safe-area-inset-*)） —— */
+  --safe-t:max(44px, env(safe-area-inset-top, 0px));
+  --safe-b:max(34px, env(safe-area-inset-bottom, 0px));
+}
+
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;overflow-x:hidden}   /* 02 §11 全局横向滚动防线（.canvas 的 overflow-x:auto 是评审画布所需，保留） */
+body{
+  font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Hiragino Sans GB','Microsoft YaHei','Helvetica Neue',Arial,sans-serif;
+  -webkit-text-size-adjust:100%;
+  color:var(--m-text-1);
+  background:#E3E9F7;                     /* 展示画布：蓝灰，避免与白色手机屏混淆 */
+  background-image:linear-gradient(180deg,#E6EBF7 0%,#D5DEF1 100%);
+}
+
+/* ==========================================================================
+   §1 展示画布（评审用；与原型内容无关）
+   ========================================================================== */
+.doc-head{max-width:none;padding:32px 40px 8px}
+.doc-head h1{margin:0;font-size:22px;font-weight:600;color:#24314F;letter-spacing:.3px}
+.doc-head p{margin:8px 0 0;font-size:13px;color:#5A6B8C;line-height:1.7;max-width:920px}
+.legend{margin-top:12px;display:flex;flex-wrap:wrap;gap:8px}
+.legend span{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:999px;background:#fff;border:1px solid #D3DCEC;font-size:12px;color:#3D4E7A}
+.legend b{font-weight:600;color:#24314F}
+.canvas{display:flex;gap:36px;padding:24px 40px 56px;overflow-x:auto;align-items:flex-start}
+.stage{flex:0 0 auto;width:395px}
+.stage-head{display:flex;align-items:baseline;gap:8px;margin-bottom:10px;padding-left:6px}
+.stage-no{font-size:12px;font-weight:700;color:#fff;background:linear-gradient(135deg,#5F86FF,#4568D8);border-radius:6px;padding:2px 7px;letter-spacing:.5px}
+.stage-name{font-size:15px;font-weight:600;color:#24314F}
+.stage-route{font-size:12px;color:#7A88A6;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.stage-note{margin:12px 6px 0;font-size:12.5px;line-height:1.7;color:#4A5A7C;border-left:3px solid #5F86FF;padding-left:10px}
+.stage-note b{color:#24314F}
+
+/* ==========================================================================
+   §2 手机外壳 + 视口 375×812
+   ========================================================================== */
+.phone{
+  width:395px;height:832px;flex:0 0 auto;
+  padding:10px;border-radius:54px;
+  background:linear-gradient(160deg,#202A44 0%,#0D1424 100%);
+  box-shadow:0 26px 60px rgba(20,30,60,.32), inset 0 0 0 1px rgba(255,255,255,.07);
+}
+.screen{
+  width:375px;height:812px;border-radius:44px;overflow:hidden;
+  position:relative;display:flex;flex-direction:column;
+  font-size:14px;line-height:1.55;color:var(--m-text-1);
+  background:
+    radial-gradient(360px 240px at 104% -8%, rgba(169,194,255,.46), transparent 60%),
+    radial-gradient(300px 220px at -12% 22%, rgba(169,194,255,.30), transparent 58%),
+    radial-gradient(340px 200px at 50% 114%, rgba(95,134,255,.16), transparent 62%),
+    radial-gradient(260px 170px at 6% 2%, rgba(95,134,255,.10), transparent 72%),
+    linear-gradient(180deg,#F8FAFF 0%,#ECF2FF 100%);
+}
+.statusbar{
+  height:var(--safe-t);flex:0 0 auto;
+  display:flex;align-items:flex-end;justify-content:space-between;
+  padding:0 22px 6px;font-size:13px;font-weight:600;color:var(--m-ink,var(--app-ink));
+  letter-spacing:.2px;
+}
+.statusbar .sb-r{display:flex;align-items:center;gap:5px}
+
+/* —— 顶栏（生产环境补 env(safe-area-inset-top)；参考稿缺口 6 已修） —— */
+.m-topbar{
+  flex:0 0 auto;height:48px;padding:0 10px;
+  display:flex;align-items:center;gap:6px;
+  background:linear-gradient(180deg,rgba(255,255,255,.95) 0%,rgba(238,244,255,.88) 100%);
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  border-bottom:1px solid rgba(95,134,255,.20);
+  position:relative;z-index:30;
+}
+.m-topbar .tb-logo{
+  width:28px;height:28px;border-radius:9px;flex:0 0 auto;
+  background:linear-gradient(135deg,#6E92FF 0%,#5F86FF 45%,#2F3E66 100%);
+  color:#fff;font-size:14px;font-weight:600;display:flex;align-items:center;justify-content:center;
+  box-shadow:0 4px 12px rgba(95,134,255,.32), inset 0 1px 0 rgba(255,255,255,.28);
+}
+.m-topbar .tb-title{flex:1;min-width:0;font-size:17px;font-weight:600;color:var(--m-text-1);
+  overflow:hidden;white-space:nowrap;text-overflow:ellipsis;padding-left:4px}
+.m-topbar .tb-right{display:flex;align-items:center;gap:2px}
+.iconbtn{width:44px;height:44px;display:flex;align-items:center;justify-content:center;
+  background:none;border:0;padding:0;color:var(--m-text-1);position:relative;cursor:pointer;
+  transition:transform var(--t-press) ease, background-color var(--t-base) ease}
+.iconbtn:active{transform:scale(.97)}
+.iconbtn .badge{top:4px;right:2px;left:auto;margin-left:0}
+
+/* —— 唯一滚动容器 —— */
+.m-scroll{
+  flex:1 1 auto;min-height:0;
+  overflow-y:auto;overflow-x:hidden;               /* 禁止横向滚动 */
+  -webkit-overflow-scrolling:touch;
+  padding:12px 12px 20px;
+}
+.m-scroll > * + *{margin-top:12px}
+
+/* —— 底部 TabBar：位于外壳（滚动容器的兄弟节点），生产环境也可写成 sticky bottom —— */
+.m-tabbar{
+  flex:0 0 auto;height:calc(var(--h-tabbar) + var(--safe-b));
+  padding-bottom:var(--safe-b);
+  display:flex;
+  background:linear-gradient(180deg,rgba(255,255,255,.97) 0%,#FFFFFF 100%);
+  border-top:1px solid rgba(95,134,255,.16);
+  box-shadow:0 -6px 20px rgba(47,62,102,.08);
+  position:relative;z-index:50;
+}
+.tab{flex:1;min-height:var(--h-tabbar);position:relative;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  font-size:11px;color:var(--m-text-2);cursor:pointer;text-decoration:none;
+  transition:color var(--t-base) ease, transform var(--t-press) ease}
+.tab:active{transform:scale(.97)}
+.tab .ic{width:22px;height:22px}
+.tab.on{color:var(--app-primary-action);font-weight:600}
+/* 选中态图标胶囊：浅蓝底 + 内描边，强化「未来界面蓝」的导航存在感 */
+.tab.on .ic{stroke-width:2.1;background:var(--app-primary-tint);border-radius:9px;
+  box-shadow:inset 0 0 0 1px rgba(95,134,255,.20)}
+.badge{
+  position:absolute;top:6px;left:50%;margin-left:6px;
+  min-width:16px;height:16px;padding:0 4px;border-radius:999px;
+  background:var(--danger-solid);color:#fff;font-size:11px;font-weight:600;line-height:16px;
+  text-align:center;font-variant-numeric:tabular-nums;box-shadow:0 0 0 2px var(--m-surface);
+}
+
+/* ==========================================================================
+   §3 通用组件
+   ========================================================================== */
+.sprite{position:absolute;width:0;height:0;overflow:hidden}
+.ic{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:0 0 auto}
+.ic.fill{fill:currentColor;stroke:none}
+
+.card{background:var(--m-surface);border:1px solid var(--m-card-border,rgba(95,134,255,.16));border-radius:var(--r-card);
+  background-image:linear-gradient(180deg,rgba(95,134,255,.05) 0%,rgba(95,134,255,0) 46%);
+  box-shadow:var(--m-shadow-card);
+  padding:12px 14px;min-width:0}
+.card.press{transition:transform var(--t-press) ease, box-shadow var(--t-base) ease}
+.card.press:active{transform:scale(.97)}
+.card.empty{border-style:dashed;border-color:var(--m-border-strong);background:transparent;box-shadow:none}
+/* 品牌身份条：左侧 4px 浅蓝→主行动色渐变（工作台三张核心卡；overflow 防止方角溢出圆角） */
+.card.accent{position:relative;padding-left:18px;overflow:hidden}
+.card.accent::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;
+  background:linear-gradient(180deg,var(--app-primary-soft) 0%,var(--app-primary-action) 100%)}
+
+.sec-head{display:flex;align-items:center;gap:6px;margin-bottom:10px}
+.sec-title{display:flex;align-items:center;gap:6px;font-size:14px;font-weight:600;color:var(--m-text-1)}
+.sec-more{margin-left:auto;display:inline-flex;align-items:center;gap:2px;
+  /* 主导航入口：44px 热区 + 负 margin 抵消，视觉高度不变（44-13-13=18px，原值） */
+  min-height:44px;padding:0 0 0 10px;margin-top:-13px;margin-bottom:-13px;
+  font-size:12px;color:var(--m-text-2);cursor:pointer;text-decoration:none}
+.sec-more.static{min-height:auto;padding:0;margin:0;cursor:default}   /* 纯说明文字，非可点元素 */
+.sub{font-size:12px;color:var(--m-text-2)}
+.mono{font-variant-numeric:tabular-nums}
+.num{font-variant-numeric:tabular-nums;font-weight:600}
+
+/* —— 文字层级 —— */
+.t1{font-size:16px;font-weight:600;color:var(--m-text-1)}
+.t2{font-size:14px;color:var(--m-text-1)}
+.t3{font-size:13px;color:var(--m-text-2)}
+.t4{font-size:12px;color:var(--m-text-2)}
+.wrap{overflow-wrap:anywhere;word-break:break-word;min-width:0}
+.nowrap{white-space:nowrap;overflow-wrap:normal;word-break:keep-all}
+
+/* —— 标签 / chip —— */
+.tag{display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 8px;border-radius:6px;
+  font-size:12px;font-weight:500;border:1px solid transparent;white-space:nowrap;flex:0 0 auto}
+.tag-info{background:var(--info-bg);color:var(--info-fg);border-color:var(--info-bd)}
+.tag-success{background:var(--success-bg);color:var(--success-fg);border-color:var(--success-bd)}
+.tag-warning{background:var(--warning-bg);color:var(--warning-fg);border-color:var(--warning-bd)}
+.tag-danger{background:var(--danger-bg);color:var(--danger-fg);border-color:var(--danger-bd)}
+.tag-neutral{background:var(--neutral-bg);color:var(--neutral-fg);border-color:var(--neutral-bd)}
+.tag-plain{background:var(--m-sunken);color:var(--m-text-2);border-color:var(--m-border)}
+
+/* 预警三级 chip：颜色 + 图标 + 文字 */
+.lv{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 9px;border-radius:999px;
+  font-size:12px;font-weight:600;border:1px solid transparent;white-space:nowrap;flex:0 0 auto}
+.lv .ic{width:13px;height:13px;stroke-width:2}
+.lv-red{background:var(--warn-red-bg);color:var(--warn-red-fg);border-color:var(--warn-red-bd)}
+.lv-orange{background:var(--warn-orange-bg);color:var(--warn-orange-fg);border-color:var(--warn-orange-bd)}
+.lv-yellow{background:var(--warn-yellow-bg);color:var(--warn-yellow-fg);border-color:var(--warn-yellow-bd)}
+.wbar{width:4px;border-radius:999px;flex:0 0 auto;align-self:stretch}
+.wbar-red{background:linear-gradient(180deg,#B8324A 0%,#9E2740 100%)}
+.wbar-orange{background:linear-gradient(180deg,#A0580D 0%,#8A6212 100%)}
+.wbar-yellow{background:linear-gradient(180deg,#C79A2E 0%,#8A6212 100%)}
+
+/* —— 可点 chip（≥44px 热区） —— */
+.chip{display:inline-flex;align-items:center;justify-content:center;gap:4px;
+  min-height:var(--touch-min);padding:0 12px;border-radius:999px;
+  font-size:14px;color:var(--m-text-2);background:var(--m-sunken);
+  border:1px solid transparent;cursor:pointer;
+  transition:transform var(--t-press) ease, background-color var(--t-base) ease, color var(--t-base) ease}
+.chip:active{transform:scale(.97)}
+.chip.on{background:var(--app-primary-tint);color:var(--info-fg);border-color:var(--info-bd);font-weight:600}
+.chip.danger.on{background:var(--danger-bg);color:var(--danger-fg);border-color:var(--danger-bd)}
+.chip.warn.on{background:var(--warning-bg);color:var(--warning-fg);border-color:var(--warning-bd)}
+.chip.gold.on{background:var(--warn-yellow-bg);color:var(--warn-yellow-fg);border-color:var(--warn-yellow-bd)}
+.chip-row{display:flex;gap:8px;flex-wrap:wrap}
+.chip-row .chip{flex:0 0 auto}
+
+/* —— 按钮 —— */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  min-height:var(--h-btn);padding:0 14px;border-radius:var(--r-sm);
+  font-size:var(--fs-btn);font-weight:500;font-family:inherit;border:1px solid transparent;cursor:pointer;
+  transition:transform var(--t-press) ease, background-color var(--t-base) ease, border-color var(--t-base) ease}
+.btn:active{transform:scale(.97)}
+/* 禁用 / 提交中：防重复提交（03 §3 规则） */
+.btn:disabled,.btn[aria-disabled="true"]{opacity:.5;pointer-events:none}
+.btn.loading{pointer-events:none}
+/* 主行动按钮：品牌渐变。两端均 ≥4.5:1（#4568D8=4.97 / #3A5BC8=5.98，白字） */
+.btn-primary{background:linear-gradient(135deg,#4568D8 0%,#3A5BC8 100%);color:#fff;
+  border-color:transparent;box-shadow:0 6px 16px rgba(69,104,216,.26)}
+.btn-primary:active{background:linear-gradient(135deg,#3F66DB 0%,#34509F 100%)}
+.btn-danger{background:var(--danger-solid);color:#fff}
+.btn-success{background:var(--success-solid);color:#fff}
+.btn-ghost{background:var(--m-surface);border-color:var(--m-border-strong);color:var(--m-text-1)}
+.btn-soft{background:var(--app-primary-tint);color:var(--info-fg);border-color:var(--info-bd)}
+.btn-block{width:100%}
+.btn .ic{width:16px;height:16px}
+.btn-sm{min-height:36px;font-size:13px;padding:0 10px}
+
+/* —— 输入（16px 是 iOS 防缩放红线） —— */
+.field{display:flex;flex-direction:column;gap:6px}
+.field > label{font-size:13px;font-weight:600;color:var(--m-text-1);display:flex;align-items:center;gap:2px}
+.req{color:var(--danger-fg);margin-left:2px}
+.inp{width:100%;min-height:var(--h-input);font-size:var(--fs-input);font-family:inherit;
+  color:var(--m-text-1);background:var(--m-surface-2);
+  border:1px solid var(--m-border-strong);border-radius:var(--r-sm);padding:10px 12px;
+  transition:box-shadow var(--t-base) ease, border-color var(--t-base) ease}
+.inp::placeholder{color:var(--m-placeholder)}   /* 搜索框无可见 label，placeholder 即字段说明，须 ≥4.5:1 */
+.inp:focus{outline:none;border-color:var(--app-primary);box-shadow:0 0 0 3px var(--m-ring)}
+textarea.inp{resize:vertical;line-height:1.6}
+.select-like{display:flex;align-items:center;justify-content:space-between;gap:8px;
+  min-height:var(--h-input);padding:0 12px;font-size:var(--fs-input);
+  background:var(--m-surface-2);border:1px solid var(--m-border-strong);border-radius:var(--r-sm)}
+.form-err{min-height:18px;font-size:12px;color:var(--danger-fg);display:flex;align-items:center;gap:4px}
+.form-err .ic{width:13px;height:13px}
+
+.search-field{position:relative;display:flex;align-items:center;flex:1;min-width:0}
+.search-field > .ic{position:absolute;left:12px;width:16px;height:16px;color:var(--m-text-2);pointer-events:none}
+.search-field .inp{padding-left:36px}
+.search-row{display:flex;gap:8px;align-items:center}
+
+/* —— 复选框（18×18 本体 + 44px 热区） —— */
+.check{width:44px;height:44px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.cbx{position:absolute;width:0;height:0;opacity:0}
+.box{width:22px;height:22px;border-radius:6px;border:2px solid var(--m-border-strong);
+  background:var(--m-surface);display:flex;align-items:center;justify-content:center;
+  transition:background-color var(--t-base) ease, border-color var(--t-base) ease}
+.box .ic{width:14px;height:14px;stroke:#fff;stroke-width:3;opacity:0;transition:opacity var(--t-base) ease}
+.cbx:checked + .box{background:var(--success-solid);border-color:var(--success-solid)}
+.cbx:checked + .box .ic{opacity:1}
+.cbx:focus-visible + .box{box-shadow:0 0 0 3px var(--m-ring)}
+
+/* —— 列表行 —— */
+.row{display:flex;align-items:center;gap:10px;min-height:44px}
+.row + .row{border-top:1px solid var(--m-border);margin-top:8px;padding-top:8px}
+.row-main{flex:1;min-width:0}
+.row-side{display:flex;align-items:center;gap:6px;flex:0 0 auto;white-space:nowrap}
+
+/* —— 折叠（已完成区） —— */
+.fold{border-top:1px solid var(--m-border)}
+.fold > summary{list-style:none;min-height:var(--touch-min);display:flex;align-items:center;gap:6px;
+  font-size:13px;font-weight:600;color:var(--m-text-2);cursor:pointer;padding-top:8px}
+.fold > summary::-webkit-details-marker{display:none}
+.fold-chev{transition:transform var(--t-base) ease}
+.fold[open] .fold-chev{transform:rotate(180deg)}
+.fold[open] > summary{color:var(--m-text-1)}
+
+/* —— 底部吸附操作条：sticky，禁止 fixed —— */
+/* 说明：本条吸附在 TabBar 之上，因此不再叠加 --safe-b；
+   若某页的操作条是屏幕最底部元素，则 padding-bottom 改 calc(10px + var(--safe-b)) */
+.m-actionbar{
+  position:sticky;bottom:0;z-index:40;
+  margin:12px -12px -20px;padding:10px 12px;
+  display:flex;align-items:center;gap:8px;        /* ← P0-1：缺此行则子级 flex:1 / flex:2 失效、间距塌成换行空白 ≈4px */
+  background:var(--m-surface);border-top:1px solid var(--m-border);
+  box-shadow:var(--m-shadow-float);
+}
+/* 屏 04 五格宫格：作为 flex item 必须撑满，否则 351px÷5 的 63.8px 会被内容宽压掉 */
+.act-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;flex:1 1 auto;min-width:0}
+.act{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+  min-height:52px;border:0;background:none;font-family:inherit;font-size:11px;color:var(--m-text-2);
+  cursor:pointer;padding:0;border-radius:var(--r-sm);
+  transition:transform var(--t-press) ease, background-color var(--t-base) ease}
+.act:active{transform:scale(.97);background:var(--m-sunken)}
+.act .ic{width:20px;height:20px;color:var(--app-primary-action)}
+.act.danger .ic{color:var(--danger-fg)}
+
+/* —— 头像 —— */
+/* 头像渐变：白字全段必须 ≥4.5:1（姓氏 17px/600 非 WCAG 大字）。
+   #2F3E66=--m-text-1 → #4568D8=--app-primary-action，全段 10.49 → 4.97:1，均 PASS */
+.ava{width:42px;height:42px;border-radius:12px;flex:0 0 auto;
+  background:linear-gradient(135deg,#2F3E66 0%,#4568D8 100%);color:#fff;
+  display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:600;
+  box-shadow:0 6px 14px rgba(95,134,255,.3)}
+.ava.lg{width:52px;height:52px;border-radius:14px;font-size:20px}
+/* 起点收紧：#B8324A=--danger-fg（白字 5.84:1）→ #9E2740（7.45:1），均 PASS */
+.ava.red{background:linear-gradient(135deg,#B8324A 0%,#9E2740 100%);box-shadow:0 6px 14px rgba(184,50,74,.3)}
+/* 起点收紧：#A0580D=--warning-fg（白字 5.39:1，原 #C08330 仅 3.22:1）→ #8A6212（5.47:1），均 PASS */
+.ava.orange{background:linear-gradient(135deg,#A0580D 0%,#8A6212 100%);box-shadow:0 6px 14px rgba(160,88,13,.3)}
+
+/* ==========================================================================
+   §4 屏幕专属组件
+   ========================================================================== */
+/* ① 工作台：问候条（精简，非全屏弹窗） */
+/* 问候条：品牌深蓝→主行动色渐变横幅（白字 6.61:1 / 副标题 #DCE6FF 5.29:1，均 PASS） */
+.greet{display:flex;align-items:center;gap:10px;
+  background:linear-gradient(135deg,#2F3E66 0%,#3556B8 100%);
+  border:1px solid rgba(95,134,255,.28);border-radius:var(--r-card);
+  box-shadow:0 10px 24px rgba(47,62,102,.20);
+  padding:10px 12px}
+.greet-t{font-size:16px;font-weight:600;color:#FFFFFF}
+.greet-s{font-size:12px;color:#DCE6FF;margin-top:2px}
+.greet-x{margin-left:auto;flex:0 0 auto;color:#FFFFFF}
+
+/* ① 关键数据 2×2（同面板内 + 发丝分隔，无独立卡壳） */
+.stat-panel{padding:0;overflow:hidden}
+.stat-panel .sec-head{padding:12px 14px 0;margin-bottom:0}
+.stat-grid{display:grid;grid-template-columns:repeat(2,1fr)}
+.stat-cell{padding:12px 14px;border-top:1px solid var(--m-border)}
+.stat-cell:nth-child(odd){border-right:1px solid var(--m-border)}
+.stat-v{font-size:26px;font-weight:600;line-height:1.15;color:var(--m-text-1);font-variant-numeric:tabular-nums}
+.stat-l{font-size:12px;color:var(--m-text-2);margin-top:2px}
+
+/* ⑥ 待办卡 */
+.todo{display:flex;align-items:flex-start;gap:2px}
+.todo .check{margin-top:2px}
+.todo-b{flex:1;min-width:0;padding:8px 0}
+.todo-t{font-size:var(--fs-btn);font-weight:500;color:var(--m-text-1);overflow-wrap:anywhere}
+.todo-m{display:flex;align-items:center;gap:6px;margin-top:4px;font-size:12px;color:var(--m-text-2);flex-wrap:wrap}
+.todo:has(.cbx:checked) .todo-t{text-decoration:line-through;color:var(--m-text-2)}
+.todo:has(.cbx:checked){opacity:.72}
+
+/* ④ 学生详情：字段行 */
+.fgroup{padding:12px 14px}
+.fgroup + .fgroup{border-top:1px solid var(--m-border)}
+.fgroup-t{font-size:13px;font-weight:600;color:var(--m-text-1);margin-bottom:8px;
+  display:flex;align-items:center;gap:6px}
+.frow{display:flex;align-items:center;gap:10px;min-height:44px;font-size:14px}
+.frow + .frow{border-top:1px dashed var(--m-border)}
+.fl{width:88px;flex:0 0 auto;font-size:13px;color:var(--m-text-2)}
+.fv{flex:1;min-width:0;overflow-wrap:anywhere}
+.fhint{display:none;font-size:11px;color:var(--warning-fg);margin-top:2px}
+/* 脱敏：默认掩码，勾选后显示明文 */
+.frow .plain{display:none}
+.frow:has(.seck:checked) .plain{display:inline}
+.frow:has(.seck:checked) .mask{display:none}
+.frow:has(.seck:checked) .fhint{display:block}
+.frow:has(.seck:checked){background:var(--warn-yellow-bg);border-radius:var(--r-sm)}
+.secl{display:inline-flex;align-items:center;justify-content:center;min-height:var(--touch-min);
+  padding:0 10px;border-radius:999px;background:var(--app-primary-tint);color:var(--info-fg);
+  font-size:13px;font-weight:600;cursor:pointer;flex:0 0 auto;
+  transition:transform var(--t-press) ease, background-color var(--t-base) ease}
+.secl:active{transform:scale(.97)}
+.secl .ic{width:14px;height:14px}
+.sw-h{display:none}
+.seck:checked ~ .sw-v{display:none}
+.seck:checked ~ .sw-h{display:inline}
+
+/* ⑤ 预警卡 */
+.wcard{display:flex;gap:10px;padding:12px 14px;background:var(--m-surface);
+  border:1px solid var(--m-border);border-radius:var(--r-card);box-shadow:var(--m-shadow-card);min-width:0}
+.wcard.tint-red{background:linear-gradient(90deg,var(--warn-red-bg) 0%,#fff 42%)}
+.wcard.tint-orange{background:linear-gradient(90deg,var(--warn-orange-bg) 0%,#fff 42%)}
+.wcard.tint-yellow{background:linear-gradient(90deg,var(--warn-yellow-bg) 0%,#fff 42%)}
+.wcard.done{border-style:dashed;border-color:var(--success-bd);background:var(--m-surface-2);box-shadow:none}
+.wmain{flex:1;min-width:0}
+.wname{font-size:16px;font-weight:600;color:var(--m-text-1);display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.wmeta{font-size:12px;color:var(--m-text-2);margin-top:3px}
+.wreason{font-size:13px;color:var(--m-text-1);margin-top:6px;overflow-wrap:anywhere}
+.wnote{font-size:12px;color:var(--m-text-2);margin-top:6px;padding:8px 10px;border-radius:var(--r-sm);
+  background:var(--m-sunken);overflow-wrap:anywhere}
+.wacts{display:flex;gap:8px;margin-top:10px}
+.wacts .btn{flex:1;min-height:44px}
+.st-done{display:none}
+#fin5:checked ~ .m-scroll .st-pending{display:none}
+#fin5:checked ~ .m-scroll .st-done{display:inline-flex}
+#fin5:checked ~ .m-scroll .w-target{background:var(--m-surface-2);border-style:dashed;border-color:var(--success-bd)}
+#fin5:checked ~ .m-scroll .w-target .wbar{background:var(--success-solid)}
+#fin5:checked ~ .m-scroll .w-target .wacts .btn-danger{display:none}
+
+/* ⑧ 更多页宫格 */
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.gcell{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
+  min-height:88px;border-radius:var(--r-md);background:var(--m-surface-2);
+  border:1px solid var(--m-border);cursor:pointer;position:relative;
+  transition:transform var(--t-press) ease, background-color var(--t-base) ease}
+.gcell:active{transform:scale(.97);background:var(--m-sunken)}
+.gcell .gic{width:40px;height:40px;border-radius:12px;display:flex;align-items:center;justify-content:center;
+  background:linear-gradient(135deg,rgba(95,134,255,.10),rgba(95,134,255,.24));color:var(--app-primary-action)}
+.gcell .gic .ic{width:20px;height:20px}
+.gcell .gtx{font-size:12px;color:var(--m-text-1);font-weight:500}
+.gcell .badge{top:6px;right:8px;left:auto;margin-left:0}
+
+/* ==========================================================================
+   §5 浮层：底部抽屉 / 确认框 / Toast
+   ========================================================================== */
+.tgl{display:none}
+.sheet{display:none}
+.tgl:checked ~ .sheet{display:block;position:absolute;inset:0;z-index:1000}
+.sheet-mask{position:absolute;inset:0;background:var(--m-overlay);animation:fadeIn var(--t-base) ease both}
+.sheet-panel{position:absolute;left:0;right:0;bottom:0;
+  max-height:92vh;max-height:92dvh;                 /* 02 §13 规定值；先 vh 后 dvh 做渐进降级 */
+  display:flex;flex-direction:column;background:var(--m-surface);
+  border-radius:var(--r-sheet) var(--r-sheet) 0 0;box-shadow:var(--m-shadow-float);
+  animation:slideUp var(--t-sheet) var(--ease-out) both}
+.grab{width:40px;height:4px;border-radius:999px;background:var(--m-border-strong);opacity:.55;
+  margin:10px auto 0;flex:0 0 auto}
+.sheet-head{display:flex;align-items:center;padding:8px 14px 4px;font-size:16px;font-weight:600;flex:0 0 auto}
+.sheet-head .iconbtn{margin-left:auto}
+.sheet-body{overflow-y:auto;padding:4px 14px 8px;display:flex;flex-direction:column;gap:14px}
+.sheet-foot{flex:0 0 auto;display:flex;gap:12px;padding:12px 14px calc(16px + var(--safe-b));
+  border-top:1px solid var(--m-border)}
+.sheet-foot .btn{flex:1;min-height:var(--h-btn-bar)}
+.chip-wrap{display:flex;flex-wrap:wrap;gap:8px}
+
+/* 居中确认框（不可逆操作二次确认） */
+.dialog{display:none}
+#ask5:checked ~ .dialog{display:block;position:absolute;inset:0;z-index:1000}
+#fin5:checked ~ .dialog{display:none}
+.dlg-mask{position:absolute;inset:0;background:var(--m-overlay);animation:fadeIn var(--t-base) ease both}
+.dlg-box{position:absolute;left:24px;right:24px;top:50%;transform:translateY(-50%);
+  background:var(--m-surface);border-radius:var(--r-lg);padding:20px 18px 16px;
+  box-shadow:0 24px 64px rgba(47,62,102,.22);animation:popIn var(--t-enter) var(--ease-out) both}
+.dlg-t{font-size:16px;font-weight:600;color:var(--m-text-1);display:flex;align-items:center;gap:8px}
+.dlg-c{font-size:14px;color:var(--m-text-2);margin-top:8px;line-height:1.7}
+.dlg-f{display:flex;gap:10px;margin-top:16px}
+.dlg-f .btn{flex:1}
+
+/* Toast：顶部居中，z-2000，2.6s 后淡出 */
+.toast{display:none}
+#fin5:checked ~ .toast{display:flex;position:absolute;z-index:2000;
+  top:calc(var(--safe-t) + 56px);left:50%;transform:translateX(-50%);
+  align-items:center;gap:8px;max-width:80%;
+  background:var(--success-solid);color:#fff;font-size:13px;font-weight:500;
+  padding:10px 16px;border-radius:12px;box-shadow:0 12px 30px rgba(47,62,102,.22);
+  animation:toastIn var(--t-enter) var(--ease-out) both}
+.toast .ic{width:16px;height:16px;stroke:#fff}
+
+/* ⑦ 审批：列表 ↔ 详情（checkbox 切换） */
+.appr-detail{display:none}
+#appr7:checked ~ .appr-list{display:none}
+#appr7:checked ~ .appr-detail{display:block;animation:viewIn var(--t-enter) var(--ease-out) both}
+.decide{display:flex;gap:8px}
+.radio{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;
+  min-height:var(--touch-min);border-radius:var(--r-sm);border:1px solid var(--m-border-strong);
+  background:var(--m-surface-2);font-size:var(--fs-btn);color:var(--m-text-1);cursor:pointer;
+  transition:transform var(--t-press) ease, background-color var(--t-base) ease}
+.radio:active{transform:scale(.97)}
+.radio .rd{width:18px;height:18px;border-radius:50%;border:2px solid var(--m-border-strong);
+  display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+.radio .rd::after{content:'';width:8px;height:8px;border-radius:50%;background:#fff;opacity:0}
+.radio input{position:absolute;width:0;height:0;opacity:0}
+.radio input:checked ~ .rd{background:var(--app-primary-action);border-color:var(--app-primary-action)}
+.radio input:checked ~ .rd::after{opacity:1}
+.radio input:checked ~ span:last-child{font-weight:600;color:var(--app-primary-action)}
+.reason{display:none}
+.appr-detail:has(#rj7:checked) .reason{display:block}
+
+/* ==========================================================================
+   §6 动画与降级
+   ========================================================================== */
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+@keyframes popIn{from{opacity:0;transform:translateY(-50%) scale(.96)}to{opacity:1;transform:translateY(-50%) scale(1)}}
+@keyframes viewIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+@keyframes toastIn{from{opacity:0;transform:translateX(-50%) translateY(-8px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+@keyframes spin{to{transform:rotate(360deg)}}          /* 仅用于「提交中…」指示器 */
+.spin{animation:spin .8s linear infinite;transform-origin:50% 50%}
+
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{
+    animation:none !important;                /* 必须显式 none，否则会停在起始帧 */
+    transition-duration:.001ms !important;
+  }
+}
+
+/* ≤380px 窄屏兜底（原型画布固定 375px，此处仅声明生产环境取值） */
+@media (max-width:380px){
+  .stat-v{font-size:22px}
+  .gcell{min-height:80px}
+  .gcell .gic{width:34px;height:34px}
+  .gtx{font-size:11px}
+}
+</style>
+</head>
+
+<body>
+
+<!-- ===================== SVG 图标精灵（内联，无外链；禁止 emoji 当图标） ===================== -->
+<svg class="sprite" aria-hidden="true" focusable="false">
+  <defs>
+    <symbol id="i-grid4" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+    <symbol id="i-triangle" viewBox="0 0 24 24"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></symbol>
+    <symbol id="i-checksq" viewBox="0 0 24 24"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="20" y1="20" x2="16.65" y2="16.65"/></symbol>
+    <symbol id="i-funnel" viewBox="0 0 24 24"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></symbol>
+    <symbol id="i-chev-r" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></symbol>
+    <symbol id="i-chev-l" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></symbol>
+    <symbol id="i-chev-d" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></symbol>
+    <symbol id="i-phone" viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.9.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></symbol>
+    <symbol id="i-msg" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
+    <symbol id="i-talk" viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8z"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></symbol>
+    <symbol id="i-flag" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></symbol>
+    <symbol id="i-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></symbol>
+    <symbol id="i-reset" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></symbol>
+    <symbol id="i-tool" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4z"/></symbol>
+    <symbol id="i-audit" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><polyline points="9 15 11 17 15 12"/></symbol>
+    <symbol id="i-house" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></symbol>
+    <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></symbol>
+    <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></symbol>
+    <symbol id="i-batt" viewBox="0 0 26 24"><rect x="1" y="7" width="19" height="10" rx="3"/><path d="M22.5 10.5v3" stroke-width="2"/><rect x="3" y="9" width="13" height="6" rx="1.5" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-spin" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9"/></symbol>
+    <symbol id="i-sig" viewBox="0 0 24 24" ><rect x="2" y="14" width="3" height="6" rx="1" fill="currentColor" stroke="none"/><rect x="7.5" y="11" width="3" height="9" rx="1" fill="currentColor" stroke="none"/><rect x="13" y="8" width="3" height="12" rx="1" fill="currentColor" stroke="none"/><rect x="18.5" y="5" width="3" height="15" rx="1" fill="currentColor" stroke="none"/></symbol>
+  </defs>
+</svg>
+
+<header class="doc-head">
+  <h1>杭科院辅导员工作台 · 移动端高保真原型（P0 核心 8 屏）</h1>
+  <p>
+    视口 375×812（iPhone X 级）· 单文件、无外链、无构建、双击即开 · 令牌来源 <code>docs/mobile-redesign/02-设计令牌.md</code> ·
+    示例数据与 <code>src/mock/db.ts</code> 种子数据一致（顾语嫣·学前2601、罗一鸣·计应2501、郑晓彤·大数2401、李昊然·计应2402）。
+  </p>
+  <div class="legend">
+    <span><b>可点</b>：筛选 / 查看 / 打卡 / 去审批 / 确认销号（纯 CSS 状态，无 JS）</span>
+    <span><b>热区</b> ≥44×44</span>
+    <span><b>输入</b> ≥16px</span>
+    <span><b>底部吸附</b> sticky 非 fixed</span>
+    <span><b>状态</b> 颜色 + 图标 + 文字</span>
+    <span><b>安全区</b> 顶栏 / TabBar 已接</span>
+  </div>
+</header>
+
+<div class="canvas">
+
+<!-- ======================================================================
+     屏 01 · 工作台  /
+     ====================================================================== -->
+<section class="stage">
+  <div class="stage-head">
+    <span class="stage-no">01</span>
+    <span class="stage-name">工作台</span>
+    <span class="stage-route">/</span>
+  </div>
+
+  <div class="phone">
+    <div class="screen">
+
+      <div class="statusbar">
+        <span>9:41</span>
+        <span class="sb-r">
+          <svg class="ic" width="16" height="16"><use href="#i-sig"/></svg>
+          <svg class="ic" width="15" height="15"><use href="#i-wifi"/></svg>
+          <svg class="ic" width="22" height="16"><use href="#i-batt"/></svg>
+        </span>
+      </div>
+
+      <div class="m-topbar">
+        <span class="tb-logo">杭</span>
+        <span class="tb-title">工作台</span>
+        <span class="tb-right">
+          <button class="iconbtn" aria-label="提醒中心">
+            <svg class="ic" width="20" height="20"><use href="#i-bell"/></svg>
+            <span class="badge" style="min-width:20px">13</span>
+          </button>
+        </span>
+      </div>
+
+      <div class="m-scroll">
+
+        <!-- 精简问候条（非全屏弹窗） -->
+        <div class="greet">
+          <div style="min-width:0">
+            <div class="greet-t">下午好，王老师</div>
+            <div class="greet-s">今日 3 项待办 · 7 名预警学生待关注</div>
+          </div>
+          <button class="iconbtn greet-x" aria-label="关闭问候条">
+            <svg class="ic" width="18" height="18"><use href="#i-x"/></svg>
+          </button>
+        </div>
+
+        <!-- 关键数据 2×2（大数字，tabular-nums） -->
+        <div class="card stat-panel">
+          <div class="sec-head">
+            <span class="sec-title"><svg class="ic" width="16" height="16"><use href="#i-grid4"/></svg>关键数据</span>
+          </div>
+          <div class="stat-grid">
+            <div class="stat-cell"><div class="stat-v">23</div><div class="stat-l">在读学生</div></div>
+            <div class="stat-cell"><div class="stat-v">10</div><div class="stat-l">本月谈心（次）</div></div>
+            <div class="stat-cell"><div class="stat-v" style="color:var(--danger-fg)">7</div><div class="stat-l">未解除预警</div></div>
+            <div class="stat-cell"><div class="stat-v" style="color:var(--warning-fg)">3</div><div class="stat-l">待审批</div></div>
+          </div>
+        </div>
+
+        <!-- 预警名单卡 -->
+        <div class="card accent">
+          <div class="sec-head">
+            <span class="sec-title"><svg class="ic" width="16" height="16" style="color:var(--danger-fg)"><use href="#i-triangle"/></svg>预警名单</span>
+            <span class="sec-more">全部 7 <svg class="ic" width="14" height="14"><use href="#i-chev-r"/></svg></span>
+          </div>
+
+          <div class="row">
+            <span class="wbar wbar-red"></span>
+            <span class="ava red">李</span>
+            <div class="row-main">
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                <span class="t1">李昊然</span>
+                <span class="lv lv-red"><svg class="ic"><use href="#i-triangle"/></svg>红色预警</span>
+              </div>
+              <div class="t4" style="margin-top:3px">计应2402 · 学业预警 · 6 天前</div>
+            </div>
+            <span class="row-side"><span class="tag tag-info">处理中</span></span>
+          </div>
+
+          <div class="row">
+            <span class="wbar wbar-orange"></span>
+            <span class="ava orange">郑</span>
+            <div class="row-main">
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                <span class="t1">郑晓彤</span>
+                <span class="lv lv-orange"><svg class="ic"><use href="#i-circle"/></svg>橙色预警</span>
+              </div>
+              <div class="t4" style="margin-top:3px">大数2401 · 心理预警 · 2 天前</div>
+            </div>
+            <span class="row-side"><span class="tag tag-danger">待处理</span></span>
+          </div>
+
+          <div class="row">
+            <span class="wbar wbar-orange"></span>
+            <span class="ava orange">冯</span>
+            <div class="row-main">
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                <span class="t1">冯子豪</span>
+                <span class="lv lv-orange"><svg class="ic"><use href="#i-circle"/></svg>橙色预警</span>
+              </div>
+              <div class="t4" style="margin-top:3px">大数2401 · 学业预警 · 25 天前</div>
+            </div>
+            <span class="row-side"><span class="tag tag-danger">待处理</span></span>
+          </div>
+        </div>
+
+        <!-- 今日待办卡 -->
+        <div class="card accent">
+          <div class="sec-head">
+            <span class="sec-title"><svg class="ic" width="16" height="16"><use href="#i-checksq"/></svg>今日待办</span>
+            <span class="sec-more">全部 <svg class="ic" width="14" height="14"><use href="#i-chev-r"/></svg></span>
+          </div>
+
+          <div class="todo">
+            <label class="check"><input type="checkbox" class="cbx"><span class="box"><svg class="ic"><use href="#i-check"/></svg></span></label>
+            <div class="todo-b">
+              <div class="todo-t">与郑晓彤进行心理约谈</div>
+              <div class="todo-m"><span class="tag tag-danger">高</span><span class="nowrap">16:00 截止</span><span>· 心理预警学生</span></div>
+            </div>
+          </div>
+          <div class="todo">
+            <label class="check"><input type="checkbox" class="cbx"><span class="box"><svg class="ic"><use href="#i-check"/></svg></span></label>
+            <div class="todo-b">
+              <div class="todo-t">提交 9 月学工台账及谈心谈话记录</div>
+              <div class="todo-m"><span class="tag tag-danger">高</span><span class="nowrap">17:30 截止</span><span>· 数据填报</span></div>
+            </div>
+          </div>
+          <div class="todo">
+            <label class="check"><input type="checkbox" class="cbx"><span class="box"><svg class="ic"><use href="#i-check"/></svg></span></label>
+            <div class="todo-b">
+              <div class="todo-t">参加学工办周例会</div>
+              <div class="todo-m"><span class="tag tag-warning">中</span><span class="nowrap">14:00</span><span>· 行政楼 302</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 待审批卡 -->
+        <div class="card accent">
+          <div class="sec-head">
+            <span class="sec-title"><svg class="ic" width="16" height="16"><use href="#i-audit"/></svg>待审批</span>
+            <span class="sec-more">共 3 项 <svg class="ic" width="14" height="14"><use href="#i-chev-r"/></svg></span>
+          </div>
+          <div class="row">
+            <div class="row-main">
+              <div class="t2">吴宇轩 · 学生请假</div>
+              <div class="t4" style="margin-top:2px">大数2401 · 今天 08:40</div>
+            </div>
+            <span class="row-side"><span class="tag tag-warning">待审批</span></span>
+          </div>
+          <div class="row">
+            <div class="row-main">
+              <div class="t2">何雨欣 · 助学金申请</div>
+              <div class="t4" style="margin-top:2px">计应2501 · 今天 09:15</div>
+            </div>
+            <span class="row-side"><span class="tag tag-warning">待审批</span></span>
+          </div>
+        </div>
+
+      </div>
+
+      <nav class="m-tabbar">
+        <a class="tab on"><svg class="ic"><use href="#i-grid4"/></svg>工作台</a>
+        <a class="tab"><svg class="ic"><use href="#i-users"/></svg>学生管理</a>
+        <a class="tab"><svg class="ic"><use href="#i-triangle"/></svg>预警管理<span class="badge">7</span></a>
+        <a class="tab"><svg class="ic"><use href="#i-checksq"/></svg>待办提醒<span class="badge">3</span></a>
+        <a class="tab"><svg class="ic"><use href="#i-grid"/></svg>更多<span class="badge">3</span></a>
+      </nav>
+
+    </div>
+  </div>
+
+  <p class="stage-note"><b>解决什么</b>：打开就看到「今天有什么事」——数据、预警、待办、审批四张卡直连对应模块，问候降级为一行轻量条，不再挡路。</p>
+</section>
+
+<!-- ======================================================================
+     屏 02 · 学生管理列表  /students
+     ====================================================================== -->
+<section class="stage">
+  <div class="stage-head">
+    <span class="stage-no">02</span>
+    <span class="stage-name">学生管理列表</span>
+    <span class="stage-route">/students</span>
+  </div>
+
+  <div class="phone">
+    <div class="screen">
+      <input type="checkbox" id="sheet2" class="tgl">
+
+      <div class="statusbar">
+        <span>9:41</span>
+        <span class="sb-r">
+          <svg class="ic" width="16" height="16"><use href="#i-sig"/></svg>
+          <svg class="ic" width="15" height="15"><use href="#i-wifi"/></svg>
+          <svg class="ic" width="22" height="16"><use href="#i-batt"/></svg>
+        </span>
+      </div>
+
+      <div class="m-topbar">
+        <span class="tb-logo">杭</span>
+        <span class="tb-title">学生管理</span>
+        <span class="tb-right">
+          <button class="iconbtn" aria-label="提醒中心">
+            <svg class="ic" width="20" height="20"><use href="#i-bell"/></svg><span class="badge" style="min-width:20px">13</span>
+          </button>
+        </span>
+      </div>
+
+      <div class="m-scroll">
+
+        <div class="search-row">
+          <div class="search-field">
+            <svg class="ic"><use href="#i-search"/></svg>
+            <input class="inp" type="search" placeholder="搜索姓名 / 学号 / 班级" aria-label="搜索学生">
+          </div>
+          <label class="btn btn-ghost" for="sheet2" style="flex:0 0 auto;padding:0 12px">
+            <svg class="ic" width="16" height="16"><use href="#i-funnel"/></svg>筛选
+          </label>
+        </div>
+
+        <div class="sub" style="display:flex;align-items:center;gap:6px">
+          <span>共 23 名学生 · 主责 20 / 共管 3</span>
+        </div>
+
+        <!-- 学生卡：三层字段 -->
+        <div class="card press">
+          <div style="display:flex;align-items:flex-start;gap:10px">
+            <span class="ava">顾</span>
+            <div style="flex:1;min-width:0">
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                <span class="t1">顾语嫣</span>
+                <span class="tag tag-info">主责</span>
+              </div>
+              <div class="t3" style="margin-top:2px">学前2601 · 学前教育</div>
+            </div>
+            <button class="iconbtn" aria-label="拨号"><svg class="ic" width="18" height="18"><use href="#i-phone"/></svg></button>
+            <button class="iconbtn" aria-label="发短信"><svg class="ic" width="18" height="18"><use href="#i-msg"/></svg></button>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;margin-top:8px;flex-wrap:wrap">
+            <span class="t4 mono">2026040101</span>
+            <span class="t4">·</span>
+            <span class="t4">最近谈心 —</span>
+            <span class="tag tag-neutral" style="margin-left:auto">暂无预警</span>
+          </div>
+          <div class="t3" style="margin-top:6px;padding-top:8px;border-top:1px dashed var(--m-border)">
+            学生公寓10-402 · 辅导员 王老师 · 手机 158****1094
+          </div>
+        </div>
+
+        <div class="card press">
+          <div style="display:flex;align-items:flex-start;gap:10px">
+            <span class="ava orange">罗</span>
+            <div style="flex:1;min-width:0">
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                <span class="t1">罗一鸣</span>
+                <span class="tag tag-info">主责</span>
+              </div>
+              <div class="t3" style="margin-top:2px">计应2501 · 计算机应用技术</div>
+            </div>
+            <button class="iconbtn" aria-label="拨号"><svg class="ic" width="18" height="18"><use href="#i-phone"/></svg></button>
+            <button class="iconbtn" aria-label="发短信"><svg class="ic" width="18" height="18"><use href="#i-msg"/></svg></button>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;margin-top:8px;flex-wrap:wrap">
+            <span class="t4 mono">2025010104</span>
+            <span class="t4">·</span>
+            <span class="t4">最近谈心 12 天前</span>
+            <span class="lv lv-orange" style="margin-left:auto"><svg class="ic"><use href="#i-circle"/></svg>橙色预警</span>
+          </div>
+          <div class="t3" style="margin-top:6px;padding-top:8px;border-top:1px dashed var(--m-border)">
+            学生公寓5-520 · 辅导员 王老师 · 手机 135****0943
+          </div>
+        </div>
+
+        <div class="card press">
+          <div style="display:flex;align-items:flex-start;gap:10px">
+            <span class="ava orange">郑</span>
+            <div style="flex:1;min-width:0">
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                <span class="t1">郑晓彤</span>
+                <span class="tag tag-plain">共管</span>
+              </div>
+              <div class="t3" style="margin-top:2px">大数2401 · 大数据技术</div>
+            </div>
+            <button class="iconbtn" aria-label="拨号"><svg class="ic" width="18" height="18"><use href="#i-phone"/></svg></button>
+            <button class="iconbtn" aria-label="发短信"><svg class="ic" width="18" height="18"><use href="#i-msg"/></svg></button>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;margin-top:8px;flex-wrap:wrap">
+            <span class="t4 mono">2024020102</span>
+            <span class="t4">·</span>
+            <span class="t4">最近谈心 1 天前</span>
+            <span class="lv lv-orange" style="margin-left:auto"><svg class="ic"><use href="#i-circle"/></svg>橙色预警</span>
+          </div>
+          <div class="t3" style="margin-top:6px;padding-top:8px;border-top:1px dashed var(--m-border)">
+            学生公寓8-305 · 辅导员 王老师 · 手机 135****2093
+          </div>
+        </div>
+
+        <div class="t4" style="text-align:center;padding:8px 0">上拉加载更多…</div>
+
+        <!-- 状态 B · 筛选无结果（与上方「有结果」互斥，生产按条件二选一渲染；
+             虚线边框 = .card.empty，与有内容卡明确区分） -->
+        <div class="t4" style="text-align:center;padding:4px 0">— 空态演示 · 筛选无结果 —</div>
+        <div class="card empty" style="text-align:center;padding:24px 14px">
+          <svg class="ic" width="28" height="28" style="color:var(--m-border-strong)"><use href="#i-search"/></svg>
+          <div class="t2" style="margin-top:8px">没有符合条件的学生</div>
+          <div class="t4" style="margin-top:4px">试试调整年级 / 预警状态，或清空搜索词</div>
+          <button class="btn btn-ghost" style="margin-top:12px">
+            <svg class="ic" width="16" height="16"><use href="#i-reset"/></svg>重置筛选
+          </button>
+        </div>
+      </div>
+
+      <nav class="m-tabbar">
+        <a class="tab"><svg class="ic"><use href="#i-grid4"/></svg>工作台</a>
+        <a class="tab on"><svg class="ic"><use href="#i-users"/></svg>学生管理</a>
+        <a class="tab"><svg class="ic"><use href="#i-triangle"/></svg>预警管理<span class="badge">7</span></a>
+        <a class="tab"><svg class="ic"><use href="#i-checksq"/></svg>待办提醒<span class="badge">3</span></a>
+        <a class="tab"><svg class="ic"><use href="#i-grid"/></svg>更多<span class="badge">3</span></a>
+      </nav>
+
+      <!-- 底部弹层（默认关闭；点「筛选」打开，见屏 03） -->
+      <div class="sheet">
+        <label class="sheet-mask" for="sheet2" aria-label="关闭筛选"></label>
+        <div class="sheet-panel">
+          <div class="grab"></div>
+          <div class="sheet-head">筛选学生
+            <label class="iconbtn" for="sheet2" aria-label="关闭"><svg class="ic" width="18" height="18"><use href="#i-x"/></svg></label>
+          </div>
+          <div class="sheet-body">
+            <div class="field"><label>年级</label>
+              <div class="chip-wrap">
+                <span class="chip">2024级</span><span class="chip on">2025级</span><span class="chip">2026级</span>
+              </div>
+            </div>
+            <div class="field"><label>预警状态</label>
+              <div class="chip-wrap">
+                <span class="chip danger on">红色</span><span class="chip warn">橙色</span><span class="chip gold">黄色</span><span class="chip">无预警</span>
+              </div>
+            </div>
+            <div class="field"><label>在读状态</label>
+              <div class="chip-wrap"><span class="chip on">在读</span><span class="chip">休学</span><span class="chip">退学</span></div>
+            </div>
+            <div class="field"><label>专业</label>
+              <div class="select-like">全部专业<svg class="ic" width="18" height="18"><use href="#i-chev-d"/></svg></div>
+            </div>
+          </div>
+          <div class="sheet-foot">
+            <button class="btn btn-ghost"><svg class="ic"><use href="#i-reset"/></svg>重置</button>
+            <label class="btn btn-primary" for="sheet2">确定</label>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <p class="stage-note"><b>解决什么</b>：把桌面横向滚动的 Table 换成卡片化列表——姓名/班级/归属一眼可见，预警与学号并列，手机号默认脱敏，电话与短信热区放在拇指侧；列表底部附「筛选无结果」空态演示（虚线卡，与有内容卡区分）。</p>
+</section>
+
+<!-- ======================================================================
+     屏 03 · 筛选底部弹层（叠加在学生列表上）
+     ====================================================================== -->
+<section class="stage">
+  <div class="stage-head">
+    <span class="stage-no">03</span>
+    <span class="stage-name">筛选底部弹层</span>
+    <span class="stage-route">/students · Bottom Sheet</span>
+  </div>
+
+  <div class="phone">
+    <div class="screen">
+      <input type="checkbox" id="sheet3" class="tgl" checked>
+
+      <div class="statusbar">
+        <span>9:41</span>
+        <span class="sb-r">
+          <svg class="ic" width="16" height="16"><use href="#i-sig"/></svg>
+          <svg class="ic" width="15" height="15"><use href="#i-wifi"/></svg>
+          <svg class="ic" width="22" height="16"><use href="#i-batt"/></svg>
+        </span>
+      </div>
+
+      <div class="m-topbar">
+        <span class="tb-logo">杭</span>
+        <span class="tb-title">学生管理</span>
+        <span class="tb-right">
+          <button class="iconbtn" aria-label="提醒中心"><svg class="ic" width="20" height="20"><use href="#i-bell"/></svg><span class="badge" style="min-width:20px">13</span></button>
+        </span>
+      </div>
+
+      <div class="m-scroll">
+        <div class="search-row">
+          <div class="search-field">
+            <svg class="ic"><use href="#i-search"/></svg>
+            <input class="inp" type="search" placeholder="搜索姓名 / 学号 / 班级" aria-label="搜索学生">
+          </div>
+          <label class="btn btn-ghost" for="sheet3" style="flex:0 0 auto;padding:0 12px">
+            <svg class="ic" width="16" height="16"><use href="#i-funnel"/></svg>筛选
+          </label>
+        </div>
+        <div class="sub">共 23 名学生 · 主责 20 / 共管 3</div>
+        <div class="card press">
+          <div style="display:flex;align-items:flex-start;gap:10px">
+            <span class="ava orange">罗</span>
+            <div style="flex:1;min-width:0">
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><span class="t1">罗一鸣</span><span class="tag tag-info">主责</span></div>
+              <div class="t3" style="margin-top:2px">计应2501 · 计算机应用技术</div>
+            </div>
+            <button class="iconbtn" aria-label="拨号"><svg class="ic" width="18" height="18"><use href="#i-phone"/></svg></button>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;margin-top:8px;flex-wrap:wrap">
+            <span class="t4 mono">2025010104</span><span class="t4">·</span><span class="t4">最近谈心 12 天前</span>
+            <span class="lv lv-orange" style="margin-left:auto"><svg class="ic"><use href="#i-circle"/></svg>橙色预警</span>
+          </div>
+        </div>
+        <div class="card press">
+          <div style="display:flex;align-items:flex-start;gap:10px">
+            <span class="ava">高</span>
+            <div style="flex:1;min-width:0">
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><span class="t1">高梓涵</span><span class="tag tag-info">主责</span></div>
+              <div class="t3" style="margin-top:2px">计应2501 · 计算机应用技术</div>
+            </div>
+            <button class="iconbtn" aria-label="拨号"><svg class="ic" width="18" height="18"><use href="#i-phone"/></svg></button>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;margin-top:8px;flex-wrap:wrap">
+            <span class="t4 mono">2025010103</span><span class="t4">·</span><span class="t4">最近谈心 —</span>
+            <span class="tag tag-neutral" style="margin-left:auto">暂无预警</span>
+          </div>
+        </div>
+      </div>
+
+      <nav class="m-tabbar">
+        <a class="tab"><svg class="ic"><use href="#i-grid4"/></svg>工作台</a>
+        <a class="tab on"><svg class="ic"><use href="#i-users"/></svg>学生管理</a>
+        <a class="tab"><svg class="ic"><use href="#i-triangle"/></svg>预警管理<span class="badge">7</span></a>
+        <a class="tab"><svg class="ic"><use href="#i-checksq"/></svg>待办提醒<span class="badge">3</span></a>
+        <a class="tab"><svg class="ic"><use href="#i-grid"/></svg>更多<span class="badge">3</span></a>
+      </nav>
+
+      <div class="sheet">
+        <label class="sheet-mask" for="sheet3" aria-label="关闭筛选"></label>
+        <div class="sheet-panel">
+          <div class="grab"></div>
+          <div class="sheet-head">筛选学生
+            <label class="iconbtn" for="sheet3" aria-label="关闭"><svg class="ic" width="18" height="18"><use href="#i-x"/></svg></label>
+          </div>
+          <div class="sheet-body">
+            <div class="field"><label>年级</label>
+              <div class="chip-wrap"><span class="chip">2024级</span><span class="chip on">2025级</span><span class="chip">2026级</span></div>
+            </div>
+            <div class="field"><label>专业</label>
+              <div class="select-like">计算机应用技术<svg class="ic" width="18" height="18"><use href="#i-chev-d"/></svg></div>
+            </div>
+            <div class="field"><label>班级</label>
+              <div class="select-like">计应2501<svg class="ic" width="18" height="18"><use href="#i-chev-d"/></svg></div>
+            </div>
+            <div class="field"><label>预警状态</label>
+              <div class="chip-wrap">
+                <span class="chip danger">红色</span><span class="chip warn on">橙色</span><span class="chip gold">黄色</span><span class="chip">无预警</span>
+              </div>
+            </div>
+            <div class="field"><label>在读状态</label>
+              <div class="chip-wrap"><span class="chip on">在读</span><span class="chip">休学</span><span class="chip">退学</span></div>
+            </div>
+          </div>
+          <div class="sheet-foot">
+            <button class="btn btn-ghost"><svg class="ic"><use href="#i-reset"/></svg>重置</button>
+            <label class="btn btn-primary" for="sheet3">确定</label>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <p class="stage-note"><b>解决什么</b>：筛选不再挤在顶部工具栏，改为底部抽屉单手可达；主操作（重置/确定）固定在底部并接安全区，字段 44px 热区、16px 字号，避免 iOS 聚焦缩放。</p>
+</section>
+
+<!-- ======================================================================
+     屏 04 · 学生详情（脱敏查看 + 底部吸附操作条）
+     ====================================================================== -->
+<section class="stage">
+  <div class="stage-head">
+    <span class="stage-no">04</span>
+    <span class="stage-name">学生详情</span>
+    <span class="stage-route">/students/s24</span>
+  </div>
+
+  <div class="phone">
+    <div class="screen">
+
+      <div class="statusbar">
+        <span>9:41</span>
+        <span class="sb-r">
+          <svg class="ic" width="16" height="16"><use href="#i-sig"/></svg>
+          <svg class="ic" width="15" height="15"><use href="#i-wifi"/></svg>
+          <svg class="ic" width="22" height="16"><use href="#i-batt"/></svg>
+        </span>
+      </div>
+
+      <div class="m-topbar">
+        <button class="iconbtn" aria-label="返回"><svg class="ic" width="20" height="20"><use href="#i-chev-l"/></svg></button>
+        <span class="tb-title">学生详情</span>
+        <span class="tb-right">
+          <button class="iconbtn" aria-label="提醒中心"><svg class="ic" width="20" height="20"><use href="#i-bell"/></svg><span class="badge" style="min-width:20px">13</span></button>
+        </span>
+      </div>
+
+      <div class="m-scroll">
+
+        <!-- 头部信息区 -->
+        <div class="card" style="padding:14px">
+          <div style="display:flex;align-items:center;gap:12px">
+            <span class="ava lg">顾</span>
+            <div style="flex:1;min-width:0">
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                <span style="font-size:20px;font-weight:600">顾语嫣</span>
+                <span class="tag tag-info">主责</span>
+                <span class="tag tag-success">在读</span>
+              </div>
+              <div class="t3" style="margin-top:3px">学前2601 · 学前教育 · 2026级</div>
+              <div class="t4 mono" style="margin-top:2px">2026040101</div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:12px;padding-top:10px;border-top:1px dashed var(--m-border);flex-wrap:wrap">
+            <span class="tag tag-neutral">暂无预警</span>
+            <span class="t4">班长 · 中共预备党员 · 浙江湖州</span>
+          </div>
+        </div>
+
+        <!-- 分组：基本信息 -->
+        <div class="card" style="padding:0">
+          <div class="fgroup">
+            <div class="fgroup-t"><svg class="ic" width="14" height="14"><use href="#i-user"/></svg>基本信息</div>
+            <div class="frow"><span class="fl">性别</span><span class="fv">女</span></div>
+            <div class="frow"><span class="fl">政治面貌</span><span class="fv">中共预备党员</span></div>
+            <div class="frow"><span class="fl">生源地</span><span class="fv">浙江湖州</span></div>
+            <div class="frow"><span class="fl">入学日期</span><span class="fv mono">2026-09-08</span></div>
+            <div class="frow"><span class="fl">宿舍</span><span class="fv">学生公寓 10-402</span></div>
+          </div>
+        </div>
+
+        <!-- 分组：联系与家庭（默认脱敏 + 点击查看） -->
+        <div class="card" style="padding:0">
+          <div class="fgroup">
+            <div class="fgroup-t"><svg class="ic" width="14" height="14"><use href="#i-phone"/></svg>联系与家庭
+              <span class="tag tag-warning" style="margin-left:auto">默认脱敏</span>
+            </div>
+
+            <div class="frow">
+              <span class="fl">本人手机</span>
+              <span class="fv">
+                <span class="mask mono">158****1094</span><span class="plain mono">158 8872 1094</span>
+                <span class="fhint">已展示明文 · 离开本页自动回隐</span>
+              </span>
+              <label class="secl"><input type="checkbox" class="seck"><svg class="ic"><use href="#i-eye"/></svg><span class="sw-v">查看</span><span class="sw-h">隐藏</span></label>
+            </div>
+
+            <div class="frow">
+              <span class="fl">父亲</span>
+              <span class="fv">
+                <span>顾建明 · </span><span class="mask mono">158****3102</span><span class="plain mono">158 8876 3102</span>
+                <span class="fhint">已展示明文 · 离开本页自动回隐</span>
+              </span>
+              <label class="secl"><input type="checkbox" class="seck"><svg class="ic"><use href="#i-eye"/></svg><span class="sw-v">查看</span><span class="sw-h">隐藏</span></label>
+            </div>
+
+            <div class="frow">
+              <span class="fl">母亲</span>
+              <span class="fv">
+                <span>费晓芳 · </span><span class="mask mono">138****2941</span><span class="plain mono">138 0675 2941</span>
+                <span class="fhint">已展示明文 · 离开本页自动回隐</span>
+              </span>
+              <label class="secl"><input type="checkbox" class="seck"><svg class="ic"><use href="#i-eye"/></svg><span class="sw-v">查看</span><span class="sw-h">隐藏</span></label>
+            </div>
+          </div>
+        </div>
+
+        <!-- 分组：学业与预警 -->
+        <div class="card" style="padding:0">
+          <div class="fgroup">
+            <div class="fgroup-t"><svg class="ic" width="14" height="14"><use href="#i-info"/></svg>学业与预警</div>
+            <div class="frow"><span class="fl">班主任</span><span class="fv">高丽娜</span></div>
+            <div class="frow"><span class="fl">辅导员</span><span class="fv">王老师</span></div>
+            <div class="frow"><span class="fl">最近谈心</span><span class="fv">暂无记录</span></div>
+            <div class="frow"><span class="fl">预警状态</span><span class="fv"><span class="tag tag-neutral">暂无预警</span></span></div>
+          </div>
+        </div>
+
+        <!-- 底部吸附操作条：sticky bottom（禁止 fixed） -->
+        <div class="m-actionbar">
+          <div class="act-grid">
+            <button class="act"><svg class="ic"><use href="#i-phone"/></svg>拨号</button>
+            <button class="act"><svg class="ic"><use href="#i-msg"/></svg>短信</button>
+            <button class="act"><svg class="ic"><use href="#i-talk"/></svg>发起谈心</button>
+            <button class="act"><svg class="ic"><use href="#i-send"/></svg>发通知</button>
+            <button class="act danger"><svg class="ic"><use href="#i-flag"/></svg>标记预警</button>
+          </div>
+        </div>
+
+      </div>
+
+      <nav class="m-tabbar">
+        <a class="tab"><svg class="ic"><use href="#i-grid4"/></svg>工作台</a>
+        <a class="tab on"><svg class="ic"><use href="#i-users"/></svg>学生管理</a>
+        <a class="tab"><svg class="ic"><use href="#i-triangle"/></svg>预警管理<span class="badge">7</span></a>
+        <a class="tab"><svg class="ic"><use href="#i-checksq"/></svg>待办提醒<span class="badge">3</span></a>
+        <a class="tab"><svg class="ic"><use href="#i-grid"/></svg>更多<span class="badge">3</span></a>
+      </nav>
+
+    </div>
+  </div>
+
+  <p class="stage-note"><b>解决什么</b>：看清一个人并立即行动——敏感字段默认掩码、点「查看」才显示明文（离开自动回隐），五个高频操作吸附在底部，单手可达。</p>
+</section>
+
+<!-- ======================================================================
+     屏 05 · 预警管理（红/橙/黄三级 + 处理闭环销号）
+     ====================================================================== -->
+<section class="stage">
+  <div class="stage-head">
+    <span class="stage-no">05</span>
+    <span class="stage-name">预警管理</span>
+    <span class="stage-route">/warnings</span>
+  </div>
+
+  <div class="phone">
+    <div class="screen">
+      <input type="checkbox" id="ask5" class="tgl">
+      <input type="checkbox" id="fin5" class="tgl">
+
+      <div class="statusbar">
+        <span>9:41</span>
+        <span class="sb-r">
+          <svg class="ic" width="16" height="16"><use href="#i-sig"/></svg>
+          <svg class="ic" width="15" height="15"><use href="#i-wifi"/></svg>
+          <svg class="ic" width="22" height="16"><use href="#i-batt"/></svg>
+        </span>
+      </div>
+
+      <div class="m-topbar">
+        <span class="tb-logo">杭</span>
+        <span class="tb-title">预警管理</span>
+        <span class="tb-right">
+          <button class="iconbtn" aria-label="提醒中心"><svg class="ic" width="20" height="20"><use href="#i-bell"/></svg><span class="badge" style="min-width:20px">13</span></button>
+        </span>
+      </div>
+
+      <div class="m-scroll">
+
+        <div class="chip-row">
+          <span class="chip on">全部 9</span>
+          <span class="chip danger">红色 1</span>
+          <span class="chip warn">橙色 3</span>
+          <span class="chip gold">黄色 5</span>
+        </div>
+
+        <div class="card" style="display:flex;align-items:center;gap:10px;padding:10px 14px">
+          <svg class="ic" width="16" height="16" style="color:var(--danger-fg)"><use href="#i-triangle"/></svg>
+          <span class="t3">未解除 <b class="num" style="color:var(--danger-fg)">7</b> · 待处理 4 · 处理中 3 · 已解除 2</span>
+        </div>
+
+        <!-- 红色（销号目标卡：确认后转「已解除」） -->
+        <div class="wcard tint-red w-target">
+          <span class="wbar wbar-red"></span>
+          <div class="wmain">
+            <div class="wname">李昊然 <span class="lv lv-red"><svg class="ic"><use href="#i-triangle"/></svg>红色预警</span>
+              <span class="tag tag-info st-pending">处理中</span><span class="tag tag-success st-done">已解除</span>
+            </div>
+            <div class="wmeta">计应2402 · 学业预警 · 6 天前</div>
+            <div class="wreason">2025-2026-2 学期不及格学分达 8 学分，触发红色学业预警</div>
+            <div class="wnote">已约谈并制定学业帮扶计划，已告知家长，安排学习委员结对帮扶</div>
+            <div class="wacts">
+              <button class="btn btn-ghost"><svg class="ic"><use href="#i-edit"/></svg>记录措施</button>
+              <label class="btn btn-danger" for="ask5">确认销号</label>
+            </div>
+          </div>
+        </div>
+
+        <!-- 橙色 -->
+        <div class="wcard tint-orange">
+          <span class="wbar wbar-orange"></span>
+          <div class="wmain">
+            <div class="wname">郑晓彤 <span class="lv lv-orange"><svg class="ic"><use href="#i-circle"/></svg>橙色预警</span></div>
+            <div class="wmeta">大数2401 · 心理预警 · 2 天前 · 今日 17:00 前处置</div>
+            <div class="wreason">连续两周情绪低落，室友反映其夜间常失眠哭泣，心理委员上报</div>
+            <div class="wacts">
+              <button class="btn btn-primary"><svg class="ic"><use href="#i-talk"/></svg>去处置</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 黄色 -->
+        <div class="wcard tint-yellow">
+          <span class="wbar wbar-yellow"></span>
+          <div class="wmain">
+            <div class="wname">韩志强 <span class="lv lv-yellow"><svg class="ic"><use href="#i-flag"/></svg>黄色预警</span></div>
+            <div class="wmeta">机电2501 · 经济困难预警 · 5 天前</div>
+            <div class="wreason">父亲重病住院，家庭主要收入来源中断</div>
+            <div class="wnote">已协助提交临时困难补助申请，待学校审核</div>
+            <div class="wacts"><button class="btn btn-ghost"><svg class="ic"><use href="#i-edit"/></svg>继续跟进</button></div>
+          </div>
+        </div>
+
+        <!-- 已解除：虚线框 + 绿色，与有内容卡区分 -->
+        <div class="wcard done">
+          <span class="wbar" style="background:var(--success-solid)"></span>
+          <div class="wmain">
+            <div class="wname">何雨欣 <span class="tag tag-success">已解除</span></div>
+            <div class="wmeta">计应2501 · 学业预警 · 黄色 · 15 天前</div>
+            <div class="wnote">安排一对一辅导，期末测验成绩回升至 75 分，已于 10-03 销号</div>
+          </div>
+        </div>
+
+      </div>
+
+      <nav class="m-tabbar">
+        <a class="tab"><svg class="ic"><use href="#i-grid4"/></svg>工作台</a>
+        <a class="tab"><svg class="ic"><use href="#i-users"/></svg>学生管理</a>
+        <a class="tab on"><svg class="ic"><use href="#i-triangle"/></svg>预警管理<span class="badge">7</span></a>
+        <a class="tab"><svg class="ic"><use href="#i-checksq"/></svg>待办提醒<span class="badge">3</span></a>
+        <a class="tab"><svg class="ic"><use href="#i-grid"/></svg>更多<span class="badge">3</span></a>
+      </nav>
+
+      <!-- 二次确认：不可逆操作 -->
+      <div class="dialog">
+        <label class="dlg-mask" for="ask5" aria-label="取消"></label>
+        <div class="dlg-box">
+          <div class="dlg-t"><svg class="ic" width="18" height="18" style="color:var(--danger-fg)"><use href="#i-triangle"/></svg>确认解除该预警？</div>
+          <div class="dlg-c">李昊然 · 红色学业预警。解除后将不再计入「未解除预警」统计，且<b>不可恢复</b>。建议先完成「记录措施」。</div>
+          <div class="dlg-f">
+            <label class="btn btn-ghost" for="ask5">取消</label>
+            <label class="btn btn-danger" for="fin5">确认解除</label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Toast 回执 -->
+      <div class="toast"><svg class="ic"><use href="#i-check"/></svg>预警已解除 · 未解除预警 6</div>
+
+    </div>
+  </div>
+
+  <p class="stage-note"><b>解决什么</b>：红/橙/黄一律「底色 + 图标 + 文字」三重编码（色盲与弱视可用），处置与销号同卡完成，销号必须二次确认，销号后卡片转虚线「已解除」并回执 Toast。</p>
+</section>
+
+<!-- ======================================================================
+     屏 06 · 待办提醒（打卡 / 逾期 / 已完成折叠）
+     ====================================================================== -->
+<section class="stage">
+  <div class="stage-head">
+    <span class="stage-no">06</span>
+    <span class="stage-name">待办提醒</span>
+    <span class="stage-route">/todos</span>
+  </div>
+
+  <div class="phone">
+    <div class="screen">
+
+      <div class="statusbar">
+        <span>9:41</span>
+        <span class="sb-r">
+          <svg class="ic" width="16" height="16"><use href="#i-sig"/></svg>
+          <svg class="ic" width="15" height="15"><use href="#i-wifi"/></svg>
+          <svg class="ic" width="22" height="16"><use href="#i-batt"/></svg>
+        </span>
+      </div>
+
+      <div class="m-topbar">
+        <span class="tb-logo">杭</span>
+        <span class="tb-title">待办提醒</span>
+        <span class="tb-right">
+          <button class="iconbtn" aria-label="提醒中心"><svg class="ic" width="20" height="20"><use href="#i-bell"/></svg><span class="badge" style="min-width:20px">13</span></button>
+        </span>
+      </div>
+
+      <div class="m-scroll">
+
+        <!-- 已逾期：红色 + 文字标识，不能只靠颜色 -->
+        <div class="card" style="border-color:var(--danger-bd)">
+          <div class="sec-head">
+            <span class="sec-title" style="color:var(--danger-fg)">
+              <svg class="ic" width="16" height="16"><use href="#i-triangle"/></svg>已逾期 2
+            </span>
+          </div>
+
+          <div class="todo">
+            <label class="check"><input type="checkbox" class="cbx"><span class="box"><svg class="ic"><use href="#i-check"/></svg></span></label>
+            <div class="todo-b">
+              <div class="todo-t">跟进韩志强临时困难补助申请材料</div>
+              <div class="todo-m">
+                <span class="tag tag-danger">高</span>
+                <span class="tag tag-danger"><svg class="ic" width="12" height="12"><use href="#i-clock"/></svg>已逾期 1 天</span>
+                <span class="nowrap">原定 10-12 12:00</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="todo">
+            <label class="check"><input type="checkbox" class="cbx"><span class="box"><svg class="ic"><use href="#i-check"/></svg></span></label>
+            <div class="todo-b">
+              <div class="todo-t">核查罗一鸣本周出勤情况</div>
+              <div class="todo-m">
+                <span class="tag tag-warning">中</span>
+                <span class="tag tag-danger"><svg class="ic" width="12" height="12"><use href="#i-clock"/></svg>已逾期 1 天</span>
+                <span class="nowrap">原定 10-12 09:00</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 今日 -->
+        <div class="card">
+          <div class="sec-head"><span class="sec-title"><svg class="ic" width="16" height="16"><use href="#i-clock"/></svg>今天 3</span></div>
+
+          <div class="todo">
+            <label class="check"><input type="checkbox" class="cbx"><span class="box"><svg class="ic"><use href="#i-check"/></svg></span></label>
+            <div class="todo-b">
+              <div class="todo-t">与郑晓彤进行心理约谈</div>
+              <div class="todo-m"><span class="tag tag-danger">高</span><span class="nowrap">16:00 截止</span><span>· 关联 郑晓彤</span></div>
+            </div>
+          </div>
+          <div class="todo">
+            <label class="check"><input type="checkbox" class="cbx"><span class="box"><svg class="ic"><use href="#i-check"/></svg></span></label>
+            <div class="todo-b">
+              <div class="todo-t">提交 9 月学工台账及谈心谈话记录</div>
+              <div class="todo-m"><span class="tag tag-danger">高</span><span class="nowrap">17:30 截止</span><span>· 数据填报</span></div>
+            </div>
+          </div>
+          <div class="todo">
+            <label class="check"><input type="checkbox" class="cbx"><span class="box"><svg class="ic"><use href="#i-check"/></svg></span></label>
+            <div class="todo-b">
+              <div class="todo-t">参加学工办周例会</div>
+              <div class="todo-m"><span class="tag tag-warning">中</span><span class="nowrap">14:00</span><span>· 行政楼 302</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 未来 -->
+        <div class="card">
+          <div class="sec-head"><span class="sec-title"><svg class="ic" width="16" height="16"><use href="#i-house"/></svg>未来 3</span></div>
+
+          <div class="todo">
+            <label class="check"><input type="checkbox" class="cbx"><span class="box"><svg class="ic"><use href="#i-check"/></svg></span></label>
+            <div class="todo-b">
+              <div class="todo-t">走访学生公寓 5 号楼宿舍</div>
+              <div class="todo-m"><span class="tag tag-warning">中</span><span class="nowrap">10-15 19:00</span></div>
+            </div>
+          </div>
+          <div class="todo">
+            <label class="check"><input type="checkbox" class="cbx"><span class="box"><svg class="ic"><use href="#i-check"/></svg></span></label>
+            <div class="todo-b">
+              <div class="todo-t">完成心理预警学生周报</div>
+              <div class="todo-m"><span class="tag tag-warning">中</span><span class="nowrap">10-16 17:00</span></div>
+            </div>
+          </div>
+          <div class="todo">
+            <label class="check"><input type="checkbox" class="cbx"><span class="box"><svg class="ic"><use href="#i-check"/></svg></span></label>
+            <div class="todo-b">
+              <div class="todo-t">组织计应2401班主题班会</div>
+              <div class="todo-m"><span class="tag tag-info">低</span><span class="nowrap">10-18 19:00</span><span>· 关联 陈嘉豪</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 已完成折叠 -->
+        <div class="card">
+          <details class="fold">
+            <summary><svg class="ic fold-chev" width="16" height="16"><use href="#i-chev-d"/></svg>已完成 2 项（点击展开）</summary>
+            <div class="todo" style="margin-top:6px">
+              <label class="check"><input type="checkbox" class="cbx" checked><span class="box"><svg class="ic"><use href="#i-check"/></svg></span></label>
+              <div class="todo-b">
+                <div class="todo-t">更新家庭经济困难学生库信息</div>
+                <div class="todo-m"><span class="tag tag-info">低</span><span class="nowrap">10-09 完成</span></div>
+              </div>
+            </div>
+            <div class="todo">
+              <label class="check"><input type="checkbox" class="cbx" checked><span class="box"><svg class="ic"><use href="#i-check"/></svg></span></label>
+              <div class="todo-b">
+                <div class="todo-t">报送 9 月心理月报</div>
+                <div class="todo-m"><span class="tag tag-warning">中</span><span class="nowrap">10-10 完成</span></div>
+              </div>
+            </div>
+          </details>
+        </div>
+
+      </div>
+
+      <nav class="m-tabbar">
+        <a class="tab"><svg class="ic"><use href="#i-grid4"/></svg>工作台</a>
+        <a class="tab"><svg class="ic"><use href="#i-users"/></svg>学生管理</a>
+        <a class="tab"><svg class="ic"><use href="#i-triangle"/></svg>预警管理<span class="badge">7</span></a>
+        <a class="tab on"><svg class="ic"><use href="#i-checksq"/></svg>待办提醒<span class="badge">3</span></a>
+        <a class="tab"><svg class="ic"><use href="#i-grid"/></svg>更多<span class="badge">3</span></a>
+      </nav>
+
+    </div>
+  </div>
+
+  <p class="stage-note"><b>解决什么</b>：逾期项除了红色还带「已逾期 1 天」文字标识；打卡是 44px 大热区、勾选即划线降权；已完成折叠收起，避免干扰当日行动。</p>
+</section>
+
+<!-- ======================================================================
+     屏 07 · 审批中心（列表 ↔ 详情，驳回必填意见）
+     ====================================================================== -->
+<section class="stage">
+  <div class="stage-head">
+    <span class="stage-no">07</span>
+    <span class="stage-name">审批中心</span>
+    <span class="stage-route">/approvals</span>
+  </div>
+
+  <div class="phone">
+    <div class="screen">
+
+      <div class="statusbar">
+        <span>9:41</span>
+        <span class="sb-r">
+          <svg class="ic" width="16" height="16"><use href="#i-sig"/></svg>
+          <svg class="ic" width="15" height="15"><use href="#i-wifi"/></svg>
+          <svg class="ic" width="22" height="16"><use href="#i-batt"/></svg>
+        </span>
+      </div>
+
+      <div class="m-topbar">
+        <span class="tb-logo">杭</span>
+        <span class="tb-title">审批中心</span>
+        <span class="tb-right">
+          <button class="iconbtn" aria-label="提醒中心"><svg class="ic" width="20" height="20"><use href="#i-bell"/></svg><span class="badge" style="min-width:20px">13</span></button>
+        </span>
+      </div>
+
+      <div class="m-scroll">
+        <input type="checkbox" id="appr7" class="tgl">
+
+        <!-- 列表 -->
+        <div class="appr-list">
+          <div class="chip-row">
+            <span class="chip on">待审批 3</span><span class="chip">已通过</span><span class="chip">已驳回</span>
+          </div>
+
+          <div class="card press">
+            <div style="display:flex;align-items:flex-start;gap:10px">
+              <span class="ava">吴</span>
+              <div style="flex:1;min-width:0">
+                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                  <span class="t1">吴宇轩</span><span class="tag tag-info">学生请假</span>
+                </div>
+                <div class="t3" style="margin-top:2px">大数2401 · 2024020101</div>
+                <div class="t4 wrap" style="margin-top:4px">因感冒发烧申请病假 2 天（9月27日-28日），已提供校医院就诊证明</div>
+                <div class="t4" style="margin-top:4px">今天 08:40 提交</div>
+              </div>
+            </div>
+            <label class="btn btn-primary btn-block" for="appr7" style="margin-top:10px;min-height:44px">去审批</label>
+          </div>
+
+          <div class="card press">
+            <div style="display:flex;align-items:flex-start;gap:10px">
+              <span class="ava">何</span>
+              <div style="flex:1;min-width:0">
+                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                  <span class="t1">何雨欣</span><span class="tag tag-success">助学金申请</span>
+                </div>
+                <div class="t3" style="margin-top:2px">计应2501 · 2025010102</div>
+                <div class="t4 wrap" style="margin-top:4px">申请本学年国家助学金（二档），家庭经济困难认定已通过</div>
+                <div class="t4" style="margin-top:4px">今天 09:15 提交</div>
+              </div>
+            </div>
+            <button class="btn btn-ghost btn-block" style="margin-top:10px;min-height:44px">去审批</button>
+          </div>
+
+          <div class="card press">
+            <div style="display:flex;align-items:flex-start;gap:10px">
+              <span class="ava">唐</span>
+              <div style="flex:1;min-width:0">
+                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                  <span class="t1">唐浩宇</span><span class="tag tag-info">学生请假</span>
+                </div>
+                <div class="t3" style="margin-top:2px">电商2601 · 2026030101</div>
+                <div class="t4 wrap" style="margin-top:4px">因参加省级电子商务技能竞赛集训，申请请假 3 天（9月28日-30日）</div>
+                <div class="t4" style="margin-top:4px">昨天 16:20 提交</div>
+              </div>
+            </div>
+            <button class="btn btn-ghost btn-block" style="margin-top:10px;min-height:44px">去审批</button>
+          </div>
+        </div>
+
+        <!-- 详情（点击「去审批」进入） -->
+        <div class="appr-detail">
+          <div class="card">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span class="ava">吴</span>
+              <div style="flex:1;min-width:0">
+                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                  <span class="t1">吴宇轩</span><span class="tag tag-info">学生请假</span>
+                </div>
+                <div class="t4" style="margin-top:2px">大数2401 · 2024020101 · 今天 08:40</div>
+              </div>
+              <span class="tag tag-warning">待审批</span>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="sec-head"><span class="sec-title"><svg class="ic" width="16" height="16"><use href="#i-file"/></svg>申请内容</span></div>
+            <div class="frow" style="min-height:auto"><span class="fl">摘要</span><span class="fv wrap">因感冒发烧申请病假 2 天（9月27日-28日）</span></div>
+            <div class="frow" style="min-height:auto"><span class="fl">起止</span><span class="fv mono">2026-09-27 ~ 2026-09-28</span></div>
+            <div class="frow" style="min-height:auto"><span class="fl">附件</span><span class="fv">校医院就诊证明.jpg（1）</span></div>
+            <div class="frow" style="min-height:auto"><span class="fl">说明</span><span class="fv wrap">已提供校医院就诊证明，家长知情。</span></div>
+          </div>
+
+          <div class="card">
+            <div class="field">
+              <label>审批决定</label>
+              <div class="decide">
+                <label class="radio"><input type="radio" name="d7"><span class="rd"></span><span>通过</span></label>
+                <label class="radio"><input type="radio" name="d7" id="rj7" checked><span class="rd"></span><span>驳回</span></label>
+              </div>
+            </div>
+
+            <div class="reason" style="margin-top:14px">
+              <div class="field">
+                <label>驳回意见<span class="req">*</span></label>
+                <textarea class="inp" rows="3" placeholder="请说明驳回原因，不少于 5 字"></textarea>
+                <div class="form-err"><svg class="ic"><use href="#i-info"/></svg>请填写驳回意见（必填）</div>
+              </div>
+            </div>
+
+            <!-- 状态示例：提交中 / 禁用（03 §3 规则：提交后禁用并切换文案，防重复提交） -->
+            <div class="field" style="margin-top:14px">
+              <label>按钮状态示例</label>
+              <button class="btn btn-primary btn-block loading" disabled>
+                <svg class="ic spin" width="16" height="16"><use href="#i-spin"/></svg>提交中…
+              </button>
+              <div class="t4" style="margin-top:6px">提交后立即禁用并切换文案，防重复提交</div>
+            </div>
+          </div>
+
+          <div class="m-actionbar">
+            <label class="btn btn-ghost" for="appr7" style="flex:1;min-height:48px">返回</label>
+            <button class="btn btn-primary" style="flex:2;min-height:48px">提交审批结果</button>
+          </div>
+        </div>
+
+      </div>
+
+      <nav class="m-tabbar">
+        <a class="tab"><svg class="ic"><use href="#i-grid4"/></svg>工作台</a>
+        <a class="tab"><svg class="ic"><use href="#i-users"/></svg>学生管理</a>
+        <a class="tab"><svg class="ic"><use href="#i-triangle"/></svg>预警管理<span class="badge">7</span></a>
+        <a class="tab"><svg class="ic"><use href="#i-checksq"/></svg>待办提醒<span class="badge">3</span></a>
+        <a class="tab on"><svg class="ic"><use href="#i-grid"/></svg>更多<span class="badge">3</span></a>
+      </nav>
+
+    </div>
+  </div>
+
+  <p class="stage-note"><b>解决什么</b>：列表一屏看清「谁、什么事、什么时候」，点「去审批」进入全屏详情；驳回时强制展开意见框并给出就近错误提示，通过则不显示该字段；「审批决定」卡内附「提交中…」禁用态示例（防重复提交）。</p>
+</section>
+
+<!-- ======================================================================
+     屏 08 · 更多页（宫格 + 管理员专属分组）
+     ====================================================================== -->
+<section class="stage">
+  <div class="stage-head">
+    <span class="stage-no">08</span>
+    <span class="stage-name">更多</span>
+    <span class="stage-route">Tab 5 · 功能宫格</span>
+  </div>
+
+  <div class="phone">
+    <div class="screen">
+
+      <div class="statusbar">
+        <span>9:41</span>
+        <span class="sb-r">
+          <svg class="ic" width="16" height="16"><use href="#i-sig"/></svg>
+          <svg class="ic" width="15" height="15"><use href="#i-wifi"/></svg>
+          <svg class="ic" width="22" height="16"><use href="#i-batt"/></svg>
+        </span>
+      </div>
+
+      <div class="m-topbar">
+        <span class="tb-logo">杭</span>
+        <span class="tb-title">更多</span>
+        <span class="tb-right">
+          <button class="iconbtn" aria-label="提醒中心"><svg class="ic" width="20" height="20"><use href="#i-bell"/></svg><span class="badge" style="min-width:20px">13</span></button>
+        </span>
+      </div>
+
+      <div class="m-scroll">
+
+        <div class="card" style="padding:14px">
+          <div style="display:flex;align-items:center;gap:12px">
+            <span class="ava lg">王</span>
+            <div style="flex:1;min-width:0">
+              <div class="t1">王老师</div>
+              <div class="t4" style="margin-top:2px">辅导员 · 主责 20 名 / 共管 3 名</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:12px">
+            <button class="btn btn-ghost" style="flex:1"><svg class="ic"><use href="#i-user"/></svg>修改称呼</button>
+            <button class="btn btn-ghost" style="flex:1"><svg class="ic"><use href="#i-logout"/></svg>退出登录</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="sec-head"><span class="sec-title"><svg class="ic" width="16" height="16"><use href="#i-audit"/></svg>常用功能</span></div>
+          <div class="grid3">
+            <div class="gcell">
+              <span class="gic"><svg class="ic"><use href="#i-audit"/></svg></span>
+              <span class="gtx">审批中心</span>
+              <span class="badge">3</span>
+            </div>
+            <div class="gcell">
+              <span class="gic"><svg class="ic"><use href="#i-talk"/></svg></span>
+              <span class="gtx">谈心谈话</span>
+            </div>
+            <div class="gcell">
+              <span class="gic"><svg class="ic"><use href="#i-send"/></svg></span>
+              <span class="gtx">通知发布</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="sec-head"><span class="sec-title"><svg class="ic" width="16" height="16"><use href="#i-folder"/></svg>资料与工具</span></div>
+          <div class="grid3">
+            <div class="gcell">
+              <span class="gic"><svg class="ic"><use href="#i-folder"/></svg></span>
+              <span class="gtx">模板汇总库</span>
+            </div>
+            <div class="gcell">
+              <span class="gic"><svg class="ic"><use href="#i-tool"/></svg></span>
+              <span class="gtx">实用工具</span>
+            </div>
+            <div class="gcell" style="border-style:dashed;border-color:var(--m-border-strong);background:transparent">
+              <span class="gic" style="background:var(--m-sunken);color:var(--m-text-2)"><svg class="ic"><use href="#i-info"/></svg></span>
+              <span class="gtx" style="color:var(--m-text-2)">更多在建</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="sec-head"><span class="sec-title"><svg class="ic" width="16" height="16"><use href="#i-shield"/></svg>管理员专属</span>
+            <span class="sec-more static">仅 role=admin 可见</span>
+          </div>
+          <div class="grid3">
+            <div class="gcell">
+              <span class="gic"><svg class="ic"><use href="#i-shield"/></svg></span>
+              <span class="gtx">用户管理</span>
+            </div>
+            <div class="gcell">
+              <span class="gic"><svg class="ic"><use href="#i-file"/></svg></span>
+              <span class="gtx">访问日志</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="t4" style="text-align:center;padding:4px 0">杭科院 · 辅导员工作台 v1.0 · 移动端 ≤768px</div>
+
+      </div>
+
+      <nav class="m-tabbar">
+        <a class="tab"><svg class="ic"><use href="#i-grid4"/></svg>工作台</a>
+        <a class="tab"><svg class="ic"><use href="#i-users"/></svg>学生管理</a>
+        <a class="tab"><svg class="ic"><use href="#i-triangle"/></svg>预警管理<span class="badge">7</span></a>
+        <a class="tab"><svg class="ic"><use href="#i-checksq"/></svg>待办提醒<span class="badge">3</span></a>
+        <a class="tab on"><svg class="ic"><use href="#i-grid"/></svg>更多<span class="badge">3</span></a>
+      </nav>
+
+    </div>
+  </div>
+
+  <p class="stage-note"><b>解决什么</b>：底部导航装不下的功能全部收进宫格，审批中心放首位并保留角标；管理员项按角色显隐，普通辅导员不渲染该分组。</p>
+</section>
+
+</div>
+
+</body>
+</html>

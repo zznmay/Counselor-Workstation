@@ -22,6 +22,7 @@ import {
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { getStoredUser } from '@/lib/auth';
 import type { DashboardStats, Todo } from '@/types';
+import DashboardMobile from './mobile';
 
 /** 迷你条形图（纯 CSS 实现，无图表库依赖） */
 function MiniBars({ data, color }: { data: { label: string; count: number }[]; color: string }) {
@@ -45,7 +46,7 @@ function MiniBars({ data, color }: { data: { label: string; count: number }[]; c
 }
 
 /** 首页工作台：今日待办、待处理审批、预警名单、关键数据卡片与分布概览 */
-export default function Dashboard() {
+function DashboardDesktop() {
   const navigate = useNavigate();
   const { message } = App.useApp();
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -89,7 +90,7 @@ export default function Dashboard() {
               {stats.pendingWarningCount} 名预警学生需要关注。
             </div>
             <div className="hero-sub">
-              {dayjs().format('YYYY年MM月DD日 dddd')} · 杭州科技职业技术学院
+              {dayjs().format('YYYY年MM月DD日 dddd')} · 知行辅导员工作台
             </div>
           </div>
           <div className="hero-art" aria-hidden>
@@ -343,4 +344,13 @@ export default function Dashboard() {
       </Row>
     </div>
   );
+}
+
+/**
+ * 视口分发：≤768px 走移动端独立渲染层（卡片化 + 触控优化），
+ * 桌面端沿用原组件，桌面样式与行为零改动。
+ */
+export default function Dashboard() {
+  const isMobile = useIsMobile();
+  return isMobile ? <DashboardMobile /> : <DashboardDesktop />;
 }

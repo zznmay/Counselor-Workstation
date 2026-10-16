@@ -3,6 +3,18 @@
    —— #5F86FF 界面蓝 / #A9C2FF 科技浅蓝 / #F4F7FF 系统白 / #2F3E66 深界面蓝
    ====================================================================== */
 
+/* ── 关闭强制暗色（自动深色）───────────────────────────────────────────
+   本项目全站仅提供浅色主题。部分运行环境（Chrome/Edge「自动深色模式」、
+   Android WebView force-dark、iOS 夜间模式、以及各类内嵌浏览器）会在
+   prefers-color-scheme: dark 时对未声明主题的页面自动反色，破坏既定配色。
+   `color-scheme: only light` 是各引擎公认的显式退出声明：
+   既让 UA 不再施加自动深色，也让表单控件/滚动条/默认背景保持浅色。
+   index.html 中另有 <meta name="color-scheme" content="only light"> 在前置阶段生效。 */
+:root,
+html {
+  color-scheme: only light;
+}
+
 :root {
   --app-primary: #5f86ff;
   --app-primary-strong: #4a6fe3;
@@ -1078,5 +1090,22 @@ body {
 
   .hero-title {
     font-size: 17px;
+  }
+}
+
+/* ======================================================================
+   防缩放兜底（≤768px）：iOS Safari 在输入控件计算字号 < 16px 时，
+   聚焦瞬间会自动放大页面且无法被 user-scalable=no 阻止。
+   统一提到 16px 根治；仅移动断点生效，桌面端排版零影响。
+   ====================================================================== */
+@media (max-width: 768px) {
+  input,
+  textarea,
+  select,
+  .ant-input,
+  .ant-input-affix-wrapper,
+  .ant-select-selection-search-input,
+  .ant-select-selector input.ant-select-selection-search-input {
+    font-size: 16px !important;
   }
 }

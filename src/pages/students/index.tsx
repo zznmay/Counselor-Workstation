@@ -64,6 +64,7 @@ import type {
   StudentQuery,
   StudentStatus,
 } from '@/types';
+import StudentsMobile from './mobile';
 
 interface StudentFormValues {
   studentNo: string;
@@ -89,7 +90,7 @@ interface StudentFormValues {
 }
 
 /** 学生信息管理：列表 / 筛选搜索 / 新增 / 编辑 / 删除 / 详情 */
-export default function Students() {
+function StudentsDesktop() {
   const isMobile = useIsMobile();
   const { message } = App.useApp();
   const [form] = Form.useForm<StudentFormValues>();
@@ -749,4 +750,13 @@ export default function Students() {
       </Modal>
     </div>
   );
+}
+
+/**
+ * 视口分发：≤768px 走移动端独立渲染层（卡片化 + 触控优化），
+ * 桌面端沿用原组件，桌面样式与行为零改动。
+ */
+export default function Students() {
+  const isMobile = useIsMobile();
+  return isMobile ? <StudentsMobile /> : <StudentsDesktop />;
 }

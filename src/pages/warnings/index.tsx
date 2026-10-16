@@ -42,6 +42,7 @@ import type {
   WarningStatus,
   WarningType,
 } from '@/types';
+import WarningsMobile from './mobile';
 
 interface WarningFormValues {
   studentId: string;
@@ -54,7 +55,7 @@ interface WarningFormValues {
 }
 
 /** 学业与心理预警：列表 / 筛选搜索 / 录入 / 编辑 / 删除 / 详情与处理 */
-export default function Warnings() {
+function WarningsDesktop() {
   const isMobile = useIsMobile();
   const { message } = App.useApp();
   const [form] = Form.useForm<WarningFormValues>();
@@ -379,4 +380,13 @@ export default function Warnings() {
       </Modal>
     </div>
   );
+}
+
+/**
+ * 视口分发：≤768px 走移动端独立渲染层（卡片化 + 触控优化），
+ * 桌面端沿用原组件，桌面样式与行为零改动。
+ */
+export default function Warnings() {
+  const isMobile = useIsMobile();
+  return isMobile ? <WarningsMobile /> : <WarningsDesktop />;
 }

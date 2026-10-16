@@ -1,4 +1,4 @@
-/** 辅导员工作台本地化服务端入口：HTTPS + 静态托管 + REST API */
+/** 知行辅导员工作台本地化服务端入口：HTTPS + 静态托管 + REST API */
 const fs = require('fs');
 const https = require('https');
 const path = require('path');
@@ -79,7 +79,7 @@ server.listen(config.PORT, '0.0.0.0', () => {
   const ips = config.lanIps();
   console.error(`[net] 已监听 0.0.0.0:${config.PORT} (${scheme})`);
   console.log('==============================================');
-  console.log('  辅导员工作台 · 本地化服务端已启动');
+  console.log('  知行辅导员工作台 · 本地化服务端已启动');
   console.log(`  本机访问:    ${scheme}://localhost:${config.PORT}`);
   ips.forEach((ip) => console.log(`  局域网访问:  ${scheme}://${ip}:${config.PORT}`));
   if (useTls) console.log('  首次访问浏览器会提示证书不受信任，属自签证书正常现象');

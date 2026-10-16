@@ -42,6 +42,7 @@ import type {
   ApprovalType,
   StudentOption,
 } from '@/types';
+import ApprovalsMobile from './mobile';
 
 interface ApprovalFormValues {
   type: ApprovalType;
@@ -51,7 +52,7 @@ interface ApprovalFormValues {
 }
 
 /** 审批中心：待办审批处理（通过/驳回）、申请登记、筛选搜索与详情查看 */
-export default function Approvals() {
+function ApprovalsDesktop() {
   const isMobile = useIsMobile();
   const { message } = App.useApp();
   const [form] = Form.useForm<ApprovalFormValues>();
@@ -386,4 +387,13 @@ export default function Approvals() {
       </Modal>
     </div>
   );
+}
+
+/**
+ * 视口分发：≤768px 走移动端独立渲染层（卡片化 + 触控优化），
+ * 桌面端沿用原组件，桌面样式与行为零改动。
+ */
+export default function Approvals() {
+  const isMobile = useIsMobile();
+  return isMobile ? <ApprovalsMobile /> : <ApprovalsDesktop />;
 }

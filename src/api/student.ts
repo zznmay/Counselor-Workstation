@@ -11,6 +11,11 @@ export async function getStudents(query: StudentQuery): Promise<PageResult<Stude
   return request<PageResult<Student>>(`/students?${params.toString()}`);
 }
 
+/** 单个学生（移动端详情页按 id 拉取，避免依赖列表页缓存） */
+export async function getStudent(id: string): Promise<Student> {
+  return request<Student>(`/students/${id}`);
+}
+
 export interface CoManager {
   id: number;
   name: string;
