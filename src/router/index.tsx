@@ -1,12 +1,10 @@
 import BasicLayout from '@/layouts/BasicLayout';
 import AdminLogs from '@/pages/admin/logs';
 import AdminUsers from '@/pages/admin/users';
-import Approvals from '@/pages/approvals';
 import Conversations from '@/pages/conversations';
 import Dashboard from '@/pages/dashboard';
 import Login from '@/pages/login';
 import MorePage from '@/pages/more';
-import Notices from '@/pages/notices';
 import Students from '@/pages/students';
 import StudentDetailMobile from '@/pages/students/mobileDetail';
 import Templates from '@/pages/templates';
@@ -49,8 +47,6 @@ export const router = createBrowserRouter([
       { path: 'more', element: <MorePage /> },
       { path: 'conversations', element: <Conversations /> },
       { path: 'warnings', element: <Warnings /> },
-      { path: 'notices', element: <Notices /> },
-      { path: 'approvals', element: <Approvals /> },
       { path: 'todos', element: <TodoList /> },
       { path: 'templates', element: <Templates /> },
       { path: 'tools', element: <ToolsIndex /> },

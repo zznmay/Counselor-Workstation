@@ -10,7 +10,6 @@ import {
   FolderOpenOutlined,
   LogoutOutlined,
   MenuOutlined,
-  NotificationOutlined,
   SettingOutlined,
   TeamOutlined,
   ToolOutlined,
@@ -45,8 +44,6 @@ const TITLES: Record<string, string> = {
   '/students': '学生信息管理',
   '/conversations': '谈心谈话记录',
   '/warnings': '学业与心理预警',
-  '/notices': '通知发布',
-  '/approvals': '审批中心',
   '/todos': '待办提醒',
   '/templates': '申请表模板汇总库',
   '/tools': '实用工具',
@@ -62,7 +59,7 @@ export default function BasicLayout() {
   const { message, modal } = App.useApp();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [badges, setBadges] = useState({ warnings: 0, approvals: 0, todos: 0 });
+  const [badges, setBadges] = useState({ warnings: 0, todos: 0 });
 
   /* ---------- 称呼信息与每日问候 ---------- */
   const [authUser, setAuthUser] = useState<AuthUser | null>(() => getStoredUser());
@@ -129,13 +126,12 @@ export default function BasicLayout() {
     });
   };
 
-  // 徽标数：未解除预警 / 待审批 / 今日待办（切换页面时刷新，保证及时性）
+  // 徽标数：未解除预警 / 今日待办（切换页面时刷新，保证及时性）
   useEffect(() => {
     getDashboardStats()
       .then((stats) =>
         setBadges({
           warnings: stats.pendingWarningCount,
-          approvals: stats.pendingApprovalCount,
           todos: stats.todayTodoCount,
         }),
       )
@@ -158,8 +154,6 @@ export default function BasicLayout() {
       { key: '/students', icon: <TeamOutlined />, label: '学生管理' },
       { key: '/conversations', icon: <CommentOutlined />, label: '谈心谈话' },
       { key: '/warnings', icon: <AlertOutlined />, label: withBadge('预警管理', badges.warnings) },
-      { key: '/notices', icon: <NotificationOutlined />, label: '通知发布' },
-      { key: '/approvals', icon: <AuditOutlined />, label: withBadge('审批中心', badges.approvals) },
       { key: '/todos', icon: <CheckSquareOutlined />, label: withBadge('待办提醒', badges.todos) },
       { key: '/templates', icon: <FolderOpenOutlined />, label: '模板汇总库' },
       {
@@ -215,7 +209,7 @@ export default function BasicLayout() {
   const tool = TOOLS.find((t) => t.path === location.pathname);
   const detailTitle = location.pathname.startsWith('/students/') ? '学生详情' : null;
   const title = detailTitle ?? TITLES[location.pathname] ?? tool?.title ?? '知行辅导员工作台';
-  const totalAlert = badges.warnings + badges.approvals + badges.todos;
+  const totalAlert = badges.warnings + badges.todos;
   const roleLabel = authUser?.role === 'admin' ? '管理员' : '辅导员';
 
   /* ==================== 移动端外壳（≤768px） ====================

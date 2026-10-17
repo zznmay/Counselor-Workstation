@@ -1,7 +1,5 @@
-import { useEffect, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 
-import { getDashboardStats } from '@/api/dashboard';
 import { MIcon } from '@/components/mobile/icons';
 import type { MIconName } from '@/components/mobile/icons';
 import { useIsMobile } from '@/hooks/useIsMobile';
@@ -12,14 +10,11 @@ interface MoreItem {
   label: string;
   icon: MIconName;
   adminOnly?: boolean;
-  badge?: 'approvals';
 }
 
 /** 底部导航收纳页：装不下的功能按「业务 / 资料 / 系统」分组呈现 */
 const BUSINESS: MoreItem[] = [
-  { key: '/approvals', label: '审批中心', icon: 'file', badge: 'approvals' },
   { key: '/conversations', label: '谈心谈话', icon: 'comment' },
-  { key: '/notices', label: '通知发布', icon: 'bell' },
 ];
 
 const RESOURCES: MoreItem[] = [
@@ -34,21 +29,13 @@ const SYSTEM: MoreItem[] = [
 
 /**
  * 「更多」页：移动端第 5 个 Tab。
- * 管理员专属入口按 role 过滤；审批中心带角标且排在业务组首位。
+ * 管理员专属入口按 role 过滤。
  */
 export default function MorePage() {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const user = getStoredUser();
   const isAdmin = user?.role === 'admin';
-  const [approvalCount, setApprovalCount] = useState(0);
-
-  useEffect(() => {
-    if (!isMobile) return;
-    getDashboardStats()
-      .then((s) => setApprovalCount(s.pendingApprovalCount))
-      .catch(() => undefined);
-  }, [isMobile]);
 
   /* 「更多」是移动端专属页；桌面端有完整侧边菜单，直接回工作台 */
   if (!isMobile) return <Navigate to="/" replace />;
@@ -66,11 +53,6 @@ export default function MorePage() {
             <button key={item.key} type="button" className="m-gcell" onClick={() => navigate(item.key)} aria-label={item.label}>
               <span className="m-gcell-wrap">
                 <MIcon name={item.icon} size={24} />
-                {item.badge === 'approvals' && approvalCount > 0 && (
-                  <span className="m-badge" style={{ top: -6, left: '100%', marginLeft: -6 }}>
-                    {approvalCount > 99 ? '99+' : approvalCount}
-                  </span>
-                )}
               </span>
               {item.label}
             </button>

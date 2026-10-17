@@ -17,4 +17,13 @@ process.on('unhandledRejection', (err) => {
 
 console.error('[boot] node=%s pid=%s PORT=%s cwd=%s', process.version, process.pid, process.env.PORT, process.cwd());
 
+// 一次性重置开关: RESET_DB=1 时清空数据目录, 强制按种子重新初始化
+// (用于云端数据不可用/密码遗忘的恢复; 日常启动不要带该变量, 否则每次重启都会清空数据)
+if (process.env.RESET_DB === '1') {
+  const fs = require('fs');
+  const { DATA_DIR } = require('./lib/config');
+  fs.rmSync(DATA_DIR, { recursive: true, force: true });
+  console.error('[boot] RESET_DB=1 → 已清空数据目录, 将按种子重新初始化');
+}
+
 require('./index.js');

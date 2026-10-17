@@ -1,0 +1,134 @@
+/* ============================================================
+   PC 端登录页（桌面端）—— 设计稿等比舞台
+   基准画布 836 x 470.5 逻辑 px (16:9); 根缩放 = max(vw/836, vh/470.5)
+   舞台随视口等比放大并居中裁剪, 观感与设计稿 1:1, 无留白边
+   ============================================================ */
+.lgpc-stage{
+  position:fixed;inset:0;overflow:hidden;
+  display:grid;place-items:center;
+  background:linear-gradient(160deg,#0E68E8 0%,#2E8BF4 60%,#5AA9F8 100%);
+}
+.lgpc-scaler{
+  position:relative;width:836px;height:470.5px;flex:none;
+  transform:scale(var(--lgpc-scale,1));transform-origin:center center;
+  background:url('/login/pc-bg.webp') center/100% 100% no-repeat,#116DE9;
+}
+
+/* ---------- 品牌行 / 标语 / 主文案 ---------- */
+.lgpc-brand{position:absolute;left:40px;top:28.5px;height:28.5px;display:flex;align-items:center}
+.lgpc-brand img{display:block;height:27.5px;width:auto}
+.lgpc-brand-zx{margin-left:13px;font-size:24px;font-weight:900;color:#fff;letter-spacing:1px;line-height:1;text-shadow:0 1px 10px rgba(10,60,140,.22)}
+.lgpc-brand-zw{margin-left:12px;align-self:flex-end;padding-bottom:3px;font-size:13.5px;font-weight:400;color:rgba(255,255,255,.95);line-height:1}
+.lgpc-slogan{position:absolute;right:40px;top:38.5px;margin:0;font-size:9.5px;line-height:15px;letter-spacing:.5px;color:rgba(255,255,255,.95)}
+.lgpc-title{
+  position:absolute;left:52.5px;top:110px;margin:0;
+  font-size:51px;line-height:61px;font-weight:900;color:#fff;letter-spacing:2.5px;
+  -webkit-text-stroke:.5px #fff;text-shadow:0 3px 20px rgba(9,58,140,.22);
+}
+.lgpc-title span{display:block}
+.lgpc-title .l2{padding-left:16.5px}
+.lgpc-dash{position:absolute;left:59px;top:239px;width:17px;height:3px;border-radius:1.5px;background:rgba(255,255,255,.92)}
+.lgpc-sub{position:absolute;left:64px;top:251px;margin:0;font-size:12px;line-height:20px;letter-spacing:4.5px;color:rgba(255,255,255,.96)}
+.lgpc-feats{position:absolute;left:47.5px;top:295px;margin:0;padding:0;list-style:none;display:flex}
+.lgpc-feats li{width:63.5px;display:flex;flex-direction:column;align-items:center}
+.lgpc-feats svg{display:block;width:20px;height:17px;color:#fff;filter:drop-shadow(0 1px 6px rgba(9,58,140,.25))}
+.lgpc-feats .t{margin-top:5.5px;font-size:8px;line-height:11px;color:rgba(255,255,255,.96);letter-spacing:.5px}
+
+/* ---------- 登录卡片 ---------- */
+.lgpc-card{
+  position:absolute;left:516.5px;top:85.5px;width:288.5px;height:324.5px;
+  background:#fff;border-radius:24px;
+  box-shadow:0 12px 30px rgba(16,74,171,.18),0 4px 10px rgba(16,74,171,.08);
+}
+.lgpc-card.shake{animation:lgpc-shake .45s cubic-bezier(.36,.07,.19,.97)}
+@keyframes lgpc-shake{
+  10%,90%{transform:translateX(-2px)}
+  20%,80%{transform:translateX(3px)}
+  30%,50%,70%{transform:translateX(-4px)}
+  40%,60%{transform:translateX(4px)}
+}
+@media (prefers-reduced-motion:reduce){.lgpc-card.shake{animation:none}}
+.lgpc-card-title{position:absolute;left:35.5px;top:36.5px;margin:0;font-size:22.5px;line-height:30px;font-weight:800;color:#1D1D1F}
+.lgpc-card-sub{position:absolute;left:35.5px;top:70.5px;margin:0;font-size:12px;line-height:16px;color:#86868B}
+
+/* 输入框 */
+.lgpc-field{
+  position:absolute;left:36px;width:214px;height:36px;
+  border:1px solid #E9EAEC;border-radius:7px;background:#fff;
+  display:flex;align-items:center;
+  transition:border-color .15s ease,box-shadow .15s ease;
+}
+.lgpc-field:focus-within{border-color:#116DE9;box-shadow:0 0 0 3px rgba(17,109,233,.09)}
+.lgpc-field.is-error{border-color:#D93025}
+.lgpc-field.is-error:focus-within{box-shadow:0 0 0 3px rgba(217,48,37,.09)}
+.lgpc-field-user{top:107.5px}
+.lgpc-field-pwd{top:152.5px}
+.lgpc-field-new{top:150px}
+.lgpc-field-confirm{top:194px}
+.lgpc-ico{position:absolute;left:14px;top:50%;transform:translateY(-50%);width:12px;height:12px;color:#66686C;pointer-events:none}
+.lgpc-field input{
+  width:100%;height:100%;margin:0;border:0;background:none;outline:none;
+  font:inherit;font-size:10.2px;color:#1D1D1F;word-spacing:-1.5px;
+  padding:0 34px 0 36.5px;border-radius:inherit;
+}
+.lgpc-field input::placeholder{color:#999A9F}
+.lgpc-eye{
+  position:absolute;right:8px;top:50%;transform:translateY(-50%);
+  width:24px;height:24px;padding:0;border:0;background:none;cursor:pointer;
+  display:grid;place-items:center;color:#3A3D45;
+}
+.lgpc-eye svg{width:16px;height:16px}
+
+/* 按钮 */
+.lgpc-btn{
+  position:absolute;left:36px;width:216px;height:36px;
+  border:0;border-radius:99px;background:#116DE9;color:#fff;
+  font:inherit;font-size:12px;font-weight:600;letter-spacing:1px;
+  cursor:pointer;transition:background .15s ease,transform .12s ease,opacity .15s ease;
+  box-shadow:0 8px 20px rgba(17,109,233,.25);
+}
+.lgpc-btn:hover{background:#0E63D6}
+.lgpc-btn:active{transform:scale(.99)}
+.lgpc-btn[disabled]{opacity:.65;cursor:default;box-shadow:none}
+.lgpc-btn-login{top:207px}
+.lgpc-btn-change{top:236px}
+
+/* 内联错误 */
+.lgpc-error{
+  position:absolute;left:36px;top:194px;margin:0;
+  font-size:8.5px;line-height:12px;color:#D93025;
+  display:flex;align-items:center;gap:4px;
+}
+.lgpc-error svg{flex:none;width:11px;height:11px}
+.lgpc-error-change{top:280px}
+/* 协议行（与参考稿一致） */
+.lgpc-agree{position:absolute;left:36px;top:267.5px;display:flex;align-items:flex-start}
+.lgpc-agree input{
+  appearance:none;-webkit-appearance:none;flex:none;
+  width:12px;height:12px;margin:0;margin-top:1px;
+  border:1px solid #A9ABB0;border-radius:3.5px;background:#fff;
+  cursor:pointer;position:relative;
+}
+.lgpc-agree input:checked{background:#116DE9;border-color:#116DE9}
+.lgpc-agree input:checked::after{
+  content:"";position:absolute;left:3.2px;top:1.4px;
+  width:2.5px;height:5.2px;border:solid #fff;border-width:0 1.5px 1.5px 0;
+  transform:rotate(45deg);
+}
+.lgpc-agree label{margin-left:4px;font-size:8.2px;line-height:11px;color:#5A5D63;cursor:pointer;white-space:nowrap}
+.lgpc-agree a{color:#116DE9;text-decoration:none}
+.lgpc-agree a:hover{text-decoration:underline}
+
+/* ---------- 首次登录改密视图 ---------- */
+.lgpc-change{position:absolute;inset:0}
+.lgpc-ring{
+  position:absolute;left:50%;top:30px;transform:translateX(-50%);
+  width:44px;height:44px;border-radius:50%;
+  background:rgba(17,109,233,.1);display:grid;place-items:center;color:#116DE9;
+}
+.lgpc-ring svg{width:20px;height:20px}
+.lgpc-change h2{position:absolute;left:0;right:0;top:84px;margin:0;text-align:center;font-size:18px;line-height:24px;font-weight:800;color:#1D1D1F}
+.lgpc-change-note{
+  position:absolute;left:30px;right:30px;top:112px;margin:0;text-align:center;
+  font-size:10px;line-height:15px;color:#86868B;
+}

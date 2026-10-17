@@ -14,7 +14,6 @@ import { getDashboardStats } from '@/api/dashboard';
 import { updateTodo } from '@/api/todo';
 import StatCard from '@/components/StatCard';
 import {
-  APPROVAL_TYPE_COLOR,
   TODO_PRIORITY_COLOR,
   WARNING_LEVEL_COLOR,
   WARNING_TYPE_COLOR,
@@ -275,61 +274,7 @@ function DashboardDesktop() {
       </Row>
 
       <Row gutter={[16, 16]}>
-        <Col xs={24} lg={12}>
-          <Card
-            title={
-              <Space>
-                待处理审批
-                <Tag color="orange">{stats.pendingApprovalCount} 件</Tag>
-              </Space>
-            }
-            extra={
-              <Button type="link" size="small" onClick={() => navigate('/approvals')}>
-                进入审批中心
-              </Button>
-            }
-          >
-            <List
-              dataSource={stats.pendingApprovals}
-              renderItem={(a) => (
-                <List.Item
-                  actions={[
-                    <Button
-                      key="go"
-                      type="link"
-                      size="small"
-                      onClick={() => navigate('/approvals')}
-                    >
-                      去审批
-                    </Button>,
-                  ]}
-                >
-                  <List.Item.Meta
-                    title={
-                      <Space size={8} wrap>
-                        <Tag color={APPROVAL_TYPE_COLOR[a.type]}>{a.type}</Tag>
-                        <span style={{ fontWeight: 600 }}>{a.studentName}</span>
-                        <span style={{ fontSize: 12, color: 'rgba(0,0,0,0.45)' }}>
-                          {a.className}
-                        </span>
-                      </Space>
-                    }
-                    description={
-                      <Typography.Paragraph
-                        type="secondary"
-                        ellipsis={{ rows: 1, tooltip: a.summary }}
-                        style={{ marginBottom: 0 }}
-                      >
-                        {a.summary}
-                      </Typography.Paragraph>
-                    }
-                  />
-                </List.Item>
-              )}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} lg={12}>
+        <Col xs={24}>
           <Card title="数据概览">
             <Typography.Title level={5} style={{ marginTop: 0 }}>
               未解除预警类型分布
