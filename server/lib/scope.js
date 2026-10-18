@@ -2,7 +2,8 @@
 const dbx = require('./db');
 
 function isAdmin(user) {
-  return user?.role === 'admin';
+  // 主角色规则：集合含 admin 时 users.role 已同步为 admin；roleKeys 兜底防御脏数据
+  return user?.role === 'admin' || (Array.isArray(user?.roleKeys) && user.roleKeys.includes('admin'));
 }
 
 /**

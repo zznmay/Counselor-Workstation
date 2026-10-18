@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 
 import { getStudent } from '@/api/student';
-import MaskedValue from '@/components/mobile/MaskedValue';
+import MaskedValue, { maskValue } from '@/components/mobile/MaskedValue';
 import { MIcon } from '@/components/mobile/icons';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { canManageStudentFront, getStoredUser } from '@/lib/auth';
@@ -22,6 +22,31 @@ function KV({ k, v, nowrap }: { k: string; v?: string | null; nowrap?: boolean }
       <span className="m-kv-k">{k}</span>
       <span className={`m-kv-v${nowrap ? ' nowrap' : ''}`}>{v}</span>
     </div>
+  );
+}
+
+/** 行内拨号按钮：所见即所得，点击直接拨打该号码（tel: 唤起系统拨号盘） */
+function TelLink({ phone, label }: { phone: string; label: string }) {
+  return (
+    <a
+      href={`tel:${phone}`}
+      className="m-tel"
+      aria-label={`拨打${label}电话 ${maskValue(phone)}`}
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 24,
+        height: 24,
+        borderRadius: '50%',
+        flexShrink: 0,
+        background: 'var(--app-primary-tint)',
+        color: 'var(--info-fg)',
+      }}
+    >
+      <MIcon name="phone" size={13} strokeWidth={2} />
+    </a>
   );
 }
 
@@ -144,24 +169,36 @@ export default function StudentDetailMobile() {
           </span>
           <span className="m-t4">敏感信息默认脱敏</span>
         </div>
+        {/* 每行号码后附行内拨号按钮：本人/父亲/母亲点谁拨谁；底部「拨号」仍默认本人 */}
         <div className="m-kv">
           <span className="m-kv-k">本人电话</span>
-          <span className="m-kv-v nowrap">
+          <span className="m-kv-v nowrap" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
             <MaskedValue value={student.phone} label="本人电话" />
+            <TelLink phone={student.phone} label="本人" />
           </span>
         </div>
         <div className="m-kv">
           <span className="m-kv-k">父亲</span>
-          <span className="m-kv-v nowrap">
-            {student.fatherName || '—'}
-            {student.fatherPhone && <> · <MaskedValue value={student.fatherPhone} label="父亲电话" /></>}
+          <span className="m-kv-v nowrap" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+            <span>{student.fatherName || '—'}</span>
+            {student.fatherPhone && (
+              <>
+                · <MaskedValue value={student.fatherPhone} label="父亲电话" />
+                <TelLink phone={student.fatherPhone} label="父亲" />
+              </>
+            )}
           </span>
         </div>
         <div className="m-kv">
           <span className="m-kv-k">母亲</span>
-          <span className="m-kv-v nowrap">
-            {student.motherName || '—'}
-            {student.motherPhone && <> · <MaskedValue value={student.motherPhone} label="母亲电话" /></>}
+          <span className="m-kv-v nowrap" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+            <span>{student.motherName || '—'}</span>
+            {student.motherPhone && (
+              <>
+                · <MaskedValue value={student.motherPhone} label="母亲电话" />
+                <TelLink phone={student.motherPhone} label="母亲" />
+              </>
+            )}
           </span>
         </div>
       </div>

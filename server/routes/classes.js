@@ -3,6 +3,7 @@ const express = require('express');
 
 const dbx = require('../lib/db');
 const auth = require('../lib/auth');
+const { requirePermission } = require('../lib/permissions');
 const { logAccess, nowStr } = require('../lib/audit');
 
 const router = express.Router();
@@ -31,7 +32,8 @@ router.get('/options', (req, res) => {
   res.json(rows);
 });
 
-router.use(auth.adminOnly);
+/* 班级维护属「班级管理」模块能力（/options 为跨模块参考数据，不受限） */
+router.use(requirePermission('classes'));
 
 /** 班级列表：关键字 + 年级筛选 + 分页 */
 router.get('/', (req, res) => {

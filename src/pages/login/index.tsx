@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { request } from '@/api/request';
-import { setSession } from '@/lib/auth';
+import { firstAccessiblePath, setSession } from '@/lib/auth';
 import type { AuthUser } from '@/lib/auth';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import LoginMobile from '@/pages/login/mobile';
@@ -117,7 +117,7 @@ function LoginDesktop() {
         setPendingUser(res.user);
         setView('change');
       } else {
-        navigate('/', { replace: true });
+        navigate(firstAccessiblePath(res.user), { replace: true });
       }
     } catch (e2) {
       fail(e2 instanceof Error ? e2.message : '登录失败');
@@ -150,7 +150,7 @@ function LoginDesktop() {
         skipAuthRedirect: true, // 旧密码错误的 401 就地提示，不整页跳转
       });
       setSession(res.token, res.user);
-      navigate('/', { replace: true });
+      navigate(firstAccessiblePath(res.user), { replace: true });
     } catch (e2) {
       fail(e2 instanceof Error ? e2.message : '修改失败');
     } finally {

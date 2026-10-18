@@ -4,10 +4,12 @@ const express = require('express');
 const dbx = require('../lib/db');
 const auth = require('../lib/auth');
 const { sensitiveScope, canManageStudent } = require('../lib/scope');
+const { requirePermission } = require('../lib/permissions');
 const { logAccess } = require('../lib/audit');
 
 const router = express.Router();
 router.use(auth.authMiddleware);
+router.use(requirePermission('conversations'));
 
 function toBool(v) { return v === 1 || v === true; }
 

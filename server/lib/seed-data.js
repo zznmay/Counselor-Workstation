@@ -136,4 +136,17 @@ const templateFiles = [
   { id: 'tf15', name: '常用证明材料模板汇总', categoryId: 'tc10', format: 'xlsx', size: 18944, description: '在读证明、住宿证明等常用证明填写模板', uploader: '王老师', updatedAt: '2026-06-22 11:00' },
 ];
 
-module.exports = { counselors, students, conversations, warnings, notices, todos, approvals, templateCategories, templateFiles };
+/**
+ * 心理健康关注标记（studentId → 关注等级）。
+ * 等级：密切关注 / 重点关注 / 日常关注 / 一般关注；仅带班辅导员可见本班数据。
+ */
+const mentalHealth = [
+  { studentId: 's08', level: '密切关注', note: '近期情绪波动较大，心理预警处理中，已联动心理健康教育中心建立一生一策' },
+  { studentId: 's19', level: '重点关注', note: '家庭突发变故（父亲重病），情绪低落，每周至少谈话一次' },
+  { studentId: 's03', level: '重点关注', note: '家庭经济困难叠加学业压力，需持续关注状态' },
+  { studentId: 's05', level: '日常关注', note: '两门课程不及格，学业焦虑明显，结合学业预警帮扶跟进' },
+  { studentId: 's14', level: '日常关注', note: '旷课偏多，出勤与精神状态需持续观察' },
+  { studentId: 's22', level: '一般关注', note: '新生适应期，观察班级融入情况' },
+];
+
+module.exports = { counselors, students, conversations, warnings, notices, todos, approvals, templateCategories, templateFiles, mentalHealth };

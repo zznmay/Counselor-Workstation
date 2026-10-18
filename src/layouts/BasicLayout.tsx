@@ -9,8 +9,10 @@ import {
   DashboardOutlined,
   EditOutlined,
   FolderOpenOutlined,
+  HeartOutlined,
   LogoutOutlined,
   MenuOutlined,
+  SafetyCertificateOutlined,
   SettingOutlined,
   TagsOutlined,
   TeamOutlined,
@@ -21,13 +23,15 @@ import { useEffect, useMemo, useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 
 import { getDashboardStats } from '@/api/dashboard';
+import { getMe } from '@/api/auth';
 import TabBar from '@/components/mobile/TabBar';
 import { MIcon } from '@/components/mobile/icons';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import DailyGreeting from '@/components/DailyGreeting';
 import ProfileModal from '@/components/ProfileModal';
+import { moduleForPath } from '@/constants/modules';
 import { TOOLS } from '@/pages/tools/registry';
-import { clearAuth, getStoredUser, setStoredUser } from '@/lib/auth';
+import { canAccessModule, clearAuth, getStoredUser, isSystemAdmin, setStoredUser } from '@/lib/auth';
 import type { AuthUser } from '@/lib/auth';
 import {
   hasGreetedToday,
@@ -46,13 +50,16 @@ const TITLES: Record<string, string> = {
   '/students': '学生名册',
   '/conversations': '谈心谈话记录',
   '/warnings': '学业与心理预警',
+  '/mental': '心理健康',
   '/todos': '待办提醒',
   '/templates': '申请表模板汇总库',
   '/tools': '实用工具',
   '/classes': '班级管理',
   '/classes/grades': '年级管理',
   '/admin/users': '用户管理',
+  '/admin/roles': '角色管理',
   '/admin/logs': '访问日志',
+  '/forbidden': '无访问权限',
 };
 
 /** 侧边菜单 + 顶栏 + 内容区；桌面端固定侧边栏，移动端抽屉式导航 */
@@ -130,8 +137,39 @@ export default function BasicLayout() {
     });
   };
 
-  // 徽标数：未解除预警 / 今日待办（切换页面时刷新，保证及时性）
+  /**
+   * 权限实时刷新：进入工作台、切换路由时拉取 /auth/me，
+   * 同步角色名与模块权限 —— 管理员调整角色权限后，对应账号无需重新登录即可生效。
+   */
   useEffect(() => {
+    let alive = true;
+    getMe()
+      .then((user) => {
+        if (!alive) return;
+        setStoredUser(user);
+        setAuthUser(user);
+      })
+      .catch(() => undefined);
+    return () => { alive = false; };
+  }, [location.pathname]);
+
+  /** 权限被收回时立即离开当前模块，避免停留在无权限页面继续发请求 */
+  useEffect(() => {
+    if (!authUser) return;
+    const mod = moduleForPath(location.pathname);
+    if (mod && !canAccessModule(authUser, mod)) {
+      navigate('/forbidden', { replace: true });
+    }
+  }, [authUser, location.pathname, navigate]);
+
+  const canDashboard = canAccessModule(authUser, 'dashboard');
+
+  // 徽标数：未解除预警 / 今日待办（切换页面时刷新；无工作台权限时不请求）
+  useEffect(() => {
+    if (!canDashboard) {
+      setBadges({ warnings: 0, todos: 0 });
+      return;
+    }
     getDashboardStats()
       .then((stats) =>
         setBadges({
@@ -140,7 +178,7 @@ export default function BasicLayout() {
         }),
       )
       .catch(() => undefined);
-  }, [location.pathname]);
+  }, [location.pathname, canDashboard]);
 
   const withBadge = (text: string, count: number): ReactNode =>
     count > 0 ? (
@@ -152,15 +190,34 @@ export default function BasicLayout() {
       text
     );
 
-  const menuItems: MenuProps['items'] = useMemo(
-    () => [
-      { key: '/', icon: <DashboardOutlined />, label: '工作台' },
-      { key: '/students', icon: <TeamOutlined />, label: '学生名册' },
-      { key: '/conversations', icon: <CommentOutlined />, label: '谈心谈话' },
-      { key: '/warnings', icon: <AlertOutlined />, label: withBadge('预警管理', badges.warnings) },
-      { key: '/todos', icon: <CheckSquareOutlined />, label: withBadge('待办提醒', badges.todos) },
-      { key: '/templates', icon: <FolderOpenOutlined />, label: '模板汇总库' },
-      {
+  /** 侧边菜单：按当前角色的模块权限过滤；系统管理仅管理员可见 */
+  const menuItems: MenuProps['items'] = useMemo(() => {
+    const can = (key: string) => canAccessModule(authUser, key);
+    const items: NonNullable<MenuProps['items']> = [];
+
+    if (can('dashboard')) {
+      items.push({ key: '/', icon: <DashboardOutlined />, label: '工作台' });
+    }
+    if (can('students')) {
+      items.push({ key: '/students', icon: <TeamOutlined />, label: '学生名册' });
+    }
+    if (can('conversations')) {
+      items.push({ key: '/conversations', icon: <CommentOutlined />, label: '谈心谈话' });
+    }
+    if (can('warnings')) {
+      items.push({ key: '/warnings', icon: <AlertOutlined />, label: withBadge('预警管理', badges.warnings) });
+    }
+    if (can('mentalHealth')) {
+      items.push({ key: '/mental', icon: <HeartOutlined />, label: '心理健康' });
+    }
+    if (can('todos')) {
+      items.push({ key: '/todos', icon: <CheckSquareOutlined />, label: withBadge('待办提醒', badges.todos) });
+    }
+    if (can('templates')) {
+      items.push({ key: '/templates', icon: <FolderOpenOutlined />, label: '模板汇总库' });
+    }
+    if (can('tools')) {
+      items.push({
         key: '/tools',
         icon: <ToolOutlined />,
         label: '实用工具',
@@ -172,33 +229,35 @@ export default function BasicLayout() {
             label: tool.title,
           })),
         ],
-      },
-      ...(authUser?.role === 'admin'
-        ? [
-            {
-              key: '/classes',
-              icon: <ApartmentOutlined />,
-              label: '班级管理',
-              children: [
-                { key: '/classes', icon: <TeamOutlined />, label: '班级管理' },
-                { key: '/classes/grades', icon: <TagsOutlined />, label: '年级管理' },
-              ],
-            },
-            {
-              key: '/admin',
-              icon: <SettingOutlined />,
-              label: '系统管理',
-              children: [
-                { key: '/admin/users', icon: <TeamOutlined />, label: '用户管理' },
-                { key: '/admin/logs', icon: <AuditOutlined />, label: '访问日志' },
-              ],
-            },
-          ]
-        : []),
-    ],
+      });
+    }
+    if (can('classes')) {
+      items.push({
+        key: '/classes',
+        icon: <ApartmentOutlined />,
+        label: '班级管理',
+        children: [
+          { key: '/classes', icon: <TeamOutlined />, label: '班级管理' },
+          { key: '/classes/grades', icon: <TagsOutlined />, label: '年级管理' },
+        ],
+      });
+    }
+    if (isSystemAdmin(authUser)) {
+      items.push({
+        key: '/admin',
+        icon: <SettingOutlined />,
+        label: '系统管理',
+        children: [
+          { key: '/admin/users', icon: <TeamOutlined />, label: '用户管理' },
+          { key: '/admin/roles', icon: <SafetyCertificateOutlined />, label: '角色管理' },
+          { key: '/admin/logs', icon: <AuditOutlined />, label: '访问日志' },
+        ],
+      });
+    }
+
+    return items;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [badges],
-  );
+  }, [badges, authUser]);
 
   const handleMenuClick: MenuProps['onClick'] = ({ key }) => {
     navigate(key);
@@ -223,7 +282,7 @@ export default function BasicLayout() {
   const detailTitle = location.pathname.startsWith('/students/') ? '学生详情' : null;
   const title = detailTitle ?? TITLES[location.pathname] ?? tool?.title ?? '知行辅导员工作台';
   const totalAlert = badges.warnings + badges.todos;
-  const roleLabel = authUser?.role === 'admin' ? '管理员' : '辅导员';
+  const roleLabel = authUser?.roleName ?? (authUser?.role === 'admin' ? '管理员' : '辅导员');
 
   /* ==================== 移动端外壳（≤768px） ====================
      顶栏（含安全区）+ 唯一滚动容器 + 底部 TabBar；桌面端布局完全不受影响。

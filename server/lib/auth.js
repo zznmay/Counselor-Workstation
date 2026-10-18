@@ -4,6 +4,7 @@ const bcrypt = require('bcryptjs');
 
 const { ensureJwtSecret } = require('./config');
 const dbx = require('./db');
+const { isSystemAdmin } = require('./permissions');
 
 const JWT_SECRET = ensureJwtSecret();
 const TOKEN_EXPIRES = '8h';
@@ -72,7 +73,11 @@ function safeUser(row) {
 function findActiveUser(uid) {
   const id = Number(uid);
   if (!Number.isInteger(id) || id <= 0) return null;
-  return dbx.get('SELECT * FROM users WHERE id = ? AND disabled = 0', [id]);
+  const user = dbx.get('SELECT * FROM users WHERE id = ? AND disabled = 0', [id]);
+  if (!user) return null;
+  // 角色集合：多角色权限并集解析依赖（每次请求实时读取，改角色即时生效）
+  user.roleKeys = dbx.all('SELECT roleKey FROM userRoles WHERE userId = ?', [id]).map((r) => r.roleKey);
+  return user;
 }
 
 /** 解析并校验 token，返回负载；失败返回 null */
@@ -111,7 +116,8 @@ function authMiddleware(req, res, next) {
 }
 
 function adminOnly(req, res, next) {
-  if (req.user?.role !== 'admin') return res.status(403).json({ message: '需要管理员权限' });
+  // 角色集合含 admin（或主角色为 admin）即系统管理员
+  if (!isSystemAdmin(req.user)) return res.status(403).json({ message: '需要管理员权限' });
   next();
 }
 

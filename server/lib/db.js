@@ -3,6 +3,7 @@ const { DatabaseSync } = require('node:sqlite');
 const bcrypt = require('bcryptjs');
 
 const { DB_PATH, ensureDirs } = require('./config');
+const { COUNSELOR_DEFAULT_KEYS, COUNSELOR_LEGACY_KEYS } = require('./modules');
 const SEED = require('./seed-data');
 
 ensureDirs();
@@ -23,6 +24,17 @@ const SCHEMA_STATEMENTS = [
     mustChangePassword INTEGER NOT NULL DEFAULT 0,
     disabled INTEGER NOT NULL DEFAULT 0,
     createdAt TEXT NOT NULL
+  )`,
+  /* 角色：users.role 存 roles.key；permissions 为模块 key 的 JSON 数组 */
+  `CREATE TABLE IF NOT EXISTS roles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT,
+    isSystem INTEGER NOT NULL DEFAULT 0,
+    permissions TEXT NOT NULL DEFAULT '[]',
+    createdAt TEXT NOT NULL,
+    updatedAt TEXT NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS students (
     id TEXT PRIMARY KEY,
@@ -85,6 +97,22 @@ const SCHEMA_STATEMENTS = [
     followUp TEXT,
     createdBy TEXT,
     createdAt TEXT
+  )`,
+  /* 心理健康：学生关注标记（1:1 档案）；level ∈ 密切关注/重点关注/日常关注/一般关注。
+     学生删除时随 FK 级联清理（PRAGMA foreign_keys = ON） */
+  `CREATE TABLE IF NOT EXISTS mentalHealth (
+    studentId TEXT PRIMARY KEY REFERENCES students(id) ON DELETE CASCADE,
+    level TEXT NOT NULL,
+    note TEXT,
+    updatedBy TEXT,
+    updatedAt TEXT NOT NULL
+  )`,
+  /* 用户-角色 多对多：users.role 保留为「主角色」（集合含 admin 时主角色即 admin），
+     本表为完整角色集合的唯一事实来源；账号删除时级联清理 */
+  `CREATE TABLE IF NOT EXISTS userRoles (
+    userId INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    roleKey TEXT NOT NULL,
+    PRIMARY KEY (userId, roleKey)
   )`,
   `CREATE TABLE IF NOT EXISTS warnings (
     id TEXT PRIMARY KEY,
@@ -184,6 +212,36 @@ if (!studentCols.includes('classId')) {
 }
 
 /**
+ * 内置角色（幂等）：admin 全量权限；counselor 默认可见业务模块。
+ * 已存在时不覆盖 —— 管理员对内置角色权限的调整在重启后保留。
+ */
+function ensureBuiltinRoles() {
+  const now = () => new Date().toISOString().slice(0, 16).replace('T', ' ');
+  const ins = db.prepare(
+    `INSERT OR IGNORE INTO roles (key, name, description, isSystem, permissions, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  );
+  ins.run('admin', '系统管理员', '内置角色，拥有全部模块权限', 1, JSON.stringify(['*']), now(), now());
+  ins.run('counselor', '辅导员', '内置角色，可访问日常业务模块', 1, JSON.stringify(COUNSELOR_DEFAULT_KEYS), now(), now());
+
+  // 老库无痕升级：counselor 权限仍为初始默认集（管理员未自定义过）时，补配后加模块。
+  // 权限一经管理员调整则保持现状，由管理员在「角色管理」自行勾选新模块。
+  const counselor = db.prepare("SELECT permissions FROM roles WHERE key = 'counselor'").get();
+  if (counselor) {
+    let perms = [];
+    try { perms = JSON.parse(counselor.permissions ?? '[]'); } catch { perms = []; }
+    const untouched = Array.isArray(perms)
+      && perms.length === COUNSELOR_LEGACY_KEYS.length
+      && COUNSELOR_LEGACY_KEYS.every((k) => perms.includes(k));
+    if (untouched) {
+      db.prepare("UPDATE roles SET permissions = ?, updatedAt = ? WHERE key = 'counselor'")
+        .run(JSON.stringify(COUNSELOR_DEFAULT_KEYS), now());
+      console.log('[db] 已为内置「辅导员」角色补配新增模块（心理健康）权限。');
+    }
+  }
+}
+
+/**
  * 学生班级归属回填（幂等）：
  * 将存量学生的 (grade, className) 组合生成年级/班级字典，并回填 classId。
  * 仅处理 classId IS NULL 且两个文本字段非空的行；年级/班级按名称 find-or-create，
@@ -268,6 +326,14 @@ function seed() {
     insWarn.run(w.id, w.studentId, w.type, w.level, w.reason, w.raisedAt, w.status, w.handleNote ?? null, w.handledAt ?? null, counselorUserIds[0]);
   });
 
+  // 心理健康关注标记（学生 id 必须存在于 students，否则跳过）
+  const insMh = db.prepare(
+    'INSERT OR IGNORE INTO mentalHealth (studentId, level, note, updatedBy, updatedAt) VALUES (?, ?, ?, ?, ?)',
+  );
+  (SEED.mentalHealth ?? []).forEach((m) => {
+    insMh.run(m.studentId, m.level, m.note ?? null, '系统管理员', now());
+  });
+
   const insNotice = db.prepare(`INSERT INTO notices
     (id, title, type, scope, content, status, pinned, publishAt, createdAt, author)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
@@ -302,8 +368,25 @@ function seed() {
   console.log('[db] 已完成首次初始化：管理员 admin 与示例数据已写入。');
 }
 
+ensureBuiltinRoles();
 seed();
 ensureStudentClassBackfill();
+ensureUserRoleBackfill();
+
+/**
+ * 用户角色集合回填（幂等）：多角色改造前 users.role 是唯一角色来源，
+ * 将每个账号的主角色补写进 userRoles，保证旧数据升级后角色集合完整。
+ */
+function ensureUserRoleBackfill() {
+  const rows = db.prepare(
+    `SELECT u.id, u.role FROM users u
+     WHERE NOT EXISTS (SELECT 1 FROM userRoles ur WHERE ur.userId = u.id)`,
+  ).all();
+  if (rows.length === 0) return;
+  const ins = db.prepare('INSERT OR IGNORE INTO userRoles (userId, roleKey) VALUES (?, ?)');
+  for (const r of rows) ins.run(r.id, r.role);
+  console.log(`[db] 用户角色集合回填完成：${rows.length} 个账号。`);
+}
 
 /** 统一参数规范化：undefined→null、Date→ISO 串，并做一次 JSON 往返消毒 */
 function normalizeParams(params) {

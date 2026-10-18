@@ -1,11 +1,14 @@
 import BasicLayout from '@/layouts/BasicLayout';
 import AdminLogs from '@/pages/admin/logs';
+import AdminRoles from '@/pages/admin/roles';
 import AdminUsers from '@/pages/admin/users';
 import Classes from '@/pages/classes';
 import Grades from '@/pages/classes/grades';
 import Conversations from '@/pages/conversations';
 import Dashboard from '@/pages/dashboard';
+import Forbidden from '@/pages/forbidden';
 import Login from '@/pages/login';
+import Mental from '@/pages/mental';
 import MorePage from '@/pages/more';
 import Students from '@/pages/students';
 import StudentDetailMobile from '@/pages/students/mobileDetail';
@@ -17,11 +20,26 @@ import Warnings from '@/pages/warnings';
 import { Navigate, createBrowserRouter } from 'react-router-dom';
 import type { ReactNode } from 'react';
 
-import { getToken } from '@/lib/auth';
+import { canAccessModule, getStoredUser, getToken, isSystemAdmin } from '@/lib/auth';
 
 /** 路由守卫：未登录统一跳转登录页 */
 function RequireAuth({ children }: { children: ReactNode }) {
   if (!getToken()) return <Navigate to="/login" replace />;
+  return <>{children}</>;
+}
+
+/**
+ * 模块守卫：与服务端 requirePermission 同口径。
+ * 权限来自本地会话（登录/首次 /auth/me 写入），角色权限变更后由 BasicLayout 刷新并即时收敛。
+ */
+function RequireModule({ moduleKey, children }: { moduleKey: string; children: ReactNode }) {
+  if (!canAccessModule(getStoredUser(), moduleKey)) return <Navigate to="/forbidden" replace />;
+  return <>{children}</>;
+}
+
+/** 系统管理守卫：用户/角色/日志始终仅系统管理员可访问（含多角色集合） */
+function RequireAdmin({ children }: { children: ReactNode }) {
+  if (!isSystemAdmin(getStoredUser())) return <Navigate to="/forbidden" replace />;
   return <>{children}</>;
 }
 
@@ -41,22 +59,25 @@ export const router = createBrowserRouter([
       </RequireAuth>
     ),
     children: [
-      { index: true, element: <Dashboard /> },
-      { path: 'students', element: <Students /> },
+      { index: true, element: <RequireModule moduleKey="dashboard"><Dashboard /></RequireModule> },
+      { path: 'students', element: <RequireModule moduleKey="students"><Students /></RequireModule> },
       /* 移动端学生详情走全屏页（替代桌面端弹窗）；桌面端仍从列表弹窗进入 */
-      { path: 'students/:id', element: <StudentDetailMobile /> },
+      { path: 'students/:id', element: <RequireModule moduleKey="students"><StudentDetailMobile /></RequireModule> },
       /* 移动端底部导航第 5 项「更多」收纳页 */
       { path: 'more', element: <MorePage /> },
-      { path: 'conversations', element: <Conversations /> },
-      { path: 'warnings', element: <Warnings /> },
-      { path: 'todos', element: <TodoList /> },
-      { path: 'templates', element: <Templates /> },
-      { path: 'tools', element: <ToolsIndex /> },
-      { path: 'tools/:toolKey', element: <ToolRunner /> },
-      { path: 'classes', element: <Classes /> },
-      { path: 'classes/grades', element: <Grades /> },
-      { path: 'admin/users', element: <AdminUsers /> },
-      { path: 'admin/logs', element: <AdminLogs /> },
+      { path: 'conversations', element: <RequireModule moduleKey="conversations"><Conversations /></RequireModule> },
+      { path: 'warnings', element: <RequireModule moduleKey="warnings"><Warnings /></RequireModule> },
+      { path: 'mental', element: <RequireModule moduleKey="mentalHealth"><Mental /></RequireModule> },
+      { path: 'todos', element: <RequireModule moduleKey="todos"><TodoList /></RequireModule> },
+      { path: 'templates', element: <RequireModule moduleKey="templates"><Templates /></RequireModule> },
+      { path: 'tools', element: <RequireModule moduleKey="tools"><ToolsIndex /></RequireModule> },
+      { path: 'tools/:toolKey', element: <RequireModule moduleKey="tools"><ToolRunner /></RequireModule> },
+      { path: 'classes', element: <RequireModule moduleKey="classes"><Classes /></RequireModule> },
+      { path: 'classes/grades', element: <RequireModule moduleKey="classes"><Grades /></RequireModule> },
+      { path: 'admin/users', element: <RequireAdmin><AdminUsers /></RequireAdmin> },
+      { path: 'admin/roles', element: <RequireAdmin><AdminRoles /></RequireAdmin> },
+      { path: 'admin/logs', element: <RequireAdmin><AdminLogs /></RequireAdmin> },
+      { path: 'forbidden', element: <Forbidden /> },
       { path: '*', element: <Navigate to="/" replace /> },
     ],
   },

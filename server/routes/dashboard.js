@@ -4,10 +4,12 @@ const dayjs = require('dayjs');
 
 const dbx = require('../lib/db');
 const auth = require('../lib/auth');
+const { requirePermission } = require('../lib/permissions');
 const { sensitiveScope } = require('../lib/scope');
 
 const router = express.Router();
 router.use(auth.authMiddleware);
+router.use(requirePermission('dashboard'));
 
 router.get('/', (req, res) => {
   const todayStr = dayjs().format('YYYY-MM-DD');

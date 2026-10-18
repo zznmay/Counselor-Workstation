@@ -4,6 +4,7 @@ const express = require('express');
 const dbx = require('../lib/db');
 const auth = require('../lib/auth');
 const { canManageStudent } = require('../lib/scope');
+const { requirePermission } = require('../lib/permissions');
 const { logAccess, nowStr } = require('../lib/audit');
 
 const router = express.Router();
@@ -58,12 +59,13 @@ function resolveStudentClassId(body, fallback = {}) {
   return { value: row ? row.id : null };
 }
 
-/** 列表：关键字 + 年级/专业/学籍状态筛选 + 分页（基础信息全员可见，不再按带班过滤） */
-router.get('/', (req, res) => {
-  const { keyword = '', grade, major, status } = req.query;
-  const page = Math.max(1, parseInt(req.query.page) || 1);
-  const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize) || 10));
-  const kw = String(keyword).trim();
+/**
+ * 列表筛选口径（列表查询与批量全选共用，保证「全选当前筛选结果」与所见一致）：
+ * 关键字（姓名/学号/班级/手机号/专业）+ 年级 + 班级 + 专业 + 学籍状态
+ */
+function buildStudentFilter(query) {
+  const { grade, major, status } = query;
+  const kw = String(query.keyword ?? '').trim();
 
   const conds = ['1 = 1'];
   const params = [];
@@ -71,11 +73,20 @@ router.get('/', (req, res) => {
     conds.push('(s.name LIKE ? OR s.studentNo LIKE ? OR s.className LIKE ? OR s.phone LIKE ? OR s.major LIKE ?)');
     params.push(`%${kw}%`, `%${kw}%`, `%${kw}%`, `%${kw}%`, `%${kw}%`);
   }
-  if (grade) { conds.push('s.grade = ?'); params.push(grade); }
-  if (major) { conds.push('s.major = ?'); params.push(major); }
-  if (status) { conds.push('s.status = ?'); params.push(status); }
+  if (grade) { conds.push('s.grade = ?'); params.push(String(grade)); }
+  if (major) { conds.push('s.major = ?'); params.push(String(major)); }
+  if (status) { conds.push('s.status = ?'); params.push(String(status)); }
+  const classId = Number(query.classId);
+  if (Number.isInteger(classId) && classId > 0) { conds.push('s.classId = ?'); params.push(classId); }
 
-  const where = conds.join(' AND ');
+  return { where: conds.join(' AND '), params };
+}
+
+/** 列表：关键字 + 年级/班级/专业/学籍状态筛选 + 分页（基础信息全员可见，不再按带班过滤） */
+router.get('/', (req, res) => {
+  const page = Math.max(1, parseInt(req.query.page) || 1);
+  const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize) || 10));
+  const { where, params } = buildStudentFilter(req.query);
   const total = dbx.get(
     `SELECT COUNT(*) AS c FROM students s WHERE ${where}`,
     params,
@@ -100,6 +111,23 @@ router.get('/options', (req, res) => {
 router.get('/nos', (req, res) => {
   const rows = dbx.all('SELECT s.studentNo FROM students s');
   res.json(rows.map((r) => r.studentNo));
+});
+
+/* —— 以下为名册数据接口：需「学生名册」模块权限（/options、/nos 为跨模块参考数据，不受限） —— */
+router.use(requirePermission('students'));
+
+/**
+ * 批量选择用：当前筛选条件下的全部学生精简信息（不分页，仅管理员）。
+ * 与列表同一套筛选口径，供前端「全选当前筛选结果」与删除确认摘要使用。
+ */
+router.get('/briefs', auth.adminOnly, (req, res) => {
+  const { where, params } = buildStudentFilter(req.query);
+  const rows = dbx.all(
+    `SELECT s.id, s.name, s.studentNo, s.grade, s.className, s.classId
+     FROM students s WHERE ${where} ORDER BY s.studentNo DESC`,
+    params,
+  );
+  res.json(rows);
 });
 
 router.get('/:id', (req, res) => {
@@ -200,6 +228,53 @@ router.delete('/:id', (req, res) => {
   dbx.run('DELETE FROM students WHERE id = ?', [req.params.id]);
   logAccess(req, `删除学生 ${target.name}（${target.studentNo}）`);
   res.json({ ok: true });
+});
+
+/**
+ * 批量删除：仅管理员。单次请求内事务写入（全部成功或全部回滚）。
+ * - 先整批校验目标是否仍存在：有任一已被他人删除则整批拒绝，避免「部分成功」
+ * - 共管关系同步清理；谈话/预警/审批等历史记录保留，便于留档追溯
+ * - 操作日志写入 accessLogs：操作人、时间由 logAccess 记录，action 内附全部学生明细
+ */
+router.post('/batch-delete', auth.adminOnly, (req, res) => {
+  const raw = Array.isArray(req.body?.ids) ? req.body.ids : [];
+  const ids = [...new Set(raw.map((v) => String(v ?? '').trim()).filter(Boolean))];
+  if (ids.length === 0) return res.status(400).json({ message: '请选择要删除的学生' });
+  if (ids.length > 2000) return res.status(400).json({ message: '单次最多删除 2000 名学生，请分批操作' });
+
+  const marks = ids.map(() => '?').join(', ');
+  const targets = dbx.all(
+    `SELECT s.id, s.name, s.studentNo, s.className FROM students s WHERE s.id IN (${marks})`,
+    ids,
+  );
+  if (targets.length !== ids.length) {
+    return res.status(409).json({
+      message: `所选学生中有 ${ids.length - targets.length} 名已不存在（可能已被删除），请刷新列表后重新选择`,
+    });
+  }
+
+  dbx.db.exec('BEGIN IMMEDIATE');
+  try {
+    for (const id of ids) {
+      dbx.run('DELETE FROM studentCounselors WHERE studentId = ?', [id]);
+      const info = dbx.run('DELETE FROM students WHERE id = ?', [id]);
+      if (Number(info.changes) !== 1) throw new Error(`学生 ${id} 删除失败`);
+    }
+    dbx.db.exec('COMMIT');
+  } catch (e) {
+    dbx.db.exec('ROLLBACK');
+    console.error('[students/batch-delete] 事务回滚：', e.message);
+    return res.status(500).json({ message: '批量删除失败，已全部回滚，未产生任何数据变更' });
+  }
+
+  const detail = targets.map((t) => `${t.name}（${t.studentNo}）`).join('、');
+  logAccess(req, `批量删除学生 ${targets.length} 名：${detail}`);
+
+  res.json({
+    ok: true,
+    deletedCount: targets.length,
+    deleted: targets.map((t) => ({ id: t.id, name: t.name, studentNo: t.studentNo, className: t.className })),
+  });
 });
 
 /** 批量追加导入：逐条校验，班级名须匹配班级管理字典（不匹配跳过并计入失败明细） */

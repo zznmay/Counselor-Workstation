@@ -4,12 +4,28 @@ const express = require('express');
 const dbx = require('../lib/db');
 const auth = require('../lib/auth');
 const { classIdsOfUser } = require('../lib/scope');
+const { permissionsOfUser, roleKeysOfUserId } = require('../lib/permissions');
 const { logAccess, clientIp } = require('../lib/audit');
 
 const router = express.Router();
 
-/** 会话用户输出：safeUser 白名单 + 所辖班级（前端按此判断「带班」权限） */
-const withClassIds = (row) => ({ ...auth.safeUser(row), classIds: classIdsOfUser(row) });
+/**
+ * 会话用户输出：safeUser 白名单 + 所辖班级 + 角色集合 + 主角色名 + 有效权限（并集）。
+ * 前端菜单与路由守卫直接消费 permissions；权限变更后重新拉取 /auth/me 即可生效。
+ */
+const withSession = (row) => {
+  // 先取角色集合再解析权限/班级（登录行的原始记录不含 roleKeys）
+  const roleKeys = roleKeysOfUserId(row.id);
+  const rowWithRoles = { ...row, roleKeys };
+  const role = dbx.get('SELECT name FROM roles WHERE key = ?', [rowWithRoles.role]);
+  return {
+    ...auth.safeUser(rowWithRoles),
+    classIds: classIdsOfUser(rowWithRoles),
+    roleKeys,
+    roleName: role?.name ?? (rowWithRoles.role === 'admin' ? '系统管理员' : rowWithRoles.role),
+    permissions: permissionsOfUser(rowWithRoles),
+  };
+};
 
 router.post('/login', (req, res) => {
   const username = String(req.body?.username ?? '').trim();
@@ -45,14 +61,14 @@ router.post('/login', (req, res) => {
   req.user = row;
   logAccess(req, '登录成功');
 
-  res.json({ token, user: withClassIds(row) });
+  res.json({ token, user: withSession(row) });
 });
 
 // 以下接口需要登录
 router.use(auth.authMiddleware);
 
 router.get('/me', (req, res) => {
-  res.json(withClassIds(req.user));
+  res.json(withSession(req.user));
 });
 
 router.patch('/me', (req, res) => {
@@ -62,7 +78,7 @@ router.patch('/me', (req, res) => {
   }
   dbx.run('UPDATE users SET displayName = ? WHERE id = ?', [displayName, req.user.id]);
   const row = dbx.get('SELECT * FROM users WHERE id = ?', [req.user.id]);
-  res.json(withClassIds(row));
+  res.json(withSession(row));
 });
 
 router.post('/change-password', (req, res) => {
@@ -85,7 +101,7 @@ router.post('/change-password', (req, res) => {
   ]);
   logAccess(req, '修改密码');
   const row = dbx.get('SELECT * FROM users WHERE id = ?', [req.user.id]);
-  res.json({ token: auth.issueToken(row), user: withClassIds(row) });
+  res.json({ token: auth.issueToken(row), user: withSession(row) });
 });
 
 module.exports = router;

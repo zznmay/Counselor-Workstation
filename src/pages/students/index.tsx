@@ -1,4 +1,4 @@
-import { CommentOutlined, DownloadOutlined, InboxOutlined, PlusOutlined, RedoOutlined, SearchOutlined, UploadOutlined } from '@ant-design/icons';
+import { CommentOutlined, DeleteOutlined, DownloadOutlined, InboxOutlined, PlusOutlined, RedoOutlined, SearchOutlined, UploadOutlined } from '@ant-design/icons';
 import {
   Alert,
   App,
@@ -25,9 +25,11 @@ import dayjs, { type Dayjs } from 'dayjs';
 import { useEffect, useMemo, useState } from 'react';
 
 import {
+  batchDeleteStudents,
   createStudent,
   deleteStudent,
   getExistingStudentNos,
+  getStudentBriefs,
   getStudents,
   importStudents,
   updateStudent,
@@ -39,7 +41,7 @@ import ConversationFormFields, {
 } from '@/components/ConversationFormFields';
 import type { ConversationFormValues } from '@/components/ConversationFormFields';
 import PageHeader from '@/components/PageHeader';
-import { canManageStudentFront, getStoredUser } from '@/lib/auth';
+import { canManageStudentFront, getStoredUser, isSystemAdmin } from '@/lib/auth';
 import {
   GENDERS,
   MAJORS,
@@ -62,6 +64,7 @@ import type {
   GradeOption,
   ParsedStudentRow,
   Student,
+  StudentBrief,
   StudentImportFailure,
   StudentImportResult,
   StudentQuery,
@@ -133,6 +136,77 @@ function StudentsDesktop() {
     () => gradeOptions.map((g) => ({ value: g.name, label: g.name })),
     [gradeOptions],
   );
+
+  /* ---------- 批量选择 / 批量删除（仅管理员） ---------- */
+  const isAdmin = isSystemAdmin(authUser);
+  /**
+   * 新增/导入入口：管理员或至少带一个班（与后端 canManageStudent 同口径）。
+   * 角色只给了「学生名册」模块但未分配班级时，隐藏写入口，避免点了才被 403。
+   */
+  const canWrite = isAdmin || (authUser?.classIds ?? []).length > 0;
+  const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
+  /** 已选学生摘要缓存：跨页选择时仍能展示姓名/学号/班级 */
+  const [briefMap, setBriefMap] = useState<Record<string, StudentBrief>>({});
+  const [batchOpen, setBatchOpen] = useState(false);
+  const [batchDeleting, setBatchDeleting] = useState(false);
+  const [selectingAll, setSelectingAll] = useState(false);
+
+  /** 筛选口径变化时清空选择，避免「看不见的学生」被误删 */
+  useEffect(() => {
+    setSelectedKeys([]);
+  }, [query.keyword, query.grade, query.classId, query.major, query.status]);
+
+  /** 当前页数据补充进摘要缓存 */
+  useEffect(() => {
+    setBriefMap((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      data.list.forEach((s) => {
+        const cur = next[s.id];
+        if (!cur || cur.name !== s.name || cur.className !== s.className) {
+          next[s.id] = {
+            id: s.id,
+            name: s.name,
+            studentNo: s.studentNo,
+            grade: s.grade,
+            className: s.className,
+            classId: s.classId,
+          };
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [data.list]);
+
+  const selectedBriefs = useMemo(
+    () => selectedKeys.map((id) => briefMap[id]).filter(Boolean) as StudentBrief[],
+    [selectedKeys, briefMap],
+  );
+
+  /** 删除确认：按班级汇总（年级 · 班级 → 人数） */
+  const batchGroups = useMemo(() => {
+    const count = new Map<string, number>();
+    selectedBriefs.forEach((b) => {
+      const label = [b.grade, b.className].filter(Boolean).join(' · ') || '未分班';
+      count.set(label, (count.get(label) ?? 0) + 1);
+    });
+    return [...count.entries()]
+      .map(([label, n]) => ({ label, count: n }))
+      .sort((a, b) => b.count - a.count);
+  }, [selectedBriefs]);
+
+  /** 班级筛选项：已选年级时只展示该年级下的班级 */
+  const filterGradeId = query.grade ? gradeIdByName.get(query.grade) : undefined;
+  const filterClassOptions = useMemo(() => {
+    const rows = filterGradeId === undefined
+      ? classOptions
+      : classOptions.filter((c) => c.gradeId === filterGradeId);
+    return rows.map((c) => ({
+      value: c.id,
+      label: filterGradeId === undefined ? `${c.gradeName} · ${c.name}` : c.name,
+    }));
+  }, [classOptions, filterGradeId]);
 
   /* ---------- 记录谈话（联动谈心谈话模块） ---------- */
   const [talkForm] = Form.useForm<ConversationFormValues>();
@@ -305,9 +379,58 @@ function StudentsDesktop() {
     refresh();
   };
 
+  /** 全选当前筛选结果（跨页；与列表同一套筛选口径，服务端解析） */
+  const handleSelectAllFiltered = async () => {
+    setSelectingAll(true);
+    try {
+      const rows = await getStudentBriefs(query);
+      if (rows.length === 0) {
+        message.warning('当前筛选条件下没有学生');
+        return;
+      }
+      setBriefMap((prev) => {
+        const next = { ...prev };
+        rows.forEach((b) => { next[b.id] = b; });
+        return next;
+      });
+      setSelectedKeys(rows.map((b) => b.id));
+      message.success(`已选中当前筛选结果共 ${rows.length} 名学生`);
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '全选失败，请重试');
+    } finally {
+      setSelectingAll(false);
+    }
+  };
+
+  const handleBatchDelete = async () => {
+    if (selectedKeys.length === 0) return;
+    const selectedSet = new Set(selectedKeys);
+    setBatchDeleting(true);
+    try {
+      const result = await batchDeleteStudents(selectedKeys);
+      message.success(`已删除 ${result.deletedCount} 名学生，操作已写入日志`);
+      setBatchOpen(false);
+      setSelectedKeys([]);
+      // 当前页被删空时回退一页，避免停留在空页
+      const remaining = data.list.filter((s) => !selectedSet.has(s.id)).length;
+      if (remaining === 0 && data.page > 1) {
+        patchQuery({ page: data.page - 1 }, false);
+      } else {
+        refresh();
+      }
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '批量删除失败');
+      setBatchOpen(false);
+      setSelectedKeys([]);
+      refresh();
+    } finally {
+      setBatchDeleting(false);
+    }
+  };
+
   const resetFilters = () => {
     setKeywordInput('');
-    patchQuery({ keyword: undefined, grade: undefined, major: undefined, status: undefined });
+    patchQuery({ keyword: undefined, grade: undefined, classId: undefined, major: undefined, status: undefined });
   };
 
   const columns: ColumnsType<Student> = [
@@ -395,7 +518,18 @@ function StudentsDesktop() {
           style={{ minWidth: 110 }}
           options={gradeSelectOptions}
           value={query.grade}
-          onChange={(grade) => patchQuery({ grade })}
+          onChange={(grade) => patchQuery({ grade, classId: undefined })}
+        />
+        <Select
+          placeholder="班级"
+          allowClear
+          showSearch
+          optionFilterProp="label"
+          style={{ minWidth: 140 }}
+          options={filterClassOptions}
+          value={query.classId}
+          onChange={(classId) => patchQuery({ classId })}
+          disabled={filterClassOptions.length === 0}
         />
         <Select
           placeholder="专业"
@@ -417,20 +551,60 @@ function StudentsDesktop() {
           重置
         </Button>
         <div className="toolbar-spacer" />
-        <Button icon={<UploadOutlined />} onClick={openImport}>
-          批量导入
-        </Button>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-          新增学生
-        </Button>
+        {isAdmin && (
+          <Button
+            danger
+            icon={<DeleteOutlined />}
+            disabled={selectedKeys.length === 0}
+            onClick={() => setBatchOpen(true)}
+          >
+            批量删除{selectedKeys.length > 0 ? `（${selectedKeys.length}）` : ''}
+          </Button>
+        )}
+        {canWrite && (
+          <Button icon={<UploadOutlined />} onClick={openImport}>
+            批量导入
+          </Button>
+        )}
+        {canWrite && (
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+            新增学生
+          </Button>
+        )}
       </div>
+
+      {/* 批量选择状态条：仅管理员可见，展示已选数量并提供跨页全选 */}
+      {isAdmin && (
+        <div className="batch-bar">
+          <span>
+            已选 <b>{selectedKeys.length}</b> 名学生
+          </span>
+          <span className="batch-bar-hint">勾选可批量删除，支持跨页选择</span>
+          <div className="batch-bar-spacer" />
+          <Button size="small" type="link" loading={selectingAll} onClick={handleSelectAllFiltered}>
+            全选当前筛选结果（共 {data.total} 名）
+          </Button>
+          <Button size="small" type="link" disabled={selectedKeys.length === 0} onClick={() => setSelectedKeys([])}>
+            清空选择
+          </Button>
+        </div>
+      )}
 
       <Table
         rowKey="id"
         columns={columns}
         dataSource={data.list}
         loading={loading}
-        scroll={{ x: 1240 }}
+        scroll={{ x: 1280 }}
+        rowSelection={
+          isAdmin
+            ? {
+                selectedRowKeys: selectedKeys,
+                preserveSelectedRowKeys: true,
+                onChange: (keys) => setSelectedKeys(keys.map(String)),
+              }
+            : undefined
+        }
         pagination={{
           current: data.page,
           pageSize: data.pageSize,
@@ -788,6 +962,53 @@ function StudentsDesktop() {
             </div>
           )}
         </Space>
+      </Modal>
+      {/* 批量删除确认：数量 + 班级汇总 + 名单明细，二次确认防误删 */}
+      <Modal
+        title="批量删除学生"
+        width={isMobile ? 'calc(100vw - 24px)' : 640}
+        open={batchOpen}
+        confirmLoading={batchDeleting}
+        okText={`确认删除 ${selectedKeys.length} 名`}
+        okButtonProps={{ danger: true }}
+        cancelText="取消"
+        onOk={handleBatchDelete}
+        onCancel={() => setBatchOpen(false)}
+      >
+        <Alert
+          type="warning"
+          showIcon
+          message={`即将永久删除 ${selectedKeys.length} 名学生，此操作不可撤销`}
+          description="学生基础信息与共管关系将一并删除；谈话、预警、审批等历史记录会保留以便追溯。"
+          style={{ marginBottom: 16 }}
+        />
+        <div className="batch-block-title">按班级汇总（{batchGroups.length} 个班级）</div>
+        <div className="batch-tags">
+          {batchGroups.map((g) => (
+            <Tag key={g.label} color="blue">
+              {g.label} · {g.count} 人
+            </Tag>
+          ))}
+        </div>
+        <div className="batch-block-title" style={{ marginTop: 16 }}>
+          名单明细（{selectedBriefs.length} 名）
+        </div>
+        <div className="batch-names">
+          {selectedBriefs.slice(0, 60).map((b) => (
+            <span className="batch-name" key={b.id}>
+              {b.name}
+              <em>{b.studentNo}</em>
+            </span>
+          ))}
+          {selectedBriefs.length > 60 && (
+            <span className="batch-more">…等共 {selectedBriefs.length} 名</span>
+          )}
+        </div>
+        {selectedKeys.length > selectedBriefs.length && (
+          <Typography.Text type="danger" style={{ display: 'block', marginTop: 8 }}>
+            有 {selectedKeys.length - selectedBriefs.length} 名学生的信息未能加载，删除时同样会被移除，建议刷新后重新选择。
+          </Typography.Text>
+        )}
       </Modal>
       {/* 记录谈话：写入谈心谈话模块共用的数据源 */}
       <Modal

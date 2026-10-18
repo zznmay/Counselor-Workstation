@@ -4,10 +4,12 @@ const express = require('express');
 const dbx = require('../lib/db');
 const auth = require('../lib/auth');
 const { sensitiveScope, canManageStudent } = require('../lib/scope');
+const { requirePermission } = require('../lib/permissions');
 const { logAccess, nowStr } = require('../lib/audit');
 
 const router = express.Router();
 router.use(auth.authMiddleware);
+router.use(requirePermission('warnings'));
 
 const STATUS_ORDER = { 待处理: 0, 处理中: 1, 已解除: 2 };
 

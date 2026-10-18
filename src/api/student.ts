@@ -1,14 +1,33 @@
 /** 学生信息：服务端接口（分页/筛选/归属过滤在服务端完成） */
 import { request } from './request';
-import type { PageResult, ParsedStudentRow, Student, StudentImportResult, StudentOption, StudentQuery } from '@/types';
+import type {
+  BatchDeleteResult,
+  PageResult,
+  ParsedStudentRow,
+  Student,
+  StudentBrief,
+  StudentImportResult,
+  StudentOption,
+  StudentQuery,
+} from '@/types';
 
-/** 学生列表：关键字 + 年级/专业/学籍状态筛选 + 分页 */
+/** 学生列表：关键字 + 年级/班级/专业/学籍状态筛选 + 分页 */
 export async function getStudents(query: StudentQuery): Promise<PageResult<Student>> {
   const params = new URLSearchParams();
   Object.entries(query).forEach(([key, value]) => {
     if (value !== undefined && value !== '') params.set(key, String(value));
   });
   return request<PageResult<Student>>(`/students?${params.toString()}`);
+}
+
+/** 当前筛选条件下的全部学生精简信息（「全选筛选结果」用，不分页；仅管理员） */
+export async function getStudentBriefs(query: StudentQuery): Promise<StudentBrief[]> {
+  const params = new URLSearchParams();
+  Object.entries(query).forEach(([key, value]) => {
+    if (key === 'page' || key === 'pageSize') return;
+    if (value !== undefined && value !== '') params.set(key, String(value));
+  });
+  return request<StudentBrief[]>(`/students/briefs?${params.toString()}`);
 }
 
 /** 单个学生（移动端详情页按 id 拉取，避免依赖列表页缓存） */
@@ -34,6 +53,14 @@ export async function updateStudent(id: string, data: Partial<Student> & { coMan
 /** 删除学生（谈话/预警等历史记录保留，便于留档追溯） */
 export async function deleteStudent(id: string): Promise<void> {
   await request(`/students/${id}`, { method: 'DELETE' });
+}
+
+/** 批量删除（仅管理员；服务端事务性删除，全部成功或全部回滚，并写入操作日志） */
+export async function batchDeleteStudents(ids: string[]): Promise<BatchDeleteResult> {
+  return request<BatchDeleteResult>('/students/batch-delete', {
+    method: 'POST',
+    body: JSON.stringify({ ids }),
+  });
 }
 
 /** 表单下拉用：在读学生精简列表（可见范围内） */

@@ -3,6 +3,7 @@ const express = require('express');
 
 const dbx = require('../lib/db');
 const auth = require('../lib/auth');
+const { requirePermission } = require('../lib/permissions');
 const { logAccess, nowStr } = require('../lib/audit');
 
 const router = express.Router();
@@ -13,7 +14,8 @@ router.get('/options', (req, res) => {
   res.json(dbx.all('SELECT id, name FROM grades ORDER BY name DESC'));
 });
 
-router.use(auth.adminOnly);
+/* 年级维护属「班级管理」模块能力 */
+router.use(requirePermission('classes'));
 
 const LIST_SELECT = `
   SELECT g.id, g.name, g.createdAt,

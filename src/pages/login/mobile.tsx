@@ -3,7 +3,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { request } from '@/api/request';
-import { setSession } from '@/lib/auth';
+import { firstAccessiblePath, setSession } from '@/lib/auth';
 import type { AuthUser } from '@/lib/auth';
 
 import '@/styles/login-mobile.css';
@@ -150,7 +150,7 @@ export default function LoginMobile() {
         message.info('首次登录请先设置新密码');
       } else {
         message.success(`欢迎，${res.user.displayName}`);
-        navigate('/', { replace: true });
+        navigate(firstAccessiblePath(res.user), { replace: true });
       }
     } catch (e) {
       message.error(e instanceof Error ? e.message : '登录失败');
@@ -203,7 +203,7 @@ export default function LoginMobile() {
       });
       setSession(res.token, res.user);
       message.success('密码已更新，欢迎加入！');
-      navigate('/', { replace: true });
+      navigate(firstAccessiblePath(res.user), { replace: true });
     } catch (e) {
       message.error(e instanceof Error ? e.message : '修改失败');
     } finally {

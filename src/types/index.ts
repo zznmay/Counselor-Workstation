@@ -128,8 +128,27 @@ export interface Student {
 
 export interface StudentQuery extends PageQuery {
   grade?: string;
+  /** 归属班级字典 ID（按班级筛选） */
+  classId?: number;
   major?: string;
   status?: StudentStatus;
+}
+
+/** 批量选择/删除确认用的学生精简信息 */
+export interface StudentBrief {
+  id: Id;
+  name: string;
+  studentNo: string;
+  grade?: string;
+  className?: string;
+  classId?: number | null;
+}
+
+/** 批量删除结果（服务端事务性删除，全部成功或全部回滚） */
+export interface BatchDeleteResult {
+  ok: true;
+  deletedCount: number;
+  deleted: Pick<StudentBrief, 'id' | 'name' | 'studentNo' | 'className'>[];
 }
 
 /** 下拉选择用的学生精简信息 */
@@ -250,6 +269,106 @@ export interface StudentImportResult {
   /** 成功追加的条数 */
   successCount: number;
   failures: StudentImportFailure[];
+}
+
+/* ==================== 角色与用户导入 ==================== */
+
+/** 角色下拉选项（不含权限明细） */
+export interface RoleOption {
+  key: string;
+  name: string;
+  isSystem: boolean;
+}
+
+/** 角色（管理端完整信息） */
+export interface Role extends RoleOption {
+  id: number;
+  description: string;
+  /** 可访问的模块 key 列表 */
+  permissions: string[];
+  /** 该角色下的用户数（删除护栏提示） */
+  userCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RoleInput {
+  name: string;
+  description?: string;
+  permissions: string[];
+}
+
+/** Excel 解析出的一行用户数据（row 为含表头的实际行号，从 2 开始） */
+export interface ParsedUserRow {
+  row: number;
+  data: {
+    username: string;
+    displayName: string;
+    role: string;
+    password?: string;
+    /** 所辖班级文本：多班用「、」分隔；同名班级写成「2024级·计应2401」 */
+    classNames?: string;
+  };
+}
+
+/** 一条用户导入失败记录（附原始行数据，便于导出修正后重传） */
+export interface UserImportFailure {
+  row: number;
+  username: string;
+  displayName: string;
+  reason: string;
+  data?: ParsedUserRow['data'];
+}
+
+export interface UserImportResult {
+  total: number;
+  successCount: number;
+  failures: UserImportFailure[];
+}
+
+/* ==================== 心理健康 ==================== */
+
+/** 关注等级（展示顺序即紧急程度从高到低） */
+export type AttentionLevel = '密切关注' | '重点关注' | '日常关注' | '一般关注';
+
+/** 关注学生条目（列表行：学生基础信息 + 关注标记 + 谈话统计） */
+export interface MentalConcern {
+  studentId: Id;
+  name: string;
+  studentNo: string;
+  className: string;
+  grade?: string;
+  major?: string;
+  status?: StudentStatus;
+  level: AttentionLevel;
+  note?: string | null;
+  updatedAt: string;
+  updatedBy?: string | null;
+  /** 关联谈心谈话统计 */
+  talkCount: number;
+  lastTalkTime?: string | null;
+  followCount: number;
+}
+
+/** 关注等级汇总（页首分类卡，四个等级恒齐全） */
+export interface MentalLevelSummary {
+  level: AttentionLevel;
+  count: number;
+}
+
+/** 可标记学生候选（可见范围内、尚未标记） */
+export interface MentalCandidate {
+  id: Id;
+  name: string;
+  studentNo: string;
+  className: string;
+  grade?: string;
+}
+
+/** 学生谈话时间线（心理健康模块只读打通） */
+export interface MentalTimeline {
+  student: { id: Id; name: string; studentNo: string; className: string };
+  list: Conversation[];
 }
 
 /* ==================== 通知发布 ==================== */

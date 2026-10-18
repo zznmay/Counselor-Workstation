@@ -3,46 +3,53 @@ import { Navigate, useNavigate } from 'react-router-dom';
 import { MIcon } from '@/components/mobile/icons';
 import type { MIconName } from '@/components/mobile/icons';
 import { useIsMobile } from '@/hooks/useIsMobile';
-import { clearAuth, getStoredUser } from '@/lib/auth';
+import { canAccessModule, clearAuth, getStoredUser, isSystemAdmin } from '@/lib/auth';
 
 interface MoreItem {
   key: string;
   label: string;
   icon: MIconName;
+  /** 所属模块；未配置表示登录即可访问 */
+  module?: string;
   adminOnly?: boolean;
 }
 
 /** 底部导航收纳页：装不下的功能按「业务 / 资料 / 系统」分组呈现 */
 const BUSINESS: MoreItem[] = [
-  { key: '/conversations', label: '谈心谈话', icon: 'comment' },
+  { key: '/conversations', label: '谈心谈话', icon: 'comment', module: 'conversations' },
+  { key: '/mental', label: '心理健康', icon: 'heart', module: 'mentalHealth' },
 ];
 
 const RESOURCES: MoreItem[] = [
-  { key: '/templates', label: '模板汇总库', icon: 'file' },
-  { key: '/tools', label: '实用工具', icon: 'tool' },
+  { key: '/templates', label: '模板汇总库', icon: 'file', module: 'templates' },
+  { key: '/tools', label: '实用工具', icon: 'tool', module: 'tools' },
 ];
 
 const SYSTEM: MoreItem[] = [
-  { key: '/classes', label: '班级管理', icon: 'school', adminOnly: true },
+  { key: '/classes', label: '班级管理', icon: 'school', module: 'classes' },
   { key: '/admin/users', label: '用户管理', icon: 'users', adminOnly: true },
-  { key: '/admin/logs', label: '访问日志', icon: 'shield', adminOnly: true },
+  { key: '/admin/roles', label: '角色管理', icon: 'shield', adminOnly: true },
+  { key: '/admin/logs', label: '访问日志', icon: 'clock', adminOnly: true },
 ];
 
 /**
  * 「更多」页：移动端第 5 个 Tab。
- * 管理员专属入口按 role 过滤。
+ * 入口按「角色权限 + 是否管理员」过滤。
  */
 export default function MorePage() {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const user = getStoredUser();
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = isSystemAdmin(user);
+  const roleLabel = user?.roleName ?? (isAdmin ? '管理员' : '辅导员');
 
   /* 「更多」是移动端专属页；桌面端有完整侧边菜单，直接回工作台 */
   if (!isMobile) return <Navigate to="/" replace />;
 
   const renderGroup = (title: string, items: MoreItem[]) => {
-    const visible = items.filter((i) => !i.adminOnly || isAdmin);
+    const visible = items.filter(
+      (i) => (!i.adminOnly || isAdmin) && (!i.module || canAccessModule(user, i.module)),
+    );
     if (visible.length === 0) return null;
     return (
       <div className="m-card" key={title}>
@@ -72,7 +79,7 @@ export default function MorePage() {
         <div className="m-row-main">
           <div className="m-t1" style={{ fontSize: 17 }}>{user?.displayName || '老师'}</div>
           <div className="m-t4" style={{ marginTop: 3 }}>
-            {isAdmin ? '管理员' : '辅导员'} · {user?.username}
+            {roleLabel} · {user?.username}
           </div>
         </div>
         <button

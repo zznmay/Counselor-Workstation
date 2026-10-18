@@ -3,10 +3,12 @@ const express = require('express');
 
 const dbx = require('../lib/db');
 const auth = require('../lib/auth');
+const { requirePermission } = require('../lib/permissions');
 const { logAccess } = require('../lib/audit');
 
 const router = express.Router();
 router.use(auth.authMiddleware);
+router.use(requirePermission('todos'));
 
 /** 列表：关键字 + 类型/优先级/状态筛选（未完成按截止时间升序，已完成沉底） */
 router.get('/', (req, res) => {
