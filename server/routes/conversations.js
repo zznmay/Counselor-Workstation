@@ -1,9 +1,9 @@
-/** 谈心谈话记录：列表/时间线/增删改查（随学生归属过滤） */
+/** 谈心谈话记录：列表/时间线/增删改查（仅所带班级学生的记录可见可维护） */
 const express = require('express');
 
 const dbx = require('../lib/db');
 const auth = require('../lib/auth');
-const { sensitiveScope, canSeeStudent } = require('../lib/scope');
+const { sensitiveScope, canManageStudent } = require('../lib/scope');
 const { logAccess } = require('../lib/audit');
 
 const router = express.Router();
@@ -47,11 +47,11 @@ router.get('/', (req, res) => {
   });
 });
 
-/** 时间线：某学生全部谈话记录（最新在前，需该学生可见） */
+/** 时间线：某学生全部谈话记录（最新在前，仅所带班级学生） */
 router.get('/timeline', (req, res) => {
   const studentId = String(req.query.studentId ?? '');
-  if (!studentId || !canSeeStudent(req.user, studentId)) {
-    return res.status(403).json({ message: '无权查看该学生' });
+  if (!studentId || !canManageStudent(req.user, studentId)) {
+    return res.status(403).json({ message: '无权查看该学生的谈话记录（仅所带班级的学生）' });
   }
   const type = req.query.type;
   const rows = type
@@ -79,12 +79,12 @@ function resolveStudent(studentId) {
   return dbx.get('SELECT id, name, studentNo, className FROM students WHERE id = ?', [studentId]);
 }
 
-/** 新增：学生需在可见范围内 */
+/** 新增：仅所带班级的学生 */
 router.post('/', async (req, res) => {
   const body = req.body ?? {};
   const studentId = String(body.studentId ?? '');
-  if (!studentId || !canSeeStudent(req.user, studentId)) {
-    return res.status(403).json({ message: '无权为该学生记录谈话' });
+  if (!studentId || !canManageStudent(req.user, studentId)) {
+    return res.status(403).json({ message: '无权为该学生记录谈话（仅所带班级的学生）' });
   }
   const student = resolveStudent(studentId);
   if (!student) return res.status(404).json({ message: '学生不存在' });
@@ -103,12 +103,12 @@ router.post('/', async (req, res) => {
 router.put('/:id', (req, res) => {
   const target = dbx.get('SELECT * FROM conversations WHERE id = ?', [req.params.id]);
   if (!target) return res.status(404).json({ message: '记录不存在' });
-  if (!canSeeStudent(req.user, target.studentId)) {
+  if (!canManageStudent(req.user, target.studentId)) {
     return res.status(403).json({ message: '无权修改该记录' });
   }
   const body = req.body ?? {};
   const studentId = String(body.studentId ?? target.studentId);
-  if (!canSeeStudent(req.user, studentId)) {
+  if (!canManageStudent(req.user, studentId)) {
     return res.status(403).json({ message: '无权将记录调整到该学生' });
   }
   dbx.run(`UPDATE conversations SET studentId = ?, talkTime = ?, way = ?, type = ?, needFollowUp = ?, content = ?, followUp = ? WHERE id = ?`,
@@ -122,7 +122,7 @@ router.put('/:id', (req, res) => {
 router.delete('/:id', (req, res) => {
   const target = dbx.get('SELECT * FROM conversations WHERE id = ?', [req.params.id]);
   if (!target) return res.status(404).json({ message: '记录不存在' });
-  if (!canSeeStudent(req.user, target.studentId)) {
+  if (!canManageStudent(req.user, target.studentId)) {
     return res.status(403).json({ message: '无权删除该记录' });
   }
   dbx.run('DELETE FROM conversations WHERE id = ?', [req.params.id]);

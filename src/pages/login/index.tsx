@@ -52,7 +52,8 @@ function LoginDesktop() {
   const [pendingUser, setPendingUser] = useState<AuthUser | null>(null);
   const [loginPassword, setLoginPassword] = useState(''); // 登录表单卸载后仍需用于改密校验
   const [showPwd, setShowPwd] = useState(false);
-  const [showNew, setShowNew] = useState(false);
+  // 改密态新密码默认明文：设置场景明文更直观，浏览器自动填充的脏值一眼可见
+  const [showNew, setShowNew] = useState(true);
   const [showConfirm, setShowConfirm] = useState(false);
   const accountRef = useRef<HTMLInputElement>(null);
   const pwdRef = useRef<HTMLInputElement>(null);
@@ -73,6 +74,20 @@ function LoginDesktop() {
   }, []);
 
   useEffect(() => () => window.clearTimeout(shakeTimer.current), []);
+
+  /** 改密视图挂载后主动清空输入框：iOS/安卓/部分桌面浏览器会无视 autoComplete，
+   *  把记住的用户名自动填进第一个输入框（新密码框出现 "admin" 的根因）。
+   *  300ms + 900ms 两次清理，覆盖绝大多数延迟填充时机。 */
+  useEffect(() => {
+    if (view !== 'change') return;
+    const clear = () => {
+      if (newPwdRef.current?.value) newPwdRef.current.value = '';
+      if (confirmRef.current?.value) confirmRef.current.value = '';
+    };
+    const t1 = window.setTimeout(clear, 300);
+    const t2 = window.setTimeout(clear, 900);
+    return () => { window.clearTimeout(t1); window.clearTimeout(t2); };
+  }, [view]);
 
   const fail = (msg: string) => {
     setError(msg);
@@ -111,16 +126,22 @@ function LoginDesktop() {
     }
   };
 
-  /** 首次登录强制改密; oldPassword 使用登录时缓存的密码 */
+  /** 首次登录强制改密; oldPassword 使用登录时缓存的密码。
+   *  校验顺序：先查两次一致（浏览器自动填充用户名进第一个框时，
+   *  「两次不一致」能让用户立刻发现真因），再查强度规则。 */
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     const newPassword = newPwdRef.current?.value ?? '';
     const confirm = confirmRef.current?.value ?? '';
+    if (newPassword !== confirm) { fail('两次输入的新密码不一致'); return; }
     if (newPassword.length < 8 || !/^(?=.*[A-Za-z])(?=.*\d).+$/.test(newPassword)) {
       fail('新密码需不少于 8 位，且同时包含字母和数字');
       return;
     }
-    if (newPassword !== confirm) { fail('两次输入的新密码不一致'); return; }
+    if (pendingUser && newPassword === pendingUser.username) {
+      fail('新密码不能与用户名相同');
+      return;
+    }
     setLoading(true);
     try {
       const res = await request<{ token: string; user: AuthUser }>('/auth/change-password', {
@@ -245,6 +266,9 @@ function LoginDesktop() {
           ) : (
             <div className="lgpc-change">
               <form onSubmit={handleChangePassword} noValidate autoComplete="off">
+                {/* 诱捕浏览器自动填充：记住的用户名/密码落在屏外隐藏字段，不污染新密码输入框 */}
+                <input type="text" name="username" autoComplete="username" tabIndex={-1} aria-hidden="true" className="lgpc-trap" />
+                <input type="password" name="password" autoComplete="current-password" tabIndex={-1} aria-hidden="true" className="lgpc-trap" />
                 <div className="lgpc-ring" aria-hidden="true">
                   <svg viewBox="0 0 24 24" fill="none">
                     <rect x="5" y="10.5" width="14" height="9.5" rx="2.4" stroke="currentColor" strokeWidth="1.8" />
@@ -262,6 +286,7 @@ function LoginDesktop() {
                   <input
                     ref={newPwdRef}
                     type={showNew ? 'text' : 'password'}
+                    name="new-password"
                     placeholder="新密码"
                     aria-label="新密码"
                     autoComplete="new-password"
@@ -282,6 +307,7 @@ function LoginDesktop() {
                   <input
                     ref={confirmRef}
                     type={showConfirm ? 'text' : 'password'}
+                    name="confirm-password"
                     placeholder="确认新密码"
                     aria-label="确认新密码"
                     autoComplete="new-password"

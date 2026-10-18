@@ -22,7 +22,7 @@ import {
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs, { type Dayjs } from 'dayjs';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import {
   createStudent,
@@ -33,14 +33,15 @@ import {
   updateStudent,
 } from '@/api/student';
 import { createConversation } from '@/api/conversation';
+import { getClassOptions, getGradeOptions } from '@/api/classes';
 import ConversationFormFields, {
   conversationFormToInput,
 } from '@/components/ConversationFormFields';
 import type { ConversationFormValues } from '@/components/ConversationFormFields';
 import PageHeader from '@/components/PageHeader';
+import { canManageStudentFront, getStoredUser } from '@/lib/auth';
 import {
   GENDERS,
-  GRADES,
   MAJORS,
   POLITICAL_STATUSES,
   STUDENT_STATUSES,
@@ -56,7 +57,9 @@ import {
   validateStudentRows,
 } from '@/utils/studentImport';
 import type {
+  ClassOption,
   Gender,
+  GradeOption,
   ParsedStudentRow,
   Student,
   StudentImportFailure,
@@ -72,7 +75,8 @@ interface StudentFormValues {
   gender: Gender;
   grade: string;
   major: string;
-  className: string;
+  /** 归属班级（班级管理字典）；className 文本由所选班级派生 */
+  classId: number;
   phone: string;
   dorm?: string;
   politicalStatus?: string;
@@ -89,10 +93,11 @@ interface StudentFormValues {
   enrollDate: Dayjs;
 }
 
-/** 学生信息管理：列表 / 筛选搜索 / 新增 / 编辑 / 删除 / 详情 */
+/** 学生名册：列表 / 筛选搜索 / 新增 / 编辑 / 删除 / 详情（查看全员放开；维护限带班辅导员或管理员） */
 function StudentsDesktop() {
   const isMobile = useIsMobile();
   const { message } = App.useApp();
+  const authUser = getStoredUser();
   const [form] = Form.useForm<StudentFormValues>();
 
   const { query, patchQuery, data, loading, refresh } = useList<Student, StudentQuery>(getStudents, {
@@ -105,6 +110,29 @@ function StudentsDesktop() {
   const [modalOpen, setModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [detail, setDetail] = useState<Student | null>(null);
+
+  /* ---------- 年级/班级字典（由「班级管理」模块维护，动态获取） ---------- */
+  const [gradeOptions, setGradeOptions] = useState<GradeOption[]>([]);
+  const [classOptions, setClassOptions] = useState<ClassOption[]>([]);
+
+  useEffect(() => {
+    getGradeOptions().then(setGradeOptions).catch(() => undefined);
+    getClassOptions().then(setClassOptions).catch(() => undefined);
+  }, []);
+
+  const watchedGrade = Form.useWatch('grade', form);
+  const gradeIdByName = useMemo(
+    () => new Map(gradeOptions.map((g) => [g.name, g.id])),
+    [gradeOptions],
+  );
+  const classListForGrade = useMemo(() => {
+    const gid = watchedGrade ? gradeIdByName.get(watchedGrade) : undefined;
+    return gid === undefined ? [] : classOptions.filter((c) => c.gradeId === gid);
+  }, [watchedGrade, gradeIdByName, classOptions]);
+  const gradeSelectOptions = useMemo(
+    () => gradeOptions.map((g) => ({ value: g.name, label: g.name })),
+    [gradeOptions],
+  );
 
   /* ---------- 记录谈话（联动谈心谈话模块） ---------- */
   const [talkForm] = Form.useForm<ConversationFormValues>();
@@ -186,7 +214,11 @@ function StudentsDesktop() {
         return;
       }
       const existingNos = await getExistingStudentNos();
-      const { valid, failures } = validateStudentRows(rows, existingNos);
+      // 班级字典预检：字典已加载时提前拦截不匹配行（服务端导入时仍会兜底校验）
+      const classKeys = classOptions.length > 0
+        ? new Set(classOptions.map((c) => `${c.gradeName}|${c.name}`))
+        : undefined;
+      const { valid, failures } = validateStudentRows(rows, existingNos, classKeys);
       setParsed({ fileName: file.name, totalRows: rows.length, valid, failures });
       if (valid.length === 0) {
         message.warning('没有可导入的数据行，请根据失败原因修正后重新上传');
@@ -217,7 +249,11 @@ function StudentsDesktop() {
   useEffect(() => {
     if (!modalOpen) return;
     if (editing) {
-      form.setFieldsValue({ ...editing, enrollDate: dayjs(editing.enrollDate) });
+      form.setFieldsValue({
+        ...editing,
+        classId: editing.classId ?? undefined,
+        enrollDate: dayjs(editing.enrollDate),
+      });
     } else {
       form.resetFields();
     }
@@ -242,7 +278,13 @@ function StudentsDesktop() {
     }
     setSubmitting(true);
     try {
-      const payload = { ...values, enrollDate: values.enrollDate.format('YYYY-MM-DD') };
+      // 年级/班级文本与 classId 外键一并提交，保证三者一致
+      const classOpt = classOptions.find((c) => c.id === values.classId);
+      const payload = {
+        ...values,
+        className: classOpt?.name ?? '',
+        enrollDate: values.enrollDate.format('YYYY-MM-DD'),
+      };
       if (editing) {
         await updateStudent(editing.id, payload);
         message.success('学生信息已更新');
@@ -293,36 +335,45 @@ function StudentsDesktop() {
       key: 'action',
       width: 245,
       fixed: 'right',
-      render: (_, record) => (
-        <Space size={0}>
-          <Button type="link" size="small" icon={<CommentOutlined />} onClick={() => openTalk(record)}>
-            记录谈话
-          </Button>
-          <Button type="link" size="small" onClick={() => setDetail(record)}>
-            详情
-          </Button>
-          <Button type="link" size="small" onClick={() => openEdit(record)}>
-            编辑
-          </Button>
-          <Popconfirm
-            title="确定删除该学生吗？"
-            description="删除后不可恢复"
-            onConfirm={() => handleDelete(record.id)}
-          >
-            <Button type="link" size="small" danger>
-              删除
+      render: (_, record) => {
+        const canManage = canManageStudentFront(authUser, record.classId);
+        return (
+          <Space size={0}>
+            {canManage && (
+              <Button type="link" size="small" icon={<CommentOutlined />} onClick={() => openTalk(record)}>
+                记录谈话
+              </Button>
+            )}
+            <Button type="link" size="small" onClick={() => setDetail(record)}>
+              详情
             </Button>
-          </Popconfirm>
-        </Space>
-      ),
+            {canManage && (
+              <Button type="link" size="small" onClick={() => openEdit(record)}>
+                编辑
+              </Button>
+            )}
+            {canManage && (
+              <Popconfirm
+                title="确定删除该学生吗？"
+                description="删除后不可恢复"
+                onConfirm={() => handleDelete(record.id)}
+              >
+                <Button type="link" size="small" danger>
+                  删除
+                </Button>
+              </Popconfirm>
+            )}
+          </Space>
+        );
+      },
     },
   ];
 
   return (
     <div className="page">
       <PageHeader
-        title="学生信息管理"
-        subtitle="所带班级学生的基础信息、学籍状态与重点关注事项"
+        title="学生名册"
+        subtitle="全体学生的基础信息、学籍状态与重点关注事项；谈话与预警仅所带班级的学生可维护"
       />
 
       <div className="toolbar">
@@ -342,7 +393,7 @@ function StudentsDesktop() {
           placeholder="年级"
           allowClear
           style={{ minWidth: 110 }}
-          options={toOptions(GRADES)}
+          options={gradeSelectOptions}
           value={query.grade}
           onChange={(grade) => patchQuery({ grade })}
         />
@@ -463,7 +514,6 @@ function StudentsDesktop() {
           initialValues={{
             gender: '男',
             status: '在读',
-            grade: '2026级',
             major: MAJORS[0],
             counselor: '王老师',
           }}
@@ -502,7 +552,10 @@ function StudentsDesktop() {
             </Col>
             <Col xs={24} sm={12}>
               <Form.Item name="grade" label="年级" rules={[{ required: true, message: '请选择年级' }]}>
-                <Select options={toOptions(GRADES)} />
+                <Select
+                  options={gradeSelectOptions}
+                  onChange={() => form.setFieldValue('classId', undefined)}
+                />
               </Form.Item>
             </Col>
             <Col xs={24} sm={12}>
@@ -512,11 +565,28 @@ function StudentsDesktop() {
             </Col>
             <Col xs={24} sm={12}>
               <Form.Item
-                name="className"
+                name="classId"
                 label="班级"
-                rules={[{ required: true, message: '请输入班级' }]}
+                rules={[{ required: true, message: '请选择班级' }]}
               >
-                <Input placeholder="如 计应2601" />
+                <Select
+                  disabled={!watchedGrade}
+                  showSearch
+                  optionFilterProp="children"
+                  placeholder={
+                    !watchedGrade
+                      ? '请先选择年级'
+                      : classListForGrade.length > 0
+                        ? '请选择班级'
+                        : '该年级暂无班级，请先在「班级管理」中创建'
+                  }
+                >
+                  {classListForGrade.map((c) => (
+                    <Select.Option key={c.id} value={c.id}>
+                      {c.name}
+                    </Select.Option>
+                  ))}
+                </Select>
               </Form.Item>
             </Col>
             <Col xs={24} sm={12}>

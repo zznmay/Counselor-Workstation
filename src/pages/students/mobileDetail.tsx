@@ -5,6 +5,7 @@ import { getStudent } from '@/api/student';
 import MaskedValue from '@/components/mobile/MaskedValue';
 import { MIcon } from '@/components/mobile/icons';
 import { useIsMobile } from '@/hooks/useIsMobile';
+import { canManageStudentFront, getStoredUser } from '@/lib/auth';
 import type { Student, StudentStatus } from '@/types';
 
 /** 学籍状态 → 语义标签（颜色 + 文字，不引入裸 hex） */
@@ -74,12 +75,17 @@ export default function StudentDetailMobile() {
     );
   }
 
-  const actions: { icon: 'phone' | 'message' | 'comment' | 'bell' | 'triangle'; label: string; href?: string; to?: string }[] = [
+  /* 操作栏：拨号/短信全员可用；发起谈心/标记预警仅带班辅导员（/notices 通知模块已下线，移除入口） */
+  const canManage = canManageStudentFront(getStoredUser(), student.classId);
+  const actions: { icon: 'phone' | 'message' | 'comment' | 'triangle'; label: string; href?: string; to?: string }[] = [
     { icon: 'phone', label: '拨号', href: `tel:${student.phone}` },
     { icon: 'message', label: '短信', href: `sms:${student.phone}` },
-    { icon: 'comment', label: '发起谈心', to: `/conversations?studentId=${student.id}` },
-    { icon: 'bell', label: '发通知', to: '/notices' },
-    { icon: 'triangle', label: '标记预警', to: `/warnings?studentId=${student.id}` },
+    ...(canManage
+      ? [
+          { icon: 'comment' as const, label: '发起谈心', to: `/conversations?studentId=${student.id}` },
+          { icon: 'triangle' as const, label: '标记预警', to: `/warnings?studentId=${student.id}` },
+        ]
+      : []),
   ];
 
   return (

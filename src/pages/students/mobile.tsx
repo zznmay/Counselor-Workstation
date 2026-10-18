@@ -3,9 +3,11 @@ import { useNavigate } from 'react-router-dom';
 
 import { getStudents } from '@/api/student';
 import { getWarnings } from '@/api/warning';
+import { getGradeOptions } from '@/api/classes';
 import FilterSheet from '@/components/mobile/FilterSheet';
 import { MIcon } from '@/components/mobile/icons';
-import { GRADES, MAJORS, STUDENT_STATUSES } from '@/constants';
+import { canManageStudentFront, getStoredUser } from '@/lib/auth';
+import { MAJORS, STUDENT_STATUSES } from '@/constants';
 import type { Student, StudentQuery, StudentStatus, WarningLevel } from '@/types';
 
 const PAGE_SIZE = 10;
@@ -24,7 +26,7 @@ function maskPhone(phone: string): string {
 }
 
 /**
- * 移动端学生管理：卡片列表替代桌面 Table。
+ * 移动端学生名册：卡片列表替代桌面 Table。
  * - 搜索常驻；筛选走底部抽屉（单手可达）
  * - 上拉加载更多（IntersectionObserver）+ 顶部手动刷新
  * - 卡片首屏必读：姓名·班级/专业·归属；一眼可见：预警·学号；折叠：宿舍/电话
@@ -32,6 +34,7 @@ function maskPhone(phone: string): string {
  */
 export default function StudentsMobile() {
   const navigate = useNavigate();
+  const authUser = getStoredUser();
 
   const [list, setList] = useState<Student[]>([]);
   const [total, setTotal] = useState(0);
@@ -44,6 +47,14 @@ export default function StudentsMobile() {
 
   /** 未解除预警学生 → 级别（用于在卡片上标注预警状态） */
   const [warnMap, setWarnMap] = useState<Record<string, WarningLevel>>({});
+
+  /* 年级字典动态获取（由「班级管理」模块维护） */
+  const [gradeNames, setGradeNames] = useState<string[]>([]);
+  useEffect(() => {
+    getGradeOptions()
+      .then((opts) => setGradeNames(opts.map((g) => g.name)))
+      .catch(() => undefined);
+  }, []);
 
   const loadWarnMap = useCallback(async () => {
     const [pending, handling] = await Promise.all([
@@ -138,7 +149,7 @@ export default function StudentsMobile() {
 
       <div className="m-t4" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         共 {total} 名学生{Object.values(filters).some(Boolean) ? '（已筛选）' : ''}
-        <button type="button" className="m-refresh" style={{ marginLeft: 'auto', width: 32, height: 32 }} aria-label="刷新列表" onClick={() => void fetchPage(1, { keyword, filters })}>
+        <button type="button" className="m-refresh" style={{ marginLeft: 'auto', width: 40, height: 40 }} aria-label="刷新列表" onClick={() => void fetchPage(1, { keyword, filters })}>
           <MIcon name="refresh" size={16} />
         </button>
       </div>
@@ -188,13 +199,15 @@ export default function StudentsMobile() {
                 <span className="m-nowrap">电话 {maskPhone(s.phone)}</span>
               </div>
 
-              {/* 快捷操作：热区 ≥44px，与整卡点击解耦（阻止冒泡） */}
+              {/* 快捷操作：热区 ≥44px，与整卡点击解耦（阻止冒泡）；谈心/预警仅带班辅导员可见 */}
               <div style={{ display: 'flex', gap: 4, marginTop: 6, borderTop: '1px solid var(--m-border)', paddingTop: 4 }}>
                 {([
                   ['phone', '拨号', `tel:${s.phone}`],
                   ['message', '短信', `sms:${s.phone}`],
-                  ['comment', '谈心', `/conversations?studentId=${s.id}`],
-                  ['triangle', '预警', `/warnings?studentId=${s.id}`],
+                  ...(canManageStudentFront(authUser, s.classId)
+                    ? [['comment', '谈心', `/conversations?studentId=${s.id}`],
+                       ['triangle', '预警', `/warnings?studentId=${s.id}`]] as const
+                    : []),
                 ] as const).map(([icon, label, target]) => (
                   <a
                     key={label}
@@ -248,7 +261,7 @@ export default function StudentsMobile() {
           <label>年级</label>
           <div className="m-seg" style={{ flexWrap: 'wrap' }}>
             <button type="button" className={`m-seg-btn${!draft.grade ? ' on' : ''}`} onClick={() => setDraft((d) => ({ ...d, grade: undefined }))}>全部</button>
-            {GRADES.map((g) => (
+            {gradeNames.map((g) => (
               <button key={g} type="button" className={`m-seg-btn${draft.grade === g ? ' on' : ''}`} onClick={() => setDraft((d) => ({ ...d, grade: g }))}>
                 {g}
               </button>

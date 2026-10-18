@@ -112,7 +112,7 @@ function DashboardDesktop() {
               value={stats.studentCount}
               extra={
                 <Button type="link" size="small" onClick={() => navigate('/students')}>
-                  学生管理 <RightOutlined />
+                  学生名册 <RightOutlined />
                 </Button>
               }
             />

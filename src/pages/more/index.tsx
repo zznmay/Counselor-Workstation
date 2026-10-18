@@ -23,6 +23,7 @@ const RESOURCES: MoreItem[] = [
 ];
 
 const SYSTEM: MoreItem[] = [
+  { key: '/classes', label: '班级管理', icon: 'school', adminOnly: true },
   { key: '/admin/users', label: '用户管理', icon: 'users', adminOnly: true },
   { key: '/admin/logs', label: '访问日志', icon: 'shield', adminOnly: true },
 ];

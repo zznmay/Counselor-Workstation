@@ -16,7 +16,7 @@ interface TabItem {
 /** 底部导航：4 常驻 + 1 更多（硬约束 ≤5）。第 4 槽为待办提醒，审批中心在「更多」首位 */
 const TABS: TabItem[] = [
   { key: '/', label: '工作台', icon: 'grid4' },
-  { key: '/students', label: '学生管理', icon: 'users' },
+  { key: '/students', label: '学生名册', icon: 'users' },
   { key: '/warnings', label: '预警管理', icon: 'triangle', badge: 'warnings' },
   { key: '/todos', label: '待办提醒', icon: 'checksq', badge: 'todos' },
   { key: '/more', label: '更多', icon: 'grid', badge: 'approvals' },

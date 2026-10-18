@@ -1,5 +1,6 @@
 import {
   AlertOutlined,
+  ApartmentOutlined,
   AppstoreOutlined,
   AuditOutlined,
   BellOutlined,
@@ -11,6 +12,7 @@ import {
   LogoutOutlined,
   MenuOutlined,
   SettingOutlined,
+  TagsOutlined,
   TeamOutlined,
   ToolOutlined,
 } from '@ant-design/icons';
@@ -41,12 +43,14 @@ const { Sider, Header, Content } = Layout;
 
 const TITLES: Record<string, string> = {
   '/': '工作台',
-  '/students': '学生信息管理',
+  '/students': '学生名册',
   '/conversations': '谈心谈话记录',
   '/warnings': '学业与心理预警',
   '/todos': '待办提醒',
   '/templates': '申请表模板汇总库',
   '/tools': '实用工具',
+  '/classes': '班级管理',
+  '/classes/grades': '年级管理',
   '/admin/users': '用户管理',
   '/admin/logs': '访问日志',
 };
@@ -151,7 +155,7 @@ export default function BasicLayout() {
   const menuItems: MenuProps['items'] = useMemo(
     () => [
       { key: '/', icon: <DashboardOutlined />, label: '工作台' },
-      { key: '/students', icon: <TeamOutlined />, label: '学生管理' },
+      { key: '/students', icon: <TeamOutlined />, label: '学生名册' },
       { key: '/conversations', icon: <CommentOutlined />, label: '谈心谈话' },
       { key: '/warnings', icon: <AlertOutlined />, label: withBadge('预警管理', badges.warnings) },
       { key: '/todos', icon: <CheckSquareOutlined />, label: withBadge('待办提醒', badges.todos) },
@@ -171,6 +175,15 @@ export default function BasicLayout() {
       },
       ...(authUser?.role === 'admin'
         ? [
+            {
+              key: '/classes',
+              icon: <ApartmentOutlined />,
+              label: '班级管理',
+              children: [
+                { key: '/classes', icon: <TeamOutlined />, label: '班级管理' },
+                { key: '/classes/grades', icon: <TagsOutlined />, label: '年级管理' },
+              ],
+            },
             {
               key: '/admin',
               icon: <SettingOutlined />,
@@ -199,7 +212,7 @@ export default function BasicLayout() {
       items={menuItems}
       selectedKeys={[location.pathname]}
       defaultOpenKeys={
-        ['tools', 'admin'].filter((prefix) => location.pathname.startsWith(`/${prefix}`))
+        ['tools', 'classes', 'admin'].filter((prefix) => location.pathname.startsWith(`/${prefix}`))
           .map((prefix) => `/${prefix}`)
       }
       onClick={handleMenuClick}

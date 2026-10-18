@@ -132,3 +132,5 @@
   position:absolute;left:30px;right:30px;top:112px;margin:0;text-align:center;
   font-size:10px;line-height:15px;color:#86868B;
 }
+/* 诱捕浏览器自动填充的隐藏字段：屏外定位，视觉零影响 */
+.lgpc-trap{position:absolute;left:-9999px;top:0;width:1px;height:1px;opacity:0;pointer-events:none}

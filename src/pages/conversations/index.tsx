@@ -31,6 +31,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 import { getStudentOptions } from '@/api/student';
+import { canManageStudentFront, getStoredUser } from '@/lib/auth';
 import {
   createConversation,
   deleteConversation,
@@ -97,7 +98,10 @@ export default function Conversations() {
   const [detail, setDetail] = useState<Conversation | null>(null);
 
   useEffect(() => {
-    getStudentOptions().then(setStudentOptions).catch(() => undefined);
+    const authUser = getStoredUser();
+    getStudentOptions()
+      .then((list) => setStudentOptions(list.filter((s) => canManageStudentFront(authUser, s.classId))))
+      .catch(() => undefined);
   }, []);
 
   const loadTalkedStudents = useCallback(() => {

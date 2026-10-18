@@ -3,9 +3,13 @@ const express = require('express');
 
 const dbx = require('../lib/db');
 const auth = require('../lib/auth');
+const { classIdsOfUser } = require('../lib/scope');
 const { logAccess, clientIp } = require('../lib/audit');
 
 const router = express.Router();
+
+/** 会话用户输出：safeUser 白名单 + 所辖班级（前端按此判断「带班」权限） */
+const withClassIds = (row) => ({ ...auth.safeUser(row), classIds: classIdsOfUser(row) });
 
 router.post('/login', (req, res) => {
   const username = String(req.body?.username ?? '').trim();
@@ -41,14 +45,14 @@ router.post('/login', (req, res) => {
   req.user = row;
   logAccess(req, '登录成功');
 
-  res.json({ token, user: auth.safeUser(row) });
+  res.json({ token, user: withClassIds(row) });
 });
 
 // 以下接口需要登录
 router.use(auth.authMiddleware);
 
 router.get('/me', (req, res) => {
-  res.json(auth.safeUser(req.user));
+  res.json(withClassIds(req.user));
 });
 
 router.patch('/me', (req, res) => {
@@ -58,7 +62,7 @@ router.patch('/me', (req, res) => {
   }
   dbx.run('UPDATE users SET displayName = ? WHERE id = ?', [displayName, req.user.id]);
   const row = dbx.get('SELECT * FROM users WHERE id = ?', [req.user.id]);
-  res.json(auth.safeUser(row));
+  res.json(withClassIds(row));
 });
 
 router.post('/change-password', (req, res) => {
@@ -73,12 +77,15 @@ router.post('/change-password', (req, res) => {
   if (!/[A-Za-z]/.test(newPassword) || !/\d/.test(newPassword)) {
     return res.status(400).json({ message: '新密码需同时包含字母和数字' });
   }
+  if (newPassword === req.user.username) {
+    return res.status(400).json({ message: '新密码不能与用户名相同' });
+  }
   dbx.run('UPDATE users SET passwordHash = ?, mustChangePassword = 0 WHERE id = ?', [
     auth.hashPassword(newPassword), req.user.id,
   ]);
   logAccess(req, '修改密码');
   const row = dbx.get('SELECT * FROM users WHERE id = ?', [req.user.id]);
-  res.json({ token: auth.issueToken(row), user: auth.safeUser(row) });
+  res.json({ token: auth.issueToken(row), user: withClassIds(row) });
 });
 
 module.exports = router;

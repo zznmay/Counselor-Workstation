@@ -16,6 +16,72 @@ export interface PageResult<T> {
 
 export type Id = string;
 
+/* ==================== 年级与班级 ==================== */
+
+/** 年级（管理端完整信息） */
+export interface Grade {
+  id: number;
+  name: string;
+  /** 年级下班级数 */
+  classCount?: number;
+  createdAt?: string;
+}
+
+/** 年级下拉选项 */
+export interface GradeOption {
+  id: number;
+  name: string;
+}
+
+/** 班级（管理端完整信息，归属年级） */
+export interface SchoolClass {
+  id: number;
+  gradeId: number;
+  name: string;
+  /** 所属年级名称 */
+  gradeName?: string;
+  /** 班级学生数 */
+  studentCount?: number;
+  /** 所辖辅导员数 */
+  counselorCount?: number;
+  /** 所辖辅导员姓名（、分隔） */
+  counselorNames?: string;
+  createdAt?: string;
+}
+
+/** 班级下拉选项（学生表单级联选择用） */
+export interface ClassOption {
+  id: number;
+  name: string;
+  gradeId: number;
+  gradeName: string;
+}
+
+/* ==================== 班级名单批量导入 ==================== */
+
+/** Excel 解析出的一行班级数据（row 为含表头的实际行号，从 2 开始） */
+export interface ParsedClassRow {
+  row: number;
+  data: { name: string; grade: string; counselors: string };
+}
+
+/** 一条班级导入失败记录（附原始行数据，便于导出明细修正后重传） */
+export interface ClassImportFailure {
+  row: number;
+  name: string;
+  grade: string;
+  reason: string;
+  data?: { name: string; grade: string; counselors: string };
+}
+
+export interface ClassImportResult {
+  /** 本次提交的总行数 */
+  total: number;
+  /** 成功追加的条数 */
+  successCount: number;
+  failures: ClassImportFailure[];
+}
+
 /* ==================== 学生信息 ==================== */
 
 export type Gender = '男' | '女';
@@ -31,6 +97,8 @@ export interface Student {
   grade: string;
   major: string;
   className: string;
+  /** 归属班级 ID（班级管理字典外键；历史数据可能为空） */
+  classId?: number | null;
   phone: string;
   /** 宿舍，如 学生公寓5-412 */
   dorm?: string;
@@ -70,6 +138,8 @@ export interface StudentOption {
   name: string;
   studentNo: string;
   className: string;
+  /** 归属班级 ID（前端按带班权限过滤表单下拉用） */
+  classId?: number | null;
 }
 
 /* ==================== 谈心谈话 ==================== */

@@ -1,5 +1,5 @@
 import { App } from 'antd';
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { request } from '@/api/request';
@@ -103,6 +103,16 @@ export default function LoginMobile() {
   /** 登录表单切换为改密态后仍需用于 oldPassword */
   const [loginPassword, setLoginPassword] = useState('');
 
+  /* 浏览器自动填充清理：受控输入的 DOM 脏值（autofill 不触发 onChange）需强制重渲染同步掉。
+     进入改密态后 300ms + 900ms 两次触发，覆盖常见延迟填充时机 */
+  const [, setAutofillTick] = useState(0);
+  useEffect(() => {
+    if (mode !== 'change') return;
+    const t1 = window.setTimeout(() => setAutofillTick((v) => v + 1), 300);
+    const t2 = window.setTimeout(() => setAutofillTick((v) => v + 1), 900);
+    return () => { window.clearTimeout(t1); window.clearTimeout(t2); };
+  }, [mode]);
+
   /** 登录提交：校验 → 请求 → 写会话 → 改密态 / 跳转 */
   const doLogin = async () => {
     const missUser = !username.trim();
@@ -134,6 +144,9 @@ export default function LoginMobile() {
         setErrPwd(false);
         setErrConfirm(false);
         setMode('change');
+        // 改密态新密码默认明文：自动填充的脏值（如用户名）一眼可见
+        setShowPassword(true);
+        setShowConfirm(true);
         message.info('首次登录请先设置新密码');
       } else {
         message.success(`欢迎，${res.user.displayName}`);
@@ -146,7 +159,7 @@ export default function LoginMobile() {
     }
   };
 
-  /** 首次登录改密：规则与桌面端一致（≥8 位且含字母和数字、两次一致） */
+  /** 首次登录改密：先查两次一致（自动填充用户名进第一个框时，能立刻暴露真因），再查强度规则 */
   const doChangePassword = async () => {
     const missPwd = !password;
     const missConfirm = !confirm;
@@ -154,6 +167,15 @@ export default function LoginMobile() {
     setErrConfirm(missConfirm);
     if (missPwd) {
       message.warning('请输入新密码');
+      return;
+    }
+    if (missConfirm) {
+      message.warning('请再次输入新密码');
+      return;
+    }
+    if (password !== confirm) {
+      setErrConfirm(true);
+      message.error('两次输入的新密码不一致');
       return;
     }
     if (password.length < 8) {
@@ -166,13 +188,9 @@ export default function LoginMobile() {
       message.warning('需同时包含字母和数字');
       return;
     }
-    if (missConfirm) {
-      message.warning('请再次输入新密码');
-      return;
-    }
-    if (password !== confirm) {
-      setErrConfirm(true);
-      message.error('两次输入的新密码不一致');
+    if (pendingUser && password === pendingUser.username) {
+      setErrPwd(true);
+      message.warning('新密码不能与用户名相同');
       return;
     }
 
@@ -222,6 +240,13 @@ export default function LoginMobile() {
 
           {/* ===== 白色面板 ===== */}
           <form className="lg-panel" onSubmit={onSubmit} noValidate>
+            {/* 诱捕浏览器自动填充：记住的用户名/密码落在屏外隐藏字段，不污染新密码输入框 */}
+            {!isLogin && (
+              <>
+                <input type="text" name="username" autoComplete="username" tabIndex={-1} aria-hidden="true" className="lg-trap" />
+                <input type="password" name="password" autoComplete="current-password" tabIndex={-1} aria-hidden="true" className="lg-trap" />
+              </>
+            )}
             <h2 className="lg-h2">{isLogin ? COPY.panelTitle : COPY.changeTitle}</h2>
             {isLogin ? (
               <p className="lg-sub">{COPY.panelSub}</p>
@@ -257,6 +282,7 @@ export default function LoginMobile() {
                   <input
                     className="lg-inp"
                     type={showPassword ? 'text' : 'password'}
+                    name="new-password"
                     autoComplete="new-password"
                     placeholder={COPY.newPasswordPlaceholder}
                     aria-label={COPY.newPasswordPlaceholder}
@@ -309,6 +335,7 @@ export default function LoginMobile() {
                   <input
                     className="lg-inp"
                     type={showConfirm ? 'text' : 'password'}
+                    name="confirm-password"
                     autoComplete="new-password"
                     placeholder={COPY.confirmPlaceholder}
                     aria-label={COPY.confirmPlaceholder}

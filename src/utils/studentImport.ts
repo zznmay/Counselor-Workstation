@@ -217,11 +217,15 @@ export async function parseStudentExcel(file: File): Promise<ParsedStudentRow[]>
 
 /**
  * 逐行校验学生数据：
- * 必填项、格式（性别/年级/专业/手机号/日期/学籍状态）、学号在系统与本表内的重复。
+ * 必填项、格式（性别/年级/专业/手机号/日期/学籍状态）、学号在系统与本表内的重复、
+ * 班级名与班级管理字典的匹配（classKeys 缺省时跳过该项，由服务端兜底）。
+ *
+ * @param classKeys 班级字典键集合（`${grade}|${className}`），调用侧由 GET /classes/options 构建
  */
 export function validateStudentRows(
   rows: ParsedStudentRow[],
   existingNos: Iterable<string>,
+  classKeys?: ReadonlySet<string>,
 ): { valid: ParsedStudentRow[]; failures: StudentImportFailure[] } {
   const existingSet = new Set(existingNos);
   const fileSeenRow = new Map<string, number>(); // 学号 → 本表首次出现的行号
@@ -260,6 +264,9 @@ export function validateStudentRows(
     else if (!(MAJORS as readonly string[]).includes(data.major)) reasons.push(`专业需为以下之一：${MAJORS.join('、')}`);
 
     if (!data.className) reasons.push('班级为必填项');
+    else if (classKeys && !classKeys.has(`${data.grade}|${data.className}`)) {
+      reasons.push(`班级名未匹配到班级字典（${data.grade} ${data.className}），请先在「班级管理」中创建该班级`);
+    }
 
     if (!data.phone) reasons.push('手机号为必填项');
     else if (!/^1\d{10}$/.test(data.phone)) reasons.push('手机号应为11位且以1开头');

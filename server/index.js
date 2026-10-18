@@ -20,6 +20,8 @@ const api = express.Router();
 api.use('/auth', require('./routes/auth'));
 api.use('/users', require('./routes/users'));
 api.use('/students', require('./routes/students'));
+api.use('/grades', require('./routes/grades'));
+api.use('/classes', require('./routes/classes'));
 api.use('/conversations', require('./routes/conversations'));
 api.use('/warnings', require('./routes/warnings'));
 api.use('/notices', require('./routes/notices'));

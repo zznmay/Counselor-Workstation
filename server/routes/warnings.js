@@ -1,9 +1,9 @@
-/** 学业与心理预警：列表/处理/增删改查（随学生归属过滤） */
+/** 学业与心理预警：列表/处理/增删改查（仅所带班级学生的记录可见可维护） */
 const express = require('express');
 
 const dbx = require('../lib/db');
 const auth = require('../lib/auth');
-const { sensitiveScope, canSeeStudent } = require('../lib/scope');
+const { sensitiveScope, canManageStudent } = require('../lib/scope');
 const { logAccess, nowStr } = require('../lib/audit');
 
 const router = express.Router();
@@ -48,12 +48,12 @@ function resolveStudent(studentId) {
   return dbx.get('SELECT id, name, studentNo, className FROM students WHERE id = ?', [studentId]);
 }
 
-/** 新增：录入预警（学生需可见） */
+/** 新增：录入预警（仅所带班级的学生） */
 router.post('/', (req, res) => {
   const body = req.body ?? {};
   const studentId = String(body.studentId ?? '');
-  if (!studentId || !canSeeStudent(req.user, studentId)) {
-    return res.status(403).json({ message: '无权为该学生录入预警' });
+  if (!studentId || !canManageStudent(req.user, studentId)) {
+    return res.status(403).json({ message: '无权为该学生录入预警（仅所带班级的学生）' });
   }
   const student = resolveStudent(studentId);
   if (!student) return res.status(404).json({ message: '学生不存在' });
@@ -73,8 +73,8 @@ router.post('/', (req, res) => {
 router.put('/:id', (req, res) => {
   const target = dbx.get('SELECT * FROM warnings WHERE id = ?', [req.params.id]);
   if (!target) return res.status(404).json({ message: '记录不存在' });
-  if (!canSeeStudent(req.user, target.studentId)) {
-    return res.status(403).json({ message: '无权处理该预警' });
+  if (!canManageStudent(req.user, target.studentId)) {
+    return res.status(403).json({ message: '无权处理该预警（仅所带班级学生的预警）' });
   }
   const body = req.body ?? {};
   const status = body.status ?? target.status;
@@ -92,7 +92,7 @@ router.put('/:id', (req, res) => {
 router.delete('/:id', (req, res) => {
   const target = dbx.get('SELECT * FROM warnings WHERE id = ?', [req.params.id]);
   if (!target) return res.status(404).json({ message: '记录不存在' });
-  if (!canSeeStudent(req.user, target.studentId)) {
+  if (!canManageStudent(req.user, target.studentId)) {
     return res.status(403).json({ message: '无权删除该预警' });
   }
   dbx.run('DELETE FROM warnings WHERE id = ?', [req.params.id]);

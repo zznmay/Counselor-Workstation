@@ -1,9 +1,9 @@
-/** 学生信息：列表/筛选/分页、增删改查、归属过滤、批量导入 */
+/** 学生名册：列表/筛选/分页、增删改查、批量导入（查看全员放开；编辑/删除限带班辅导员或管理员） */
 const express = require('express');
 
 const dbx = require('../lib/db');
 const auth = require('../lib/auth');
-const { studentScope, canSeeStudent } = require('../lib/scope');
+const { canManageStudent } = require('../lib/scope');
 const { logAccess, nowStr } = require('../lib/audit');
 
 const router = express.Router();
@@ -33,14 +33,38 @@ function setCoManagers(studentId, userIds) {
   }
 }
 
-/** 列表：关键字 + 年级/专业/学籍状态筛选 + 分页 */
+/**
+ * 解析学生归属班级 classId：
+ * - body.classId 显式传 null/'' 表示清空；传数字时校验班级存在，不存在返回 { error }
+ * - 未传 classId 时按 (grade, className) 文本反查字典回填，查不到返回 { value: null }（不自动建班）
+ * - PUT 场景可传 fallback（库中原行），文本字段未随请求更新时以原值为准
+ */
+function resolveStudentClassId(body, fallback = {}) {
+  if (body.classId !== undefined) {
+    if (body.classId === null || body.classId === '') return { value: null };
+    const cid = Number(body.classId);
+    if (!Number.isInteger(cid) || cid <= 0 || !dbx.get('SELECT id FROM classes WHERE id = ?', [cid])) {
+      return { error: '所选班级不存在（可能已被删除）' };
+    }
+    return { value: cid };
+  }
+  const grade = String(body.grade ?? fallback.grade ?? '').trim();
+  const className = String(body.className ?? fallback.className ?? '').trim();
+  if (!grade || !className) return { value: null };
+  const row = dbx.get(
+    'SELECT c.id FROM classes c JOIN grades g ON g.id = c.gradeId WHERE c.name = ? AND g.name = ?',
+    [className, grade],
+  );
+  return { value: row ? row.id : null };
+}
+
+/** 列表：关键字 + 年级/专业/学籍状态筛选 + 分页（基础信息全员可见，不再按带班过滤） */
 router.get('/', (req, res) => {
   const { keyword = '', grade, major, status } = req.query;
   const page = Math.max(1, parseInt(req.query.page) || 1);
   const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize) || 10));
   const kw = String(keyword).trim();
 
-  const scope = studentScope(req.user);
   const conds = ['1 = 1'];
   const params = [];
   if (kw) {
@@ -51,40 +75,34 @@ router.get('/', (req, res) => {
   if (major) { conds.push('s.major = ?'); params.push(major); }
   if (status) { conds.push('s.status = ?'); params.push(status); }
 
-  const where = `${conds.join(' AND ')} ${scope.where}`;
+  const where = conds.join(' AND ');
   const total = dbx.get(
     `SELECT COUNT(*) AS c FROM students s WHERE ${where}`,
-    [...params, ...scope.params],
+    params,
   ).c;
   const rows = dbx.all(
     `SELECT s.* FROM students s WHERE ${where} ORDER BY s.studentNo DESC LIMIT ? OFFSET ?`,
-    [...params, ...scope.params, pageSize, (page - 1) * pageSize],
+    [...params, pageSize, (page - 1) * pageSize],
   );
   res.json({ list: rows, total, page, pageSize });
 });
 
-/** 表单下拉：在读学生精简列表（可见范围内） */
+/** 表单下拉：在读学生精简列表（全量；带班班级字段供前端按权限过滤） */
 router.get('/options', (req, res) => {
-  const scope = studentScope(req.user);
   const rows = dbx.all(
-    `SELECT s.id, s.name, s.studentNo, s.className FROM students s
-     WHERE s.status = '在读' ${scope.where} ORDER BY s.studentNo`,
-    [...scope.params],
+    `SELECT s.id, s.name, s.studentNo, s.className, s.classId FROM students s
+     WHERE s.status = '在读' ORDER BY s.studentNo`,
   );
   res.json(rows);
 });
 
-/** 导入查重用：可见范围内全部学号 */
+/** 导入查重用：全部学号（学号全局唯一） */
 router.get('/nos', (req, res) => {
-  const scope = studentScope(req.user);
-  const rows = dbx.all(`SELECT s.studentNo FROM students s WHERE 1 = 1 ${scope.where}`, [...scope.params]);
+  const rows = dbx.all('SELECT s.studentNo FROM students s');
   res.json(rows.map((r) => r.studentNo));
 });
 
 router.get('/:id', (req, res) => {
-  if (!canSeeStudent(req.user, req.params.id)) {
-    return res.status(403).json({ message: '无权查看该学生' });
-  }
   const row = dbx.get('SELECT s.* FROM students s WHERE s.id = ?', [req.params.id]);
   if (!row) return res.status(404).json({ message: '学生不存在' });
   res.json({ ...row, coManagerIds: coManagersOf(req.params.id).map((u) => u.id), coManagers: coManagersOf(req.params.id) });
@@ -111,13 +129,16 @@ router.post('/', (req, res) => {
     : req.user.id;
   const id = `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 
+  const cls = resolveStudentClassId(body);
+  if (cls.error) return res.status(400).json({ message: cls.error });
+
   dbx.run(`INSERT INTO students
-    (id, studentNo, name, gender, grade, major, className, phone, dorm, politicalStatus, origin, status,
+    (id, studentNo, name, gender, grade, major, className, classId, phone, dorm, politicalStatus, origin, status,
      headTeacher, counselor, fatherName, fatherPhone, motherName, motherPhone, position, remark, enrollDate,
      ownerId, createdBy, createdAt, updatedAt)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [id, studentNo, name, body.gender ?? '男', body.grade ?? '', body.major ?? '', body.className ?? '',
-      body.phone ?? '', body.dorm ?? null, body.politicalStatus ?? null, body.origin ?? null,
+      cls.value, body.phone ?? '', body.dorm ?? null, body.politicalStatus ?? null, body.origin ?? null,
       body.status ?? '在读', body.headTeacher ?? null, body.counselor ?? null, body.fatherName ?? null,
       body.fatherPhone ?? null, body.motherName ?? null, body.motherPhone ?? null, body.position ?? null,
       body.remark ?? null, body.enrollDate ?? '', ownerId, req.user.id, nowStr(), nowStr()],
@@ -129,10 +150,10 @@ router.post('/', (req, res) => {
   res.json({ ...row, coManagerIds: coManagersOf(id).map((u) => u.id) });
 });
 
-/** 编辑：需可见；共管关系与归属（仅管理员）可更新 */
+/** 编辑：仅所带班级的辅导员或管理员；共管关系与归属（仅管理员）可更新 */
 router.put('/:id', (req, res) => {
-  if (!canSeeStudent(req.user, req.params.id)) {
-    return res.status(403).json({ message: '无权修改该学生' });
+  if (!canManageStudent(req.user, req.params.id)) {
+    return res.status(403).json({ message: '无权修改该学生（仅所带班级的学生或管理员可编辑）' });
   }
   const target = dbx.get('SELECT s.* FROM students s WHERE s.id = ?', [req.params.id]);
   if (!target) return res.status(404).json({ message: '学生不存在' });
@@ -150,6 +171,10 @@ router.put('/:id', (req, res) => {
   for (const field of FIELDS) {
     if (body[field] !== undefined) { sets.push(`${field} = ?`); params.push(body[field]); }
   }
+  const cls = resolveStudentClassId(body, target);
+  if (cls.error) return res.status(400).json({ message: cls.error });
+  sets.push('classId = ?');
+  params.push(cls.value);
   if (req.user.role === 'admin' && body.ownerId !== undefined) {
     sets.push('ownerId = ?'); params.push(Number(body.ownerId) || req.user.id);
   }
@@ -164,10 +189,10 @@ router.put('/:id', (req, res) => {
   res.json({ ...row, coManagerIds: coManagersOf(req.params.id).map((u) => u.id) });
 });
 
-/** 删除（谈话/预警等历史记录保留，便于留档追溯） */
+/** 删除：仅所带班级的辅导员或管理员（谈话/预警等历史记录保留，便于留档追溯） */
 router.delete('/:id', (req, res) => {
-  if (!canSeeStudent(req.user, req.params.id)) {
-    return res.status(403).json({ message: '无权删除该学生' });
+  if (!canManageStudent(req.user, req.params.id)) {
+    return res.status(403).json({ message: '无权删除该学生（仅所带班级的学生或管理员可删除）' });
   }
   const target = dbx.get('SELECT s.* FROM students s WHERE s.id = ?', [req.params.id]);
   if (!target) return res.status(404).json({ message: '学生不存在' });
@@ -177,7 +202,7 @@ router.delete('/:id', (req, res) => {
   res.json({ ok: true });
 });
 
-/** 批量追加导入（前端已完成预检，服务端做全局学号查重兜底） */
+/** 批量追加导入：逐条校验，班级名须匹配班级管理字典（不匹配跳过并计入失败明细） */
 router.post('/import', (req, res) => {
   const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
   let successCount = 0;
@@ -193,6 +218,7 @@ router.post('/import', (req, res) => {
     }
     if (!name) reasons.push('姓名为必填项');
     if (!data?.gender) reasons.push('性别为必填项');
+    if (!data?.grade) reasons.push('年级为必填项');
     if (!data?.className) reasons.push('班级为必填项');
     if (!data?.enrollDate) reasons.push('入学时间为必填项');
 
@@ -201,13 +227,30 @@ router.post('/import', (req, res) => {
       continue;
     }
 
+    // 班级字典匹配：(年级, 班级) 必须已存在于班级管理，未匹配的行跳过不导入
+    const grade = String(data?.grade ?? '').trim();
+    const className = String(data?.className ?? '').trim();
+    const clsRow = dbx.get(
+      'SELECT c.id FROM classes c JOIN grades g ON g.id = c.gradeId WHERE c.name = ? AND g.name = ?',
+      [className, grade],
+    );
+    if (!clsRow) {
+      failures.push({
+        row, studentNo, name,
+        reason: `班级名未匹配到班级字典（${grade} ${className}），请先在「班级管理」中创建该班级`,
+        data,
+      });
+      continue;
+    }
+
     dbx.run(`INSERT INTO students
-      (id, studentNo, name, gender, grade, major, className, phone, dorm, politicalStatus, origin, status,
+      (id, studentNo, name, gender, grade, major, className, classId, phone, dorm, politicalStatus, origin, status,
        headTeacher, counselor, fatherName, fatherPhone, motherName, motherPhone, position, remark, enrollDate,
        ownerId, createdBy, createdAt, updatedAt)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [`s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}-${row}`, studentNo, name,
-        data.gender ?? '男', data.grade ?? '', data.major ?? '', data.className ?? '', data.phone ?? '',
+        data.gender ?? '男', data.grade ?? '', data.major ?? '', data.className ?? '', clsRow.id,
+        data.phone ?? '',
         data.dorm ?? null, data.politicalStatus ?? null, data.origin ?? null, data.status ?? '在读',
         data.headTeacher ?? null, data.counselor ?? null, data.fatherName ?? null, data.fatherPhone ?? null,
         data.motherName ?? null, data.motherPhone ?? null, data.position ?? null, data.remark ?? null,

@@ -1,6 +1,8 @@
 import BasicLayout from '@/layouts/BasicLayout';
 import AdminLogs from '@/pages/admin/logs';
 import AdminUsers from '@/pages/admin/users';
+import Classes from '@/pages/classes';
+import Grades from '@/pages/classes/grades';
 import Conversations from '@/pages/conversations';
 import Dashboard from '@/pages/dashboard';
 import Login from '@/pages/login';
@@ -51,6 +53,8 @@ export const router = createBrowserRouter([
       { path: 'templates', element: <Templates /> },
       { path: 'tools', element: <ToolsIndex /> },
       { path: 'tools/:toolKey', element: <ToolRunner /> },
+      { path: 'classes', element: <Classes /> },
+      { path: 'classes/grades', element: <Grades /> },
       { path: 'admin/users', element: <AdminUsers /> },
       { path: 'admin/logs', element: <AdminLogs /> },
       { path: '*', element: <Navigate to="/" replace /> },

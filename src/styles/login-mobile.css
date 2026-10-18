@@ -300,9 +300,11 @@
     color: #5f6167;
     cursor: pointer;
   }
-  /* 协议链接：无对应文档，点击给如实说明，不做假跳转 */
+  /* 协议链接：无对应文档，点击给如实说明，不做假跳转。
+     负 margin 抵消 padding：视觉不变，触控热区扩到 ~44px 高（行内小目标可达性） */
   .lg-link {
-    padding: 0;
+    padding: 13px 6px;
+    margin: -13px -6px;
     border: 0;
     background: none;
     font-family: inherit;
@@ -315,3 +317,5 @@
   }
   .lg-link:active { opacity: .6; }
 }
+  /* 诱捕浏览器自动填充的隐藏字段：屏外定位，视觉零影响 */
+  .lg-trap{position:absolute;left:-9999px;top:0;width:1px;height:1px;opacity:0;pointer-events:none}

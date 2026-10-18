@@ -32,6 +32,7 @@ const SCHEMA_STATEMENTS = [
     grade TEXT,
     major TEXT,
     className TEXT,
+    classId INTEGER,
     phone TEXT,
     dorm TEXT,
     politicalStatus TEXT,
@@ -55,6 +56,23 @@ const SCHEMA_STATEMENTS = [
     studentId TEXT NOT NULL,
     userId INTEGER NOT NULL,
     PRIMARY KEY (studentId, userId)
+  )`,
+  `CREATE TABLE IF NOT EXISTS grades (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    createdAt TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS classes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    gradeId INTEGER NOT NULL REFERENCES grades(id) ON DELETE RESTRICT,
+    name TEXT NOT NULL,
+    createdAt TEXT NOT NULL,
+    UNIQUE (gradeId, name)
+  )`,
+  `CREATE TABLE IF NOT EXISTS classCounselors (
+    classId INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+    userId INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    PRIMARY KEY (classId, userId)
   )`,
   `CREATE TABLE IF NOT EXISTS conversations (
     id TEXT PRIMARY KEY,
@@ -159,6 +177,48 @@ for (const sql of SCHEMA_STATEMENTS) {
   db.prepare(sql).run();
 }
 
+/** 老库升级：students.classId 列不存在时补加（新库建表语句已含该列，此处幂等跳过） */
+const studentCols = db.prepare('PRAGMA table_info(students)').all().map((c) => c.name);
+if (!studentCols.includes('classId')) {
+  db.prepare('ALTER TABLE students ADD COLUMN classId INTEGER').run();
+}
+
+/**
+ * 学生班级归属回填（幂等）：
+ * 将存量学生的 (grade, className) 组合生成年级/班级字典，并回填 classId。
+ * 仅处理 classId IS NULL 且两个文本字段非空的行；年级/班级按名称 find-or-create，
+ * 多次启动不会产生重复字典。文本为空/NULL 的行保持 classId 为 NULL。
+ */
+function ensureStudentClassBackfill() {
+  const now = () => new Date().toISOString().slice(0, 16).replace('T', ' ');
+  const pending = db.prepare(
+    `SELECT DISTINCT TRIM(grade) AS grade, TRIM(className) AS className FROM students
+     WHERE classId IS NULL
+       AND TRIM(COALESCE(grade, '')) <> ''
+       AND TRIM(COALESCE(className, '')) <> ''`,
+  ).all();
+  if (pending.length === 0) return;
+
+  const findGrade = db.prepare('SELECT id FROM grades WHERE name = ?');
+  const insGrade = db.prepare('INSERT INTO grades (name, createdAt) VALUES (?, ?)');
+  const findClass = db.prepare('SELECT id FROM classes WHERE gradeId = ? AND name = ?');
+  const insClass = db.prepare('INSERT INTO classes (gradeId, name, createdAt) VALUES (?, ?, ?)');
+  const link = db.prepare(
+    'UPDATE students SET classId = ? WHERE classId IS NULL AND TRIM(grade) = ? AND TRIM(className) = ?',
+  );
+
+  let created = 0;
+  for (const { grade, className } of pending) {
+    let g = findGrade.get(grade);
+    if (!g) g = { id: Number(insGrade.run(grade, now()).lastInsertRowid) };
+    let c = findClass.get(g.id, className);
+    if (!c) c = { id: Number(insClass.run(g.id, className, now()).lastInsertRowid) };
+    link.run(c.id, grade, className);
+    created += 1;
+  }
+  console.log(`[db] 学生班级归属回填完成：处理 ${created} 组（年级, 班级）组合。`);
+}
+
 /** 首次初始化：管理员 + 示例辅导员账号 + 示例业务数据 */
 function seed() {
   const userCount = db.prepare('SELECT COUNT(*) AS c FROM users').get().c;
@@ -243,6 +303,7 @@ function seed() {
 }
 
 seed();
+ensureStudentClassBackfill();
 
 /** 统一参数规范化：undefined→null、Date→ISO 串，并做一次 JSON 往返消毒 */
 function normalizeParams(params) {

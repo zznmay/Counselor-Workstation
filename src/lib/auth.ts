@@ -5,6 +5,18 @@ export interface AuthUser {
   displayName: string;
   role: 'admin' | 'counselor';
   mustChangePassword?: boolean;
+  /** 所辖班级 ID（管理员为空数组；旧会话缓存可能缺失，按只读容错） */
+  classIds?: number[];
+}
+
+/**
+ * 前端「带班」判定：与学生后端 canManageStudent 同口径——
+ * 管理员全量；辅导员仅所辖班级（classCounselors）内的学生可维护。
+ */
+export function canManageStudentFront(user: AuthUser | null, classId?: number | null): boolean {
+  if (!user) return false;
+  if (user.role === 'admin') return true;
+  return classId != null && (user.classIds ?? []).includes(classId);
 }
 
 const TOKEN_KEY = 'workbench_token';

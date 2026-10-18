@@ -10,7 +10,7 @@ export type MIconName =
   | 'search' | 'funnel' | 'chevR' | 'chevL' | 'chevD'
   | 'phone' | 'message' | 'comment' | 'bell' | 'x' | 'check' | 'clock'
   | 'refresh' | 'alertTriangle' | 'alertCircle' | 'flag' | 'plus'
-  | 'user' | 'file' | 'tool' | 'shield' | 'edit' | 'logout' | 'spinner';
+  | 'user' | 'file' | 'tool' | 'shield' | 'edit' | 'logout' | 'spinner' | 'school';
 
 const PATHS: Record<MIconName, string> = {
   grid4: 'M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z',
@@ -42,6 +42,7 @@ const PATHS: Record<MIconName, string> = {
   edit: 'M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4z',
   logout: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9',
   spinner: 'M21 12a9 9 0 1 1-6.22-8.56',
+  school: 'M14 22v-4a2 2 0 1 0-4 0v4M18 10l3.45 1.72a1 1 0 0 1 .55.9V20a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-7.38a1 1 0 0 1 .55-.9L6 10M18 5v17M4 6l7.11-3.55a2 2 0 0 1 1.78 0L20 6M6 5v17M12 11a2 2 0 1 0 0-4 2 2 0 0 0 0 4',
 };
 
 interface MIconProps {

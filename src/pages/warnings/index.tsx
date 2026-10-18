@@ -20,6 +20,7 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 import { getStudentOptions } from '@/api/student';
+import { canManageStudentFront, getStoredUser } from '@/lib/auth';
 import { createWarning, deleteWarning, getWarnings, updateWarning } from '@/api/warning';
 import PageHeader from '@/components/PageHeader';
 import {
@@ -75,7 +76,10 @@ function WarningsDesktop() {
   const [detail, setDetail] = useState<Warning | null>(null);
 
   useEffect(() => {
-    getStudentOptions().then(setStudentOptions).catch(() => undefined);
+    const authUser = getStoredUser();
+    getStudentOptions()
+      .then((list) => setStudentOptions(list.filter((s) => canManageStudentFront(authUser, s.classId))))
+      .catch(() => undefined);
   }, []);
 
   useEffect(() => {

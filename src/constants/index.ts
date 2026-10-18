@@ -15,8 +15,10 @@ import type {
   WarningType,
 } from '@/types';
 
-/** 年级选项 */
-export const GRADES = ['2024级', '2025级', '2026级'] as const;
+/**
+ * 年级选项：已迁移为「班级管理 → 年级管理」的动态字典（GET /api/grades/options），
+ * 此处不再硬编码。通知发布范围（NOTICE_SCOPES）暂保留静态清单，后续可改为动态字典。
+ */
 
 /** 专业选项 */
 export const MAJORS = [

@@ -1,18 +1,21 @@
 import { PlusOutlined } from '@ant-design/icons';
 import { App, Button, Card, Form, Input, Modal, Select, Table, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { createUser, getUsers, updateUser } from '@/api/admin';
 import type { ManagedUser } from '@/api/admin';
+import { getClassOptions } from '@/api/classes';
 import PageHeader from '@/components/PageHeader';
 import { useIsMobile } from '@/hooks/useIsMobile';
+import type { ClassOption } from '@/types';
 
 interface UserFormValues {
   username: string;
   displayName: string;
   role: 'admin' | 'counselor';
   password: string;
+  classIds?: number[];
 }
 
 /** 系统管理：账号开设、停用/启用、密码重置（仅管理员） */
@@ -24,8 +27,82 @@ export default function AdminUsers() {
   const [formOpen, setFormOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [form] = Form.useForm<UserFormValues>();
+  const roleWatch = Form.useWatch('role', form);
   const [resetTarget, setResetTarget] = useState<ManagedUser | null>(null);
   const [resetForm] = Form.useForm<{ password: string }>();
+
+  /* ---------- 辅导员分班 ---------- */
+  const [classOptions, setClassOptions] = useState<ClassOption[]>([]);
+  const [assignTarget, setAssignTarget] = useState<ManagedUser | null>(null);
+  const [assignForm] = Form.useForm<{ classIds?: number[] }>();
+  const [assigning, setAssigning] = useState(false);
+
+  useEffect(() => {
+    getClassOptions().then(setClassOptions).catch(() => undefined);
+  }, []);
+
+  /** 班级选项按年级分组（Select OptGroup 展示） */
+  const gradeGroups = useMemo(() => {
+    const groups: { gradeName: string; items: ClassOption[] }[] = [];
+    const index = new Map<string, number>();
+    for (const opt of classOptions) {
+      let gi = index.get(opt.gradeName);
+      if (gi === undefined) {
+        gi = groups.length;
+        index.set(opt.gradeName, gi);
+        groups.push({ gradeName: opt.gradeName, items: [] });
+      }
+      groups[gi].items.push(opt);
+    }
+    return groups;
+  }, [classOptions]);
+
+  const openAssign = (user: ManagedUser) => {
+    setAssignTarget(user);
+    assignForm.setFieldsValue({ classIds: user.classIds ?? [] });
+  };
+
+  const handleAssign = async () => {
+    if (!assignTarget) return;
+    let values: { classIds?: number[] };
+    try {
+      values = await assignForm.validateFields();
+    } catch {
+      return;
+    }
+    setAssigning(true);
+    try {
+      await updateUser(assignTarget.id, { classIds: values.classIds ?? [] });
+      message.success(`已更新「${assignTarget.displayName}」的所辖班级`);
+      setAssignTarget(null);
+      void reload();
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '保存失败');
+    } finally {
+      setAssigning(false);
+    }
+  };
+
+  /** 按年级分组的班级多选（新增账号与分配班级共用） */
+  const classSelect = (
+    <Select
+      mode="multiple"
+      allowClear
+      showSearch
+      optionFilterProp="children"
+      placeholder="选择所辖班级（可多选）"
+    >
+      {gradeGroups.map((g) => (
+        <Select.OptGroup key={g.gradeName} label={g.gradeName}>
+          {g.items.map((c) => (
+            <Select.Option key={c.id} value={c.id}>
+              {c.name}
+            </Select.Option>
+          ))}
+        </Select.OptGroup>
+      ))}
+    </Select>
+  );
 
   const reload = async () => {
     setLoading(true);
@@ -49,7 +126,9 @@ export default function AdminUsers() {
     }
     setSubmitting(true);
     try {
-      await createUser(values);
+      // classIds 仅对辅导员生效；角色切到 admin 时丢弃该字段
+      const payload = { ...values, classIds: values.role === 'counselor' ? values.classIds : undefined };
+      await createUser(payload);
       message.success(`账号「${values.username}」已创建`);
       setFormOpen(false);
       form.resetFields();
@@ -113,6 +192,18 @@ export default function AdminUsers() {
         role === 'admin' ? <Tag color="gold">管理员</Tag> : <Tag color="blue">辅导员</Tag>,
     },
     {
+      title: '所辖班级',
+      dataIndex: 'classNames',
+      width: 200,
+      ellipsis: true,
+      render: (_, record) =>
+        record.role === 'counselor'
+          ? record.classNames?.length
+            ? record.classNames.join('、')
+            : '未分配'
+          : '—',
+    },
+    {
       title: '状态',
       dataIndex: 'disabled',
       width: 90,
@@ -123,9 +214,14 @@ export default function AdminUsers() {
     {
       title: '操作',
       key: 'action',
-      width: 220,
+      width: 290,
       render: (_, record) => (
         <span>
+          {record.role !== 'admin' && (
+            <Button type="link" size="small" onClick={() => openAssign(record)}>
+              分配班级
+            </Button>
+          )}
           <Button
             type="link"
             size="small"
@@ -171,7 +267,7 @@ export default function AdminUsers() {
         columns={columns}
         dataSource={users}
         loading={loading}
-        scroll={{ x: 800 }}
+        scroll={{ x: 900 }}
         pagination={false}
         rowClassName={(record) => (record.disabled ? 'row-disabled' : '')}
       />
@@ -208,6 +304,15 @@ export default function AdminUsers() {
               ]}
             />
           </Form.Item>
+          {roleWatch === 'counselor' && (
+            <Form.Item
+              name="classIds"
+              label="所辖班级"
+              extra="可多选；也可创建后在列表中调整"
+            >
+              {classSelect}
+            </Form.Item>
+          )}
           <Form.Item
             name="password"
             label="初始密码"
@@ -219,6 +324,27 @@ export default function AdminUsers() {
             extra="首次登录时系统会要求该教师修改密码"
           >
             <Input.Password placeholder="至少 8 位，含字母和数字" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title={`分配班级 · ${assignTarget?.displayName ?? ''}`}
+        open={!!assignTarget}
+        confirmLoading={assigning}
+        onOk={handleAssign}
+        onCancel={() => setAssignTarget(null)}
+        okText="保存"
+        cancelText="取消"
+        width={isMobile ? 'calc(100vw - 24px)' : 460}
+      >
+        <Form form={assignForm} layout="vertical">
+          <Form.Item
+            name="classIds"
+            label="所辖班级"
+            extra="该辅导员负责的班级，可多选；按年级分组展示"
+          >
+            {classSelect}
           </Form.Item>
         </Form>
       </Modal>

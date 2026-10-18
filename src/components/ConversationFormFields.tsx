@@ -15,7 +15,7 @@ export interface ConversationFormValues {
 
 /**
  * 谈话记录表单的公共字段（不含学生选择）。
- * 谈心谈话模块与「学生管理-记录谈话」共用，保证两处录入的字段与校验一致。
+ * 谈心谈话模块与「学生名册-记录谈话」共用，保证两处录入的字段与校验一致。
  */
 export default function ConversationFormFields() {
   return (

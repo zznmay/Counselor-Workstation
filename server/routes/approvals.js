@@ -1,9 +1,9 @@
-/** 审批中心：随学生归属过滤，支持通过/驳回 */
+/** 审批中心：仅所带班级学生的申请可见可维护，支持通过/驳回 */
 const express = require('express');
 
 const dbx = require('../lib/db');
 const auth = require('../lib/auth');
-const { sensitiveScope, canSeeStudent } = require('../lib/scope');
+const { sensitiveScope, canManageStudent } = require('../lib/scope');
 const { logAccess, nowStr } = require('../lib/audit');
 
 const router = express.Router();
@@ -46,12 +46,12 @@ function resolveStudent(studentId) {
   return dbx.get('SELECT id, name, studentNo, className FROM students WHERE id = ?', [studentId]);
 }
 
-/** 登记申请（代学生提交，学生需可见） */
+/** 登记申请（代学生提交，仅所带班级的学生） */
 router.post('/', (req, res) => {
   const body = req.body ?? {};
   const studentId = String(body.studentId ?? '');
-  if (!studentId || !canSeeStudent(req.user, studentId)) {
-    return res.status(403).json({ message: '无权为该学生登记申请' });
+  if (!studentId || !canManageStudent(req.user, studentId)) {
+    return res.status(403).json({ message: '无权为该学生登记申请（仅所带班级的学生）' });
   }
   const student = resolveStudent(studentId);
   if (!student) return res.status(404).json({ message: '学生不存在' });
@@ -68,7 +68,7 @@ router.post('/', (req, res) => {
 router.put('/:id', (req, res) => {
   const target = dbx.get('SELECT * FROM approvals WHERE id = ?', [req.params.id]);
   if (!target) return res.status(404).json({ message: '记录不存在' });
-  if (!canSeeStudent(req.user, target.studentId)) {
+  if (!canManageStudent(req.user, target.studentId)) {
     return res.status(403).json({ message: '无权修改该申请' });
   }
   const body = req.body ?? {};
@@ -83,7 +83,7 @@ router.put('/:id', (req, res) => {
 router.post('/:id/approve', (req, res) => {
   const target = dbx.get('SELECT * FROM approvals WHERE id = ?', [req.params.id]);
   if (!target) return res.status(404).json({ message: '记录不存在' });
-  if (!canSeeStudent(req.user, target.studentId)) {
+  if (!canManageStudent(req.user, target.studentId)) {
     return res.status(403).json({ message: '无权审批该申请' });
   }
   if (target.status !== '待审批') return res.status(400).json({ message: '该申请已审批完成' });
@@ -99,7 +99,7 @@ router.post('/:id/approve', (req, res) => {
 router.delete('/:id', (req, res) => {
   const target = dbx.get('SELECT * FROM approvals WHERE id = ?', [req.params.id]);
   if (!target) return res.status(404).json({ message: '记录不存在' });
-  if (!canSeeStudent(req.user, target.studentId)) {
+  if (!canManageStudent(req.user, target.studentId)) {
     return res.status(403).json({ message: '无权删除该申请' });
   }
   dbx.run('DELETE FROM approvals WHERE id = ?', [req.params.id]);
