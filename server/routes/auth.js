@@ -4,13 +4,14 @@ const express = require('express');
 const dbx = require('../lib/db');
 const auth = require('../lib/auth');
 const { classIdsOfUser } = require('../lib/scope');
-const { permissionsOfUser, roleKeysOfUserId } = require('../lib/permissions');
+const { permissionsOfUser, ownerModulesOfUser, isSystemAdmin, roleKeysOfUserId } = require('../lib/permissions');
 const { logAccess, clientIp } = require('../lib/audit');
 
 const router = express.Router();
 
 /**
- * 会话用户输出：safeUser 白名单 + 所辖班级 + 角色集合 + 主角色名 + 有效权限（并集）。
+ * 会话用户输出：safeUser 白名单 + 所辖班级 + 角色集合 + 主角色名 + 有效权限（并集）
+ * + 主负责模块（并集；管理员为 ['*']，与 permissions 口径一致）。
  * 前端菜单与路由守卫直接消费 permissions；权限变更后重新拉取 /auth/me 即可生效。
  */
 const withSession = (row) => {
@@ -24,6 +25,7 @@ const withSession = (row) => {
     roleKeys,
     roleName: role?.name ?? (rowWithRoles.role === 'admin' ? '系统管理员' : rowWithRoles.role),
     permissions: permissionsOfUser(rowWithRoles),
+    ownerModules: isSystemAdmin(rowWithRoles) ? ['*'] : ownerModulesOfUser(rowWithRoles),
   };
 };
 

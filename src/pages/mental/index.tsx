@@ -1,4 +1,4 @@
-import { HeartOutlined, PlusOutlined, RedoOutlined, SearchOutlined } from '@ant-design/icons';
+import { ExportOutlined, FileTextOutlined, HeartOutlined, PlusOutlined, RedoOutlined, SearchOutlined } from '@ant-design/icons';
 import {
   Alert,
   App,
@@ -14,25 +14,56 @@ import {
   Table,
   Tag,
   Timeline,
+  Tooltip,
   Typography,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useEffect, useMemo, useState } from 'react';
 
 import {
+  deleteMentalInterview,
   getMentalCandidates,
   getMentalConcerns,
+  getMentalInterviewOverview,
+  getMentalInterviews,
+  getMentalLevelLogs,
   getMentalSummary,
   getMentalTimeline,
   setAttention,
 } from '@/api/mental';
-import type { AttentionLevel, MentalCandidate, MentalConcern, MentalLevelSummary, MentalTimeline } from '@/types';
+import type {
+  AttentionLevel,
+  InterviewFormModel,
+  InterviewOverview,
+  MentalCandidate,
+  MentalConcern,
+  MentalInterview,
+  MentalInterviewView,
+  MentalLevelLog,
+  MentalLevelSummary,
+  MentalTimeline,
+} from '@/types';
 import { getClassOptions } from '@/api/classes';
 import PageHeader from '@/components/PageHeader';
-import { ATTENTION_LEVELS, ATTENTION_TAG_COLORS } from '@/constants/mental';
+import { DEFAULT_INTERVIEW_FORM, INTERVIEW_REQUIRED } from '@/constants/interview';
+import {
+  ATTENTION_LEVELS,
+  ATTENTION_TAG_COLORS,
+  TALK_RECORD_EXTERNAL_URL,
+  TALK_RECORD_TARGET_LEVELS,
+} from '@/constants/mental';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useList } from '@/hooks/useList';
-import { getStoredUser, isSystemAdmin } from '@/lib/auth';
+import { canAccessModule, getStoredUser, isModuleOwner, isSystemAdmin } from '@/lib/auth';
+import InterviewFormModal, { type InterviewStudentRef } from './interview/InterviewFormModal';
+import TemplateManageModal from './interview/TemplateManageModal';
+import {
+  LEVEL_LOG_SOURCE_COLORS,
+  LEVEL_LOG_SOURCE_LABELS,
+  levelLogText,
+  recordFormOf,
+  recordQaPairs,
+} from './interview/shared';
 import MentalMobile from './mobile';
 
 interface MentalQuery {
@@ -57,17 +88,34 @@ interface MarkModalState {
   target: MentalConcern | null;
 }
 
+/** 心理访谈表单弹窗状态 */
+interface InterviewModalState {
+  open: boolean;
+  student: InterviewStudentRef | null;
+  record: MentalInterview | null;
+  /** 生效记录单模板（按学生年级解析） */
+  form: InterviewFormModel;
+}
+
 /**
  * 心理健康：关注学生按等级分类展示与筛选；与谈心谈话打通（只读查看谈话记录）。
- * 数据范围由服务端按「带班」严格限定：仅本班学生可见，带班为空则不可见任何数据。
+ * 心理访谈入口在「一般关注」学生行内（不新增菜单/路由），写权由服务端逐行判定。
+ * 数据范围由服务端按「主负责辅导员」模型限定：管理员/主负责全院可见，
+ * 其他角色仅所辖班级学生可见（只读）。
  */
 function MentalHealthDesktop() {
   const isMobile = useIsMobile();
   const { message } = App.useApp();
   const authUser = getStoredUser();
   const isAdmin = isSystemAdmin(authUser);
-  /** 写权限：与后端 canManageStudent 同口径 —— 管理员或至少带一个班 */
+  /** 心理健康主负责（含管理员）：查看全院 + 全部写操作 */
+  const isMentalOwner = isModuleOwner(authUser, 'mentalHealth');
+  /** 关注写权限（新增/调整/取消）：严格口径 —— 管理员或心理健康主负责 */
+  const canMentalWrite = isAdmin || isMentalOwner;
+  /** 保留原口径：仅「新增谈话」外链按钮继续使用（辅导员权限 + 三类关注学生，不随主负责收紧） */
   const canWrite = isAdmin || (authUser?.classIds ?? []).length > 0;
+  /** 心理访谈任务提醒：仅持有访谈权限的角色（班主任/管理员/主负责）拉取 */
+  const canInterviewPerm = canAccessModule(authUser, 'mentalInterview');
 
   const { query, patchQuery, data, loading, refresh } = useList<MentalConcern, MentalQuery>(
     getMentalConcerns,
@@ -87,17 +135,42 @@ function MentalHealthDesktop() {
   /* ---------- 谈话记录抽屉 ---------- */
   const [talkDrawer, setTalkDrawer] = useState<TalkDrawerState>({ open: false, loading: false, data: null });
 
+  /* ---------- 心理访谈 ---------- */
+  const [overview, setOverview] = useState<InterviewOverview | null>(null);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
+  const [pendingOpen, setPendingOpen] = useState(false);
+  const [ivView, setIvView] = useState<MentalInterviewView | null>(null);
+  const [ivDrawerOpen, setIvDrawerOpen] = useState(false);
+  const [ivLevelLogs, setIvLevelLogs] = useState<MentalLevelLog[]>([]);
+  const [ivModal, setIvModal] = useState<InterviewModalState>({
+    open: false,
+    student: null,
+    record: null,
+    form: DEFAULT_INTERVIEW_FORM,
+  });
+  const [deletingRecordId, setDeletingRecordId] = useState<string | null>(null);
+  /** 记录单模板管理弹窗（管理员/心理主负责） */
+  const [tplModalOpen, setTplModalOpen] = useState(false);
+
   const reloadSummary = () => {
     getMentalSummary().then(setSummary).catch(() => undefined);
   };
 
+  const reloadOverview = () => {
+    if (!canInterviewPerm) return;
+    getMentalInterviewOverview()
+      .then(setOverview)
+      .catch(() => undefined);
+  };
+
   useEffect(() => {
     reloadSummary();
+    reloadOverview();
     getClassOptions()
       .then((opts) => {
-        // 非管理员只展示所辖班级，避免出现选了也查不到数据的选项
+        // 非管理员且非主负责只展示所辖班级，避免出现选了也查不到数据的选项
         setClassOptions(
-          isAdmin ? opts : opts.filter((c) => (authUser?.classIds ?? []).includes(c.id)),
+          isAdmin || isMentalOwner ? opts : opts.filter((c) => (authUser?.classIds ?? []).includes(c.id)),
         );
       })
       .catch(() => undefined);
@@ -153,6 +226,7 @@ function MentalHealthDesktop() {
       setMarkModal({ open: false, mode: 'adjust', target: null });
       reloadSummary();
       refresh();
+      reloadOverview();
     } catch (e) {
       message.error(e instanceof Error ? e.message : '保存失败');
     } finally {
@@ -166,6 +240,7 @@ function MentalHealthDesktop() {
       message.success(`已取消对「${record.name}」的关注标记`);
       reloadSummary();
       refresh();
+      reloadOverview();
     } catch (e) {
       message.error(e instanceof Error ? e.message : '操作失败');
     }
@@ -180,6 +255,74 @@ function MentalHealthDesktop() {
       setTalkDrawer({ open: false, loading: false, data: null });
       message.error(e instanceof Error ? e.message : '谈话记录加载失败');
     }
+  };
+
+  /* ---------- 心理访谈交互 ---------- */
+
+  /** 访谈保存/作废后的统一刷新 */
+  const afterInterviewChanged = (studentId?: string) => {
+    setIvModal({ open: false, student: null, record: null, form: DEFAULT_INTERVIEW_FORM });
+    reloadSummary();
+    refresh();
+    reloadOverview();
+    if (studentId) {
+      getMentalInterviews(String(studentId))
+        .then(setIvView)
+        .catch(() => undefined);
+      getMentalLevelLogs(String(studentId))
+        .then(setIvLevelLogs)
+        .catch(() => undefined);
+    }
+  };
+
+  /**
+   * 行内「心理访谈」入口：
+   * 本学期 0 条且可写 → 直接弹记录单；否则打开记录抽屉（查看/继续/补充）。
+   */
+  const openInterview = async (studentId: string) => {
+    try {
+      const view = await getMentalInterviews(String(studentId));
+      const form = view.form ?? DEFAULT_INTERVIEW_FORM;
+      if (view.done === 0 && view.canWrite) {
+        setIvModal({ open: true, student: view.student, record: null, form });
+        return;
+      }
+      setIvView(view);
+      setIvLevelLogs([]);
+      setIvDrawerOpen(true);
+      getMentalLevelLogs(String(studentId))
+        .then(setIvLevelLogs)
+        .catch(() => undefined);
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '访谈记录加载失败');
+    }
+  };
+
+  const handleDeleteRecord = async (record: MentalInterview) => {
+    setDeletingRecordId(record.id);
+    try {
+      const res = await deleteMentalInterview(record.id);
+      message.success(`已作废该条记录（本学期剩余 ${res.done} 次；关注等级不回滚）`);
+      afterInterviewChanged(record.studentId);
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '操作失败');
+    } finally {
+      setDeletingRecordId(null);
+    }
+  };
+
+  /** 横幅本学期忽略（key 带学期，跨学期自动重新提醒） */
+  const bannerDismissKey = overview
+    ? `mentalInterviewBannerDismissed:${authUser?.id ?? 0}:${overview.semester.key}`
+    : '';
+  const bannerVisible = !!overview
+    && overview.pendingCount > 0
+    && !bannerDismissed
+    && !(bannerDismissKey && localStorage.getItem(bannerDismissKey));
+
+  const dismissBanner = () => {
+    if (bannerDismissKey) localStorage.setItem(bannerDismissKey, '1');
+    setBannerDismissed(true);
   };
 
   const columns: ColumnsType<MentalConcern> = [
@@ -239,15 +382,59 @@ function MentalHealthDesktop() {
       ),
     },
     {
+      title: '心理访谈',
+      key: 'interview',
+      width: 150,
+      render: (_, record) => {
+        const done = record.interviewDone ?? 0;
+        const required = record.interviewRequired || INTERVIEW_REQUIRED;
+        // 显隐完全由服务端 canInterview 判定；done>0 时允许继续查看/补齐
+        if (!record.canInterview && done === 0) {
+          return <Typography.Text type="secondary">—</Typography.Text>;
+        }
+        const color = done >= required ? 'green' : done > 0 ? 'orange' : 'red';
+        // 无写权且已有记录（如「无需关注」留档学生）→ 只读查看
+        const label = !record.canInterview && done > 0
+          ? '查看记录'
+          : done >= required ? '查看记录' : done > 0 ? '继续访谈' : '填写访谈';
+        return (
+          <Space size={4} wrap>
+            <Tag color={color} style={{ marginInlineEnd: 0 }}>
+              本学期 {done}/{required}
+            </Tag>
+            <Button type="link" size="small" onClick={() => openInterview(record.studentId)}>
+              {label}
+            </Button>
+          </Space>
+        );
+      },
+    },
+    {
       title: '操作',
       key: 'action',
-      width: 230,
+      width: 260,
       render: (_, record) => (
-        <Space size={2} wrap={false}>
+        <Space size={2} wrap>
           <Button type="link" size="small" onClick={() => openTalks(record)}>
             谈话记录
           </Button>
-          {canWrite && (
+          {/* 新增谈话：仅辅导员权限（canWrite）且为三类关注学生时可见；点击跳转学校外部谈话平台（不随主负责收紧） */}
+          {canWrite && TALK_RECORD_TARGET_LEVELS.includes(record.level) && (
+            <Tooltip title="前往学校谈话平台填写谈话记录">
+              <Button
+                type="link"
+                size="small"
+                href={TALK_RECORD_EXTERNAL_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                icon={<ExportOutlined />}
+              >
+                新增谈话
+              </Button>
+            </Tooltip>
+          )}
+          {/* 关注写操作：严格口径 —— 管理员或心理健康主负责 */}
+          {canMentalWrite && (
             <>
               <Button type="link" size="small" onClick={() => openAdjust(record)}>
                 调整关注
@@ -274,26 +461,57 @@ function MentalHealthDesktop() {
     <div className="page">
       <PageHeader
         title="心理健康"
-        subtitle="按关注等级管理需要关注的学生；等级数据与谈心谈话记录联动（仅本班学生可见）"
+        subtitle={`按关注等级管理需要关注的学生；等级数据与谈心谈话记录联动（${
+          isAdmin || isMentalOwner ? '全院学生可见' : '仅本班学生可见'
+        }）`}
         extra={
-          canWrite && (
-            <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-              新增关注
-            </Button>
-          )
+          <Space>
+            {canMentalWrite && (
+              <Button icon={<FileTextOutlined />} onClick={() => setTplModalOpen(true)}>
+                记录单模板
+              </Button>
+            )}
+            {canMentalWrite && (
+              <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+                新增关注
+              </Button>
+            )}
+          </Space>
         }
       />
 
-      {/* 数据范围提示：非管理员仅可见所辖班级学生 */}
+      {/* 数据范围提示：管理员不提示；主负责全院；普通带班只读；无带班引导 */}
       {!isAdmin && (
         <Alert
           type="info"
           showIcon
           style={{ marginBottom: 16 }}
           message={
-            (authUser?.classIds ?? []).length > 0
-              ? '数据范围：仅您所辖班级内被标记为需要关注的学生。'
-              : '您尚未分配带班班级，暂无可查看的关注学生；请联系管理员在「用户管理」中分配所辖班级。'
+            isMentalOwner
+              ? '数据范围：全院所有被标记关注的学生（心理健康主负责）。'
+              : (authUser?.classIds ?? []).length > 0
+                ? '数据范围：仅您所辖班级内被标记为需要关注的学生（只读）；新增/调整关注请联系心理健康主负责辅导员或管理员。'
+                : '您尚未分配带班班级，暂无可查看的关注学生；如需维护关注标记请联系心理健康主负责辅导员或管理员。'
+          }
+        />
+      )}
+
+      {/* 心理访谈任务提醒：仅对持有访谈权限的角色展示（班主任/管理员/主负责） */}
+      {bannerVisible && overview && (
+        <Alert
+          type={overview.semester.daysLeft <= 30 ? 'warning' : 'info'}
+          showIcon
+          style={{ marginBottom: 16 }}
+          message={`${overview.semester.label}：${isAdmin || isMentalOwner ? '全院' : '您所辖班级'}有 ${overview.pendingCount} 名学生心理访谈未完成（每人至少 ${overview.required} 次${overview.semester.daysLeft <= 30 ? `，距学期结束还有 ${overview.semester.daysLeft} 天` : ''}）`}
+          action={
+            <Space size={4} wrap>
+              <Button size="small" type="link" onClick={() => setPendingOpen(true)}>
+                查看待完成
+              </Button>
+              <Button size="small" type="text" onClick={dismissBanner}>
+                本学期不再提醒
+              </Button>
+            </Space>
           }
         />
       )}
@@ -367,7 +585,7 @@ function MentalHealthDesktop() {
         columns={columns}
         dataSource={data.list}
         loading={loading}
-        scroll={{ x: 1080 }}
+        scroll={{ x: 1240 }}
         pagination={{
           current: data.page,
           pageSize: data.pageSize,
@@ -393,7 +611,7 @@ function MentalHealthDesktop() {
             <Form.Item name="studentId" label="学生" rules={[{ required: true, message: '请选择学生' }]}>
               <Select
                 showSearch
-                placeholder="输入姓名或学号搜索（仅本班未标记学生）"
+                placeholder={isMentalOwner ? '输入姓名或学号搜索（全院未标记学生）' : '输入姓名或学号搜索（仅本班未标记学生）'}
                 filterOption={false}
                 onSearch={(v) => setCandidateKeyword(v.trim())}
                 notFoundContent={candidates.length === 0 ? '没有可标记的学生' : undefined}
@@ -414,7 +632,7 @@ function MentalHealthDesktop() {
             name="note"
             label="关注备注"
             rules={[{ max: 200, message: '不可超过 200 字' }]}
-            extra="记录关注事由与跟进安排（选填），仅带班教师可见"
+            extra="记录关注事由与跟进安排（选填）"
           >
             <Input.TextArea rows={3} placeholder="如：近期情绪波动较大，已联系家长，每周谈话跟进" />
           </Form.Item>
@@ -463,6 +681,201 @@ function MentalHealthDesktop() {
           </>
         )}
       </Drawer>
+
+      {/* 心理访谈记录抽屉 */}
+      <Drawer
+        title={ivView ? `心理访谈 · ${ivView.student.name}` : '心理访谈'}
+        width={isMobile ? 'calc(100vw - 24px)' : 640}
+        open={ivDrawerOpen}
+        onClose={() => setIvDrawerOpen(false)}
+      >
+        {ivView && (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+              <Typography.Text type="secondary">
+                {ivView.student.studentNo} · {ivView.student.className}
+              </Typography.Text>
+              <Tag color="blue" style={{ marginInlineEnd: 0 }}>{ivView.semester.label}</Tag>
+              <Tag
+                color={ivView.done >= ivView.required ? 'green' : ivView.done > 0 ? 'orange' : 'red'}
+                style={{ marginInlineEnd: 0 }}
+              >
+                本学期 {ivView.done}/{ivView.required} 次
+              </Tag>
+            </div>
+
+            {ivView.canWrite && (
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                style={{ marginBottom: 12 }}
+                onClick={() => setIvModal({ open: true, student: ivView.student, record: null, form: ivView.form })}
+              >
+                {ivView.done >= ivView.required ? '补充访谈' : '新增访谈'}
+              </Button>
+            )}
+
+            {ivView.list.length === 0 ? (
+              <Empty description="本学期暂无访谈记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+            ) : (
+              ivView.list.map((r) => {
+                const canEditRecord = isAdmin || Number(r.interviewerId) === Number(authUser?.id);
+                return (
+                  <div
+                    key={r.id}
+                    style={{ border: '1px solid #e5e9f2', borderRadius: 10, padding: '10px 12px', marginBottom: 10 }}
+                  >
+                    <Space size={6} wrap style={{ marginBottom: 4 }}>
+                      <Tag color="blue" style={{ marginInlineEnd: 0 }}>{r.interviewDate}</Tag>
+                      <Tag color={r.levelAfter === '无需关注' ? 'default' : 'orange'} style={{ marginInlineEnd: 0 }}>
+                        评估：{r.levelAfter}
+                      </Tag>
+                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                        访谈教师 {r.interviewerName}
+                      </Typography.Text>
+                    </Space>
+                    <div style={{ lineHeight: 1.7, marginBottom: 6 }}>{r.summary}</div>
+                    <details>
+                      <summary style={{ cursor: 'pointer', fontSize: 12, color: '#5b7bd5' }}>查看全部问答</summary>
+                      <div style={{ marginTop: 8 }}>
+                        {recordQaPairs(r, recordFormOf(r, ivView.form)).map((qa) => (
+                          <div key={qa.key} style={{ marginBottom: 8 }}>
+                            <div style={{ fontSize: 12, color: '#8a94ad' }}>{qa.question}</div>
+                            <div style={{ fontSize: 13, lineHeight: 1.7 }}>{qa.answer}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                    <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                        签字：{r.signatureName} · {r.signedAt}
+                      </Typography.Text>
+                      {r.updatedBy && (
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                          （修订 by {r.updatedBy}）
+                        </Typography.Text>
+                      )}
+                      {canEditRecord && (
+                        <Space size={4} style={{ marginLeft: 'auto' }}>
+                          <Button
+                            type="link"
+                            size="small"
+                            onClick={() => setIvModal({ open: true, student: ivView.student, record: r, form: ivView.form })}
+                          >
+                            编辑
+                          </Button>
+                          <Popconfirm
+                            title="作废这条访谈记录？"
+                            description="作废后本学期计数回退，关注等级不会回滚"
+                            okText="作废"
+                            cancelText="取消"
+                            onConfirm={() => handleDeleteRecord(r)}
+                          >
+                            <Button type="link" size="small" danger loading={deletingRecordId === r.id}>
+                              作废
+                            </Button>
+                          </Popconfirm>
+                        </Space>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+
+            <Typography.Title level={5} style={{ marginTop: 18, marginBottom: 8, fontSize: 14 }}>
+              关注等级变更
+            </Typography.Title>
+            {ivLevelLogs.length === 0 ? (
+              <Typography.Text type="secondary">暂无变更记录</Typography.Text>
+            ) : (
+              <Timeline
+                items={ivLevelLogs.map((l) => ({
+                  color: l.source === 'interview-delete' ? 'red' : 'blue',
+                  children: (
+                    <div style={{ paddingBottom: 6 }}>
+                      <Space size={6} wrap style={{ marginBottom: 2 }}>
+                        <Tag color={LEVEL_LOG_SOURCE_COLORS[l.source]} style={{ marginInlineEnd: 0 }}>
+                          {LEVEL_LOG_SOURCE_LABELS[l.source]}
+                        </Tag>
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>{l.createdAt}</Typography.Text>
+                      </Space>
+                      <div style={{ fontSize: 13 }}>
+                        {levelLogText(l.fromLevel)} → {levelLogText(l.toLevel)}
+                      </div>
+                      {l.note && (
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>{l.note}</Typography.Text>
+                      )}
+                    </div>
+                  ),
+                }))}
+              />
+            )}
+          </>
+        )}
+      </Drawer>
+
+      {/* 本学期待完成名单 */}
+      <Modal
+        title="本学期心理访谈待完成"
+        open={pendingOpen}
+        footer={null}
+        onCancel={() => setPendingOpen(false)}
+        width={isMobile ? 'calc(100vw - 24px)' : 560}
+      >
+        {(overview?.pending ?? []).length === 0 ? (
+          <Empty description="本学期全部达标" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        ) : (
+          (overview?.pending ?? []).map((p) => (
+            <div
+              key={p.id}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                flexWrap: 'wrap',
+                padding: '8px 0',
+                borderBottom: '1px solid #eef1f7',
+              }}
+            >
+              <span style={{ fontWeight: 600 }}>{p.name}</span>
+              <Typography.Text type="secondary">{p.className}</Typography.Text>
+              {p.level && <Tag style={{ marginInlineEnd: 0 }}>{p.level}</Tag>}
+              <Tag
+                color={p.done >= p.required ? 'green' : p.done > 0 ? 'orange' : 'red'}
+                style={{ marginInlineEnd: 0 }}
+              >
+                {p.done}/{p.required}
+              </Tag>
+              <Button
+                type="link"
+                size="small"
+                style={{ marginLeft: 'auto' }}
+                disabled={!p.canWrite}
+                onClick={() => {
+                  setPendingOpen(false);
+                  openInterview(String(p.id));
+                }}
+              >
+                {p.done > 0 ? '继续访谈' : '填写访谈'}
+              </Button>
+            </div>
+          ))
+        )}
+      </Modal>
+
+      {/* 心理访谈记录单（新增 / 修订） */}
+      <InterviewFormModal
+        open={ivModal.open}
+        student={ivModal.student}
+        record={ivModal.record}
+        form={ivModal.form}
+        onClose={() => setIvModal({ open: false, student: null, record: null, form: DEFAULT_INTERVIEW_FORM })}
+        onSaved={() => afterInterviewChanged(ivModal.student?.id ?? ivModal.record?.studentId)}
+      />
+
+      {/* 心理访谈记录单模板（管理员/心理主负责） */}
+      <TemplateManageModal open={tplModalOpen} onClose={() => setTplModalOpen(false)} />
     </div>
   );
 }

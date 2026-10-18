@@ -8,6 +8,8 @@ export interface AppModule {
   key: string;
   name: string;
   group: string;
+  /** false = 功能级权限，不承载菜单，也不可设为主负责（默认 true） */
+  ownerable?: boolean;
 }
 
 export const APP_MODULES: AppModule[] = [
@@ -16,6 +18,7 @@ export const APP_MODULES: AppModule[] = [
   { key: 'conversations', name: '谈心谈话', group: '业务办理' },
   { key: 'warnings', name: '预警管理', group: '业务办理' },
   { key: 'mentalHealth', name: '心理健康', group: '业务办理' },
+  { key: 'mentalInterview', name: '心理访谈', group: '业务办理', ownerable: false },
   { key: 'todos', name: '待办提醒', group: '业务办理' },
   { key: 'templates', name: '模板汇总库', group: '资料与工具' },
   { key: 'tools', name: '实用工具', group: '资料与工具' },
@@ -35,6 +38,7 @@ export const MODULE_HOME: Record<string, string> = {
   conversations: '/conversations',
   warnings: '/warnings',
   mentalHealth: '/mental',
+  mentalInterview: '/mental',
   todos: '/todos',
   templates: '/templates',
   tools: '/tools',

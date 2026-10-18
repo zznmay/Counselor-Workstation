@@ -13,7 +13,7 @@
  * 角色权限修改、用户角色调整在下一次请求即生效，无需重新登录。
  */
 const dbx = require('./db');
-const { MODULE_KEYS } = require('./modules');
+const { MODULE_KEYS, OWNERABLE_MODULE_KEYS } = require('./modules');
 
 /** 解析权限 JSON（容错：脏数据按空数组处理） */
 function parsePermissions(raw) {
@@ -95,6 +95,45 @@ function normalizePermissions(raw) {
   return MODULE_KEYS.filter((k) => list.includes(k)); // 按注册表顺序稳定输出
 }
 
+/** 角色的主负责模块列表；admin 恒为全模块（不落库，短路语义） */
+function ownerModulesOfRole(roleKey) {
+  if (roleKey === 'admin') return [...MODULE_KEYS];
+  const role = roleByKey(roleKey);
+  if (!role) return [];
+  const parsed = parsePermissions(role.ownerModules); // 复用容错解析：脏数据按空数组
+  return OWNERABLE_MODULE_KEYS.filter((k) => parsed.includes(k)); // 按注册表顺序稳定输出
+}
+
+/** 用户的有效主负责模块 = 所有角色 ownerModules 的并集；含 admin 角色则为全模块 */
+function ownerModulesOfUser(user) {
+  if (!user) return [];
+  const keys = roleKeysOfUser(user);
+  if (keys.includes('admin')) return [...MODULE_KEYS];
+  const union = new Set();
+  for (const key of keys) {
+    for (const m of ownerModulesOfRole(key)) union.add(m);
+  }
+  return MODULE_KEYS.filter((k) => union.has(k)); // 按注册表顺序稳定输出
+}
+
+/**
+ * 是否某模块的主负责（或管理员）——模块级最高权限的唯一判定口径。
+ * 实时性：每次调用现查 roles 表，角色主负责配置改动在下一次请求即生效。
+ */
+function isModuleOwner(user, moduleKey) {
+  if (!user) return false;
+  if (isSystemAdmin(user)) return true;
+  return ownerModulesOfUser(user).includes(moduleKey);
+}
+
+/** 规范化主负责模块数组：去重、白名单校验（仅 ownerable 模块）；含非法值返回 null */
+function normalizeOwnerModules(raw) {
+  if (!Array.isArray(raw)) return null;
+  const list = [...new Set(raw.map((v) => String(v ?? '').trim()).filter(Boolean))];
+  if (list.some((k) => !OWNERABLE_MODULE_KEYS.includes(k))) return null;
+  return OWNERABLE_MODULE_KEYS.filter((k) => list.includes(k)); // 按注册表顺序稳定输出
+}
+
 module.exports = {
   parsePermissions,
   roleByKey,
@@ -106,4 +145,8 @@ module.exports = {
   hasPermission,
   requirePermission,
   normalizePermissions,
+  ownerModulesOfRole,
+  ownerModulesOfUser,
+  isModuleOwner,
+  normalizeOwnerModules,
 };

@@ -480,6 +480,58 @@
   @keyframes m-spin { to { transform: rotate(360deg); } }
   .m-spin { animation: m-spin 0.8s linear infinite; }
 
+  /* ================= 心理访谈（长表单全屏 Sheet + 步骤条 + 提醒卡） ================= */
+
+  /* 全屏 Sheet：心理访谈记录单等长表单容器；--kb-h 由 FilterSheet 写入键盘高度 */
+  .m-sheet-full {
+    height: 100dvh;
+    max-height: 100dvh;
+    border-radius: 0;
+  }
+  .m-sheet-full::before { display: none; }
+  .m-sheet-full .m-sheet-body { flex: 1; min-height: 0; }
+  .m-sheet-full .m-sheet-foot {
+    padding-bottom: calc(10px + var(--safe-b) + var(--kb-h, 0px));
+  }
+
+  /* 步骤条（4 步向导头部） */
+  .m-step-head {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  }
+  .m-step-title { font-size: 15px; font-weight: 600; color: var(--m-text-1); }
+  .m-step-index { font-size: 12px; color: var(--m-text-3); }
+  .m-step-bar {
+    height: 6px; border-radius: var(--r-full); overflow: hidden;
+    background: var(--m-border); margin-top: 8px;
+  }
+  .m-step-bar > i {
+    display: block; height: 100%; border-radius: var(--r-full);
+    background: var(--app-primary-action);
+    transition: width var(--t-base) ease;
+  }
+
+  /* 分组标题（表单分区，对应纸质记录单分区标题） */
+  .m-group-title {
+    font-size: 13px; font-weight: 600; color: var(--m-text-2);
+    padding-top: 2px;
+  }
+
+  /* 提醒卡（心理访谈任务横幅）：左侧色条 + 文字，不单靠颜色表意 */
+  .m-notice-card {
+    position: relative; overflow: hidden;
+    padding: 10px 14px 10px 16px;
+  }
+  .m-notice-card::before {
+    content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
+    background: var(--info-fg);
+  }
+  .m-notice-card[data-tone='warning']::before { background: var(--warning-fg); }
+  .m-notice-actions { display: flex; gap: 4px; margin-top: 8px; flex-wrap: wrap; }
+
+  /* 访谈记录卡（问答展开） */
+  .m-iv-qa-q { font-size: 12px; color: var(--m-text-3); line-height: 1.6; }
+  .m-iv-qa-a { font-size: 14px; color: var(--m-text-1); line-height: 1.7; }
+
   /* 动效降级：压缩 duration 不够稳（会停在起始帧），必须显式 animation:none 落到终态 */
   @media (prefers-reduced-motion: reduce) {
     .m-shell *, .m-shell *::before, .m-shell *::after {

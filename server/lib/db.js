@@ -3,7 +3,7 @@ const { DatabaseSync } = require('node:sqlite');
 const bcrypt = require('bcryptjs');
 
 const { DB_PATH, ensureDirs } = require('./config');
-const { COUNSELOR_DEFAULT_KEYS, COUNSELOR_LEGACY_KEYS } = require('./modules');
+const { COUNSELOR_DEFAULT_KEYS, COUNSELOR_LEGACY_KEYS, HEAD_TEACHER_DEFAULT_KEYS } = require('./modules');
 const SEED = require('./seed-data');
 
 ensureDirs();
@@ -12,6 +12,8 @@ const db = new DatabaseSync(DB_PATH);
 // WAL 模式：允许多教师并发读、写入串行化
 db.prepare('PRAGMA journal_mode = WAL').get();
 db.prepare('PRAGMA foreign_keys = ON').get();
+// 备份/外部 sqlite 进程持锁时，写事务等待 5s 再报错，避免直接 SQLITE_BUSY
+db.prepare('PRAGMA busy_timeout = 5000').get();
 
 // 建表语句逐条执行（prepare().run() 支持 DDL）
 const SCHEMA_STATEMENTS = [
@@ -25,7 +27,8 @@ const SCHEMA_STATEMENTS = [
     disabled INTEGER NOT NULL DEFAULT 0,
     createdAt TEXT NOT NULL
   )`,
-  /* 角色：users.role 存 roles.key；permissions 为模块 key 的 JSON 数组 */
+  /* 角色：users.role 存 roles.key；permissions 为模块 key 的 JSON 数组；
+     ownerModules 为「主负责辅导员」模块 key 的 JSON 数组（该模块最高权限：全院数据 + 全部操作） */
   `CREATE TABLE IF NOT EXISTS roles (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     key TEXT NOT NULL UNIQUE,
@@ -33,6 +36,7 @@ const SCHEMA_STATEMENTS = [
     description TEXT,
     isSystem INTEGER NOT NULL DEFAULT 0,
     permissions TEXT NOT NULL DEFAULT '[]',
+    ownerModules TEXT NOT NULL DEFAULT '[]',
     createdAt TEXT NOT NULL,
     updatedAt TEXT NOT NULL
   )`,
@@ -107,6 +111,66 @@ const SCHEMA_STATEMENTS = [
     updatedBy TEXT,
     updatedAt TEXT NOT NULL
   )`,
+  /* 心理访谈：一般关注学生每学期至少 2 次，记录与纸质《心理访谈记录单》逐字段对齐。
+     不设 studentId 外键：学生删除后访谈记录与等级轨迹仍需留档（与 conversations 同策略），
+     姓名/班级/年级冗余快照，避免 JOIN 不到时审计信息丢失。 */
+  `CREATE TABLE IF NOT EXISTS mentalInterviews (
+    id TEXT PRIMARY KEY,
+    studentId TEXT NOT NULL,
+    studentName TEXT NOT NULL,
+    className TEXT,
+    grade TEXT,
+    semesterKey TEXT NOT NULL,
+    semesterLabel TEXT NOT NULL,
+    interviewDate TEXT NOT NULL,
+    interviewerId INTEGER,
+    interviewerName TEXT NOT NULL,
+    levelBefore TEXT,
+    levelAfter TEXT NOT NULL,
+    answers TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    signatureName TEXT NOT NULL,
+    signedAt TEXT NOT NULL,
+    formVersion INTEGER NOT NULL DEFAULT 1,
+    clientRequestId TEXT NOT NULL UNIQUE,
+    updatedBy TEXT,
+    updatedAt TEXT,
+    deletedAt TEXT,
+    deletedBy TEXT,
+    createdAt TEXT NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_mi_student_sem ON mentalInterviews(studentId, semesterKey)`,
+  `CREATE INDEX IF NOT EXISTS idx_mi_sem_deleted ON mentalInterviews(semesterKey, deletedAt)`,
+  /* 心理访谈记录单模板：表单内容（题目分组/题干/上限）由管理员或心理辅导员维护，
+     grades 为适用年级名 JSON 数组（空数组 = 全部年级适用）；groups 结构见
+     lib/interviewTemplate.js（与前端 InterviewFormModel 同构）。 */
+  `CREATE TABLE IF NOT EXISTS mentalInterviewTemplates (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    grades TEXT NOT NULL DEFAULT '[]',
+    groups TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    version INTEGER NOT NULL DEFAULT 1,
+    createdBy TEXT,
+    updatedBy TEXT,
+    createdAt TEXT NOT NULL,
+    updatedAt TEXT NOT NULL
+  )`,
+  /* 关注等级变更审计：手工调整与访谈评估联动都落一条，永不删除 */
+  `CREATE TABLE IF NOT EXISTS mentalLevelLogs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    studentId TEXT NOT NULL,
+    studentName TEXT NOT NULL,
+    fromLevel TEXT,
+    toLevel TEXT,
+    source TEXT NOT NULL,
+    refId TEXT,
+    operatorId INTEGER,
+    operatorName TEXT,
+    note TEXT,
+    createdAt TEXT NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_mll_student ON mentalLevelLogs(studentId, id DESC)`,
   /* 用户-角色 多对多：users.role 保留为「主角色」（集合含 admin 时主角色即 admin），
      本表为完整角色集合的唯一事实来源；账号删除时级联清理 */
   `CREATE TABLE IF NOT EXISTS userRoles (
@@ -211,18 +275,53 @@ if (!studentCols.includes('classId')) {
   db.prepare('ALTER TABLE students ADD COLUMN classId INTEGER').run();
 }
 
+/** 老库升级：roles.ownerModules 列不存在时补加（新库建表语句已含该列，此处幂等跳过） */
+const roleCols = db.prepare('PRAGMA table_info(roles)').all().map((c) => c.name);
+if (!roleCols.includes('ownerModules')) {
+  db.prepare("ALTER TABLE roles ADD COLUMN ownerModules TEXT NOT NULL DEFAULT '[]'").run();
+}
+
 /**
- * 内置角色（幂等）：admin 全量权限；counselor 默认可见业务模块。
+ * 老库升级：mentalInterviews 补加模板相关列（新库建表语句已含，此处幂等跳过）。
+ * templateId/templateVersion/formSnapshot：记录填写时所用的记录单模板与题目快照，
+ * 模板后续改题不影响历史记录的问答渲染。
+ */
+const interviewCols = db.prepare('PRAGMA table_info(mentalInterviews)').all().map((c) => c.name);
+for (const [col, ddl] of [
+  ['templateId', 'ALTER TABLE mentalInterviews ADD COLUMN templateId TEXT'],
+  ['templateVersion', 'ALTER TABLE mentalInterviews ADD COLUMN templateVersion INTEGER'],
+  ['formSnapshot', 'ALTER TABLE mentalInterviews ADD COLUMN formSnapshot TEXT'],
+]) {
+  if (!interviewCols.includes(col)) db.prepare(ddl).run();
+}
+
+/**
+ * 内置角色（幂等）：admin 全量权限；counselor 默认可见业务模块；
+ * headTeacher（班主任）仅心理健康 + 心理访谈（数据范围由用户管理里的带班班级决定）。
  * 已存在时不覆盖 —— 管理员对内置角色权限的调整在重启后保留。
  */
 function ensureBuiltinRoles() {
   const now = () => new Date().toISOString().slice(0, 16).replace('T', ' ');
   const ins = db.prepare(
-    `INSERT OR IGNORE INTO roles (key, name, description, isSystem, permissions, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR IGNORE INTO roles (key, name, description, isSystem, permissions, ownerModules, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   );
-  ins.run('admin', '系统管理员', '内置角色，拥有全部模块权限', 1, JSON.stringify(['*']), now(), now());
-  ins.run('counselor', '辅导员', '内置角色，可访问日常业务模块', 1, JSON.stringify(COUNSELOR_DEFAULT_KEYS), now(), now());
+  ins.run('admin', '系统管理员', '内置角色，拥有全部模块权限', 1, JSON.stringify(['*']), '[]', now(), now());
+  ins.run('counselor', '辅导员', '内置角色，可访问日常业务模块', 1, JSON.stringify(COUNSELOR_DEFAULT_KEYS), '[]', now(), now());
+  ins.run(
+    'headTeacher',
+    '班主任',
+    '内置角色：查看所带班级心理健康 + 填写心理访谈（数据范围由带班班级决定）',
+    1,
+    JSON.stringify(HEAD_TEACHER_DEFAULT_KEYS),
+    '[]',
+    now(),
+    now(),
+  );
+  // roles.name 有 UNIQUE 约束：若已存在同名「班主任」自定义角色，INSERT OR IGNORE 会静默失败
+  if (!db.prepare("SELECT 1 FROM roles WHERE key = 'headTeacher'").get()) {
+    console.warn('[db] 内置「班主任」角色创建失败：角色名「班主任」已被其他角色占用，请改名后重启服务端。');
+  }
 
   // 老库无痕升级：counselor 权限仍为初始默认集（管理员未自定义过）时，补配后加模块。
   // 权限一经管理员调整则保持现状，由管理员在「角色管理」自行勾选新模块。
@@ -372,6 +471,26 @@ ensureBuiltinRoles();
 seed();
 ensureStudentClassBackfill();
 ensureUserRoleBackfill();
+ensureMentalLevelBaselineLogs();
+ensureDefaultInterviewTemplate();
+
+/**
+ * 心理访谈记录单默认模板（幂等）：库内没有任何模板时播种内置默认模板
+ * （题目与纸质记录单逐字对齐，适用年级 = 全部）。管理员后续的增改不受影响；
+ * 默认模板被删除后不会重新播种（由模板管理保证至少保留一个）。
+ */
+function ensureDefaultInterviewTemplate() {
+  const { DEFAULT_TEMPLATE_ID, DEFAULT_TEMPLATE_NAME, DEFAULT_FORM_GROUPS } = require('./interviewFormDefault');
+  const exists = db.prepare('SELECT 1 FROM mentalInterviewTemplates LIMIT 1').get();
+  if (exists) return;
+  const now = new Date().toISOString().slice(0, 16).replace('T', ' ');
+  db.prepare(
+    `INSERT INTO mentalInterviewTemplates
+       (id, name, grades, groups, enabled, version, createdBy, updatedBy, createdAt, updatedAt)
+     VALUES (?, ?, '[]', ?, 1, 1, '系统', '系统', ?, ?)`,
+  ).run(DEFAULT_TEMPLATE_ID, DEFAULT_TEMPLATE_NAME, JSON.stringify(DEFAULT_FORM_GROUPS), now, now);
+  console.log('[db] 心理访谈记录单默认模板已播种。');
+}
 
 /**
  * 用户角色集合回填（幂等）：多角色改造前 users.role 是唯一角色来源，
@@ -386,6 +505,37 @@ function ensureUserRoleBackfill() {
   const ins = db.prepare('INSERT OR IGNORE INTO userRoles (userId, roleKey) VALUES (?, ?)');
   for (const r of rows) ins.run(r.id, r.role);
   console.log(`[db] 用户角色集合回填完成：${rows.length} 个账号。`);
+}
+
+/**
+ * 关注等级基线日志（幂等）：升级前已有的关注标记没有变更历史，
+ * 为其补一条 source='init' 的基线记录，保证审计时间线从升级时点起完整。
+ * 仅处理「该学生一条日志都没有」的行，重启不会重复插入。
+ */
+function ensureMentalLevelBaselineLogs() {
+  const rows = db.prepare(
+    `SELECT mh.studentId, mh.level, mh.updatedBy, mh.updatedAt, s.name AS studentName
+     FROM mentalHealth mh
+     LEFT JOIN students s ON s.id = mh.studentId
+     WHERE NOT EXISTS (SELECT 1 FROM mentalLevelLogs l WHERE l.studentId = mh.studentId)`,
+  ).all();
+  if (rows.length === 0) return;
+  const ins = db.prepare(
+    `INSERT INTO mentalLevelLogs
+       (studentId, studentName, fromLevel, toLevel, source, refId, operatorId, operatorName, note, createdAt)
+     VALUES (?, ?, NULL, ?, 'init', NULL, NULL, ?, ?, ?)`,
+  );
+  for (const r of rows) {
+    ins.run(
+      r.studentId,
+      r.studentName ?? '（已删除学生）',
+      r.level,
+      r.updatedBy ?? '系统',
+      '系统升级初始化：记录升级前已有的关注等级',
+      r.updatedAt ?? new Date().toISOString().slice(0, 16).replace('T', ' '),
+    );
+  }
+  console.log(`[db] 心理健康等级日志基线回填完成：${rows.length} 名学生。`);
 }
 
 /** 统一参数规范化：undefined→null、Date→ISO 串，并做一次 JSON 往返消毒 */
@@ -408,4 +558,20 @@ function run(sql, params = []) {
   return db.prepare(sql).run(...normalizeParams(params));
 }
 
-module.exports = { db, all, get, run };
+/**
+ * 同步事务：BEGIN IMMEDIATE 立即取写锁，避免并发写升级为死锁。
+ * 注意：回调内不得出现 await（node:sqlite 是同步 API，await 会让出事件循环破坏事务边界）。
+ */
+function withTransaction(fn) {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const out = fn();
+    db.exec('COMMIT');
+    return out;
+  } catch (err) {
+    try { db.exec('ROLLBACK'); } catch { /* 无活动事务时忽略 */ }
+    throw err;
+  }
+}
+
+module.exports = { db, all, get, run, withTransaction };

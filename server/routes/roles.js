@@ -3,7 +3,7 @@ const express = require('express');
 
 const dbx = require('../lib/db');
 const auth = require('../lib/auth');
-const { parsePermissions, normalizePermissions } = require('../lib/permissions');
+const { parsePermissions, normalizePermissions, normalizeOwnerModules } = require('../lib/permissions');
 const { logAccess, nowStr } = require('../lib/audit');
 
 const router = express.Router();
@@ -22,7 +22,7 @@ const LIST_SELECT = `
       SELECT 1 FROM userRoles ur WHERE ur.userId = u.id AND ur.roleKey = r.key)) AS userCount
   FROM roles r`;
 
-/** 输出结构：permissions 反序列化为数组，isSystem 转布尔 */
+/** 输出结构：permissions/ownerModules 反序列化为数组，isSystem 转布尔 */
 function toRole(row) {
   return {
     id: row.id,
@@ -31,10 +31,20 @@ function toRole(row) {
     description: row.description ?? '',
     isSystem: !!row.isSystem,
     permissions: parsePermissions(row.permissions),
+    ownerModules: parsePermissions(row.ownerModules),
     userCount: row.userCount ?? 0,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
+}
+
+/** 主负责模块必须落在该角色可访问模块内（不变量 ownerModules ⊆ permissions） */
+function assertSubset(owners, perms) {
+  const invalid = owners.filter((k) => !perms.includes(k));
+  if (invalid.length > 0) {
+    return `主负责模块（${invalid.join('、')}）必须在该角色的可访问模块内`;
+  }
+  return null;
 }
 
 /** 角色列表（含用户数，用于删除护栏提示） */
@@ -52,16 +62,20 @@ router.post('/', (req, res) => {
   }
   const permissions = normalizePermissions(req.body?.permissions ?? []);
   if (permissions === null) return res.status(400).json({ message: '权限配置含无效模块，请刷新后重试' });
+  const ownerModules = normalizeOwnerModules(req.body?.ownerModules ?? []);
+  if (ownerModules === null) return res.status(400).json({ message: '主负责模块配置含无效模块，请刷新后重试' });
+  const subsetErr = assertSubset(ownerModules, permissions);
+  if (subsetErr) return res.status(400).json({ message: subsetErr });
 
   // 自定义角色标识：与展示名解耦，保证改名不影响已分配用户
   const key = `role_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`;
   const now = nowStr();
   const info = dbx.run(
-    `INSERT INTO roles (key, name, description, isSystem, permissions, createdAt, updatedAt)
-     VALUES (?, ?, ?, 0, ?, ?, ?)`,
-    [key, name, description || null, JSON.stringify(permissions), now, now],
+    `INSERT INTO roles (key, name, description, isSystem, permissions, ownerModules, createdAt, updatedAt)
+     VALUES (?, ?, ?, 0, ?, ?, ?, ?)`,
+    [key, name, description || null, JSON.stringify(permissions), JSON.stringify(ownerModules), now, now],
   );
-  logAccess(req, `新增角色 ${name}（${permissions.length} 个模块权限）`);
+  logAccess(req, `新增角色 ${name}（${permissions.length} 个模块权限${ownerModules.length ? `，主负责 ${ownerModules.length} 个模块` : ''}）`);
   res.json(toRole(dbx.get(`${LIST_SELECT} WHERE r.id = ?`, [info.lastInsertRowid])));
 });
 
@@ -91,11 +105,23 @@ router.put('/:id', (req, res) => {
     permissions = next;
   }
 
+  // 主负责模块：显式传入则校验落库；未传但收窄了 permissions 时静默收回不再可访问模块的主负责
+  let ownerModules = parsePermissions(target.ownerModules);
+  if (req.body?.ownerModules !== undefined) {
+    const next = normalizeOwnerModules(req.body.ownerModules);
+    if (next === null) return res.status(400).json({ message: '主负责模块配置含无效模块，请刷新后重试' });
+    const subsetErr = assertSubset(next, permissions); // permissions 此时已是最终值
+    if (subsetErr) return res.status(400).json({ message: subsetErr });
+    ownerModules = next;
+  } else if (req.body?.permissions !== undefined) {
+    ownerModules = ownerModules.filter((k) => permissions.includes(k));
+  }
+
   dbx.run(
-    'UPDATE roles SET name = ?, description = ?, permissions = ?, updatedAt = ? WHERE id = ?',
-    [name, description || null, JSON.stringify(permissions), nowStr(), id],
+    'UPDATE roles SET name = ?, description = ?, permissions = ?, ownerModules = ?, updatedAt = ? WHERE id = ?',
+    [name, description || null, JSON.stringify(permissions), JSON.stringify(ownerModules), nowStr(), id],
   );
-  logAccess(req, `修改角色 ${target.name} → ${name}（${permissions.length} 个模块权限）`);
+  logAccess(req, `修改角色 ${target.name} → ${name}（${permissions.length} 个模块权限${ownerModules.length ? `，主负责 ${ownerModules.length} 个模块` : ''}）`);
   res.json(toRole(dbx.get(`${LIST_SELECT} WHERE r.id = ?`, [id])));
 });
 

@@ -4,7 +4,10 @@ const fs = require('fs');
 const os = require('os');
 
 const SERVER_ROOT = __dirname ? path.join(__dirname, '..') : process.cwd();
-const DATA_DIR = path.join(SERVER_ROOT, 'data');
+/** 数据目录：默认项目内 data/；可用 WORKBENCH_DATA_DIR 覆盖（隔离测试库用，生产不设即默认） */
+const DATA_DIR = process.env.WORKBENCH_DATA_DIR
+  ? path.resolve(process.env.WORKBENCH_DATA_DIR)
+  : path.join(SERVER_ROOT, 'data');
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 const BACKUP_DIR = path.join(DATA_DIR, 'backups');
 const CERT_DIR = path.join(SERVER_ROOT, 'certs');

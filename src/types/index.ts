@@ -286,6 +286,8 @@ export interface Role extends RoleOption {
   description: string;
   /** 可访问的模块 key 列表 */
   permissions: string[];
+  /** 主负责的模块 key 列表（该模块最高权限：查看全院数据 + 全部操作；必须 ⊆ permissions） */
+  ownerModules: string[];
   /** 该角色下的用户数（删除护栏提示） */
   userCount: number;
   createdAt: string;
@@ -296,6 +298,7 @@ export interface RoleInput {
   name: string;
   description?: string;
   permissions: string[];
+  ownerModules?: string[];
 }
 
 /** Excel 解析出的一行用户数据（row 为含表头的实际行号，从 2 开始） */
@@ -328,8 +331,8 @@ export interface UserImportResult {
 
 /* ==================== 心理健康 ==================== */
 
-/** 关注等级（展示顺序即紧急程度从高到低） */
-export type AttentionLevel = '密切关注' | '重点关注' | '日常关注' | '一般关注';
+/** 关注等级（展示顺序即紧急程度从高到低；末位「无需关注」为留档档位，不安排访谈） */
+export type AttentionLevel = '密切关注' | '重点关注' | '日常关注' | '一般关注' | '无需关注';
 
 /** 关注学生条目（列表行：学生基础信息 + 关注标记 + 谈话统计） */
 export interface MentalConcern {
@@ -348,9 +351,13 @@ export interface MentalConcern {
   talkCount: number;
   lastTalkTime?: string | null;
   followCount: number;
+  /** 本学期心理访谈进度（服务端判定写权，前端只读消费） */
+  interviewDone: number;
+  interviewRequired: number;
+  canInterview: boolean;
 }
 
-/** 关注等级汇总（页首分类卡，四个等级恒齐全） */
+/** 关注等级汇总（页首分类卡，五个等级恒齐全） */
 export interface MentalLevelSummary {
   level: AttentionLevel;
   count: number;
@@ -369,6 +376,149 @@ export interface MentalCandidate {
 export interface MentalTimeline {
   student: { id: Id; name: string; studentNo: string; className: string };
   list: Conversation[];
+}
+
+/* ==================== 心理访谈记录单模板 ==================== */
+
+/** 模板题目（key 为 answers JSON 的唯一标识，既有题目不可改 key） */
+export interface InterviewTemplateQuestion {
+  key: string;
+  /** 题干 */
+  text: string;
+  /** 预填提示（选填） */
+  placeholder?: string;
+  /** 答案字数上限 */
+  max: number;
+  /** 输入框行数 */
+  rows: number;
+}
+
+/** 模板题目分组（对应纸质表分区标题） */
+export interface InterviewTemplateGroup {
+  title: string;
+  questions: InterviewTemplateQuestion[];
+}
+
+/** 生效表单模型（前端渲染记录单用；服务端按学生年级解析） */
+export interface InterviewFormModel {
+  /** 模板 ID；null = 内置默认记录单（库内无启用模板时兜底） */
+  id: string | null;
+  name: string;
+  /** 适用年级名；空数组 = 全部年级适用 */
+  grades: string[];
+  groups: InterviewTemplateGroup[];
+  /** 模板版本（每保存一次内容变更 +1） */
+  version: number;
+}
+
+/** 记录单模板（管理端列表/编辑用） */
+export interface InterviewTemplate extends InterviewFormModel {
+  /** 模板 ID（已落库模板恒有值；null 仅用于内置默认兜底模型） */
+  id: string;
+  enabled: boolean;
+  /** 引用该模板的未删除访谈记录数 */
+  usageCount: number;
+  createdBy?: string | null;
+  updatedBy?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** 记录单模板入参 */
+export interface InterviewTemplateInput {
+  name: string;
+  grades: string[];
+  groups: InterviewTemplateGroup[];
+  enabled?: boolean;
+}
+
+/* ==================== 心理访谈 ==================== */
+
+/** 访谈后评估等级：含「无需关注」，与关注列表 4 档 AttentionLevel 顺序不同，勿混用 */
+export type InterviewLevel = '无需关注' | '一般关注' | '日常关注' | '重点关注' | '密切关注';
+
+/** 学期（服务端按 Asia/Shanghai 推导：第一学期 8/1–次年 1/31，第二学期 2/1–7/31） */
+export interface SemesterInfo {
+  key: string;
+  label: string;
+  startDate: string;
+  endDate: string;
+  daysLeft: number;
+}
+
+/** 心理访谈记录（字段对齐纸质《心理访谈记录单》，answers 按模板题目 key 存储） */
+export interface MentalInterview {
+  id: string;
+  studentId: Id;
+  studentName: string;
+  className?: string | null;
+  semesterKey: string;
+  semesterLabel: string;
+  interviewDate: string;
+  interviewerId?: number | null;
+  interviewerName: string;
+  levelBefore?: string | null;
+  levelAfter: InterviewLevel;
+  answers: Record<string, string>;
+  summary: string;
+  signatureName: string;
+  signedAt: string;
+  formVersion: number;
+  /** 填写时所用的记录单模板（快照，模板后续改题不影响本条记录） */
+  templateId?: string | null;
+  templateVersion?: number | null;
+  formGroups?: InterviewTemplateGroup[] | null;
+  updatedBy?: string | null;
+  updatedAt?: string | null;
+  createdAt: string;
+}
+
+/** 某学生某学期的访谈视图（进度 + 记录列表 + 写权 + 生效记录单模板） */
+export interface MentalInterviewView {
+  student: { id: Id; name: string; studentNo: string; className: string };
+  semester: SemesterInfo;
+  required: number;
+  done: number;
+  canWrite: boolean;
+  level: AttentionLevel | null;
+  list: MentalInterview[];
+  /** 该生当前生效的记录单模板（按年级解析；渲染表单与历史问答兜底用） */
+  form: InterviewFormModel;
+}
+
+/** 关注等级变更审计（手工调整 / 访谈评估联动 / 记录作废 / 初始化基线） */
+export interface MentalLevelLog {
+  id: number;
+  studentId: Id;
+  studentName: string;
+  fromLevel: string | null;
+  toLevel: string | null;
+  source: 'init' | 'manual' | 'interview' | 'interview-edit' | 'interview-delete';
+  refId?: string | null;
+  operatorName?: string | null;
+  note?: string | null;
+  createdAt: string;
+}
+
+/** 本学期访谈未达标学生（横幅/待完成名单用） */
+export interface InterviewPendingStudent {
+  id: Id;
+  name: string;
+  studentNo: string;
+  className: string;
+  classId?: number | null;
+  level: AttentionLevel | null;
+  done: number;
+  required: number;
+  canWrite: boolean;
+}
+
+/** 本学期访谈任务总览（页面横幅数据源） */
+export interface InterviewOverview {
+  semester: SemesterInfo;
+  required: number;
+  pendingCount: number;
+  pending: InterviewPendingStudent[];
 }
 
 /* ==================== 通知发布 ==================== */

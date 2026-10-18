@@ -33,6 +33,16 @@ export default function TabBar() {
   const canDashboard = canAccessModule(user, 'dashboard');
   const tabs = TABS.filter((tab) => !tab.module || canAccessModule(user, tab.module));
 
+  // 班主任等仅持心理健康权限的角色：第 4 槽用「心理健康」补位，避免底部只剩「更多」（总数仍 ≤5）
+  if (
+    canAccessModule(user, 'mentalHealth')
+    && !canAccessModule(user, 'todos')
+    && !tabs.some((t) => t.key === '/mental')
+  ) {
+    const insertAt = Math.max(0, Math.min(3, tabs.length - 1));
+    tabs.splice(insertAt, 0, { key: '/mental', label: '心理健康', icon: 'heart', module: 'mentalHealth' });
+  }
+
   // 角标：与桌面端同源（切换页面时刷新；无工作台权限时不请求）
   useEffect(() => {
     if (!canDashboard) {

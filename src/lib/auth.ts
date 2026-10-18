@@ -1,4 +1,6 @@
 /** 登录会话：token 与当前用户信息（localStorage 持久化） */
+import { APP_MODULES, MODULE_HOME } from '@/constants/modules';
+
 export interface AuthUser {
   id: number;
   username: string;
@@ -11,6 +13,8 @@ export interface AuthUser {
   roleKeys?: string[];
   /** 有效模块权限（服务端按角色集合实时解析并集；admin 为 ['*']） */
   permissions?: string[];
+  /** 主负责模块（服务端按角色集合实时解析并集；admin 为 ['*']；旧会话缓存可能缺失） */
+  ownerModules?: string[];
   mustChangePassword?: boolean;
   /** 所辖班级 ID（管理员为空数组；旧会话缓存可能缺失，按只读容错） */
   classIds?: number[];
@@ -36,21 +40,17 @@ export function canAccessModule(user: AuthUser | null, moduleKey: string): boole
   return user.permissions.includes('*') || user.permissions.includes(moduleKey);
 }
 
-/** 第一个可访问的业务路由（登录落地 / 无权限页返回用） */
+/**
+ * 第一个可访问的业务路由（登录落地 / 无权限页返回用）。
+ * 遍历模块注册表（新增模块自动纳入），仅认有落地路由的模块；
+ * 功能级权限（如 mentalInterview，无独立菜单/路由）不作为落地依据。
+ */
 export function firstAccessiblePath(user: AuthUser | null): string {
-  const order: [string, string][] = [
-    ['dashboard', '/'],
-    ['students', '/students'],
-    ['conversations', '/conversations'],
-    ['warnings', '/warnings'],
-    ['mentalHealth', '/mental'],
-    ['todos', '/todos'],
-    ['templates', '/templates'],
-    ['tools', '/tools'],
-    ['classes', '/classes'],
-  ];
-  const hit = order.find(([key]) => canAccessModule(user, key));
-  return hit ? hit[1] : '/forbidden';
+  for (const mod of APP_MODULES) {
+    const home = MODULE_HOME[mod.key];
+    if (home && canAccessModule(user, mod.key)) return home;
+  }
+  return '/forbidden';
 }
 
 /**
@@ -61,6 +61,21 @@ export function canManageStudentFront(user: AuthUser | null, classId?: number | 
   if (!user) return false;
   if (isSystemAdmin(user)) return true;
   return classId != null && (user.classIds ?? []).includes(classId);
+}
+
+/**
+ * 前端「主负责」判定：与服务端 isModuleOwner 同口径——
+ * 管理员恒 true；其他用户看服务端下发的 ownerModules 并集（兼容 ['*']）。
+ * 旧会话缓存缺失该字段时按收紧处理（返回 false）：缺失只影响写按钮显隐，
+ * 不锁路由菜单，且 BasicLayout 切路由即 getMe() 刷新，窗口极短；
+ * 严格口径下宁可短暂少显示按钮，也不显示一个点了必 403 的按钮。
+ */
+export function isModuleOwner(user: AuthUser | null, moduleKey: string): boolean {
+  if (!user) return false;
+  if (isSystemAdmin(user)) return true;
+  const mods = user.ownerModules;
+  if (!Array.isArray(mods)) return false;
+  return mods.includes('*') || mods.includes(moduleKey);
 }
 
 const TOKEN_KEY = 'workbench_token';

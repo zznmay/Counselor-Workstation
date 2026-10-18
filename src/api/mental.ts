@@ -1,9 +1,16 @@
-/** 心理健康：关注标记与谈心谈话联动（服务端按带班严格限定可见范围） */
+/** 心理健康：关注标记、谈心谈话联动与心理访谈（服务端按带班严格限定可见范围） */
 import { request } from './request';
 import type {
   AttentionLevel,
+  InterviewFormModel,
+  InterviewLevel,
+  InterviewOverview,
+  InterviewTemplate,
+  InterviewTemplateInput,
   MentalCandidate,
   MentalConcern,
+  MentalInterviewView,
+  MentalLevelLog,
   MentalLevelSummary,
   MentalTimeline,
   PageResult,
@@ -53,3 +60,87 @@ export function getMentalCandidates(keyword = ''): Promise<MentalCandidate[]> {
 export function getMentalTimeline(studentId: string): Promise<MentalTimeline> {
   return request<MentalTimeline>(`/mental/timeline?studentId=${encodeURIComponent(studentId)}`);
 }
+
+/* ==================== 心理访谈 ==================== */
+
+/** 访谈填写/编辑入参（10 题白名单 key，服务端逐项校验） */
+export interface MentalInterviewInput {
+  studentId?: string;
+  interviewDate: string;
+  levelAfter: InterviewLevel;
+  answers: Record<string, string>;
+  summary: string;
+  signatureConfirmed: boolean;
+  /** 新增时必带（幂等键）；编辑时不传 */
+  clientRequestId?: string;
+}
+
+/** 某学生某学期的访谈视图：进度 + 记录列表 + 写权 */
+export function getMentalInterviews(studentId: string, semesterKey?: string): Promise<MentalInterviewView> {
+  const sp = new URLSearchParams({ studentId });
+  if (semesterKey) sp.set('semesterKey', semesterKey);
+  return request<MentalInterviewView>(`/mental/interviews?${sp.toString()}`);
+}
+
+/** 新增访谈（幂等：同一 clientRequestId 重复提交返回已有记录） */
+export function createMentalInterview(
+  data: MentalInterviewInput,
+): Promise<{ id: string; done: number; levelSynced: boolean; duplicate?: boolean; studentName: string; levelAfter: InterviewLevel; semester: { key: string; label: string } }> {
+  return request('/mental/interviews', { method: 'POST', body: JSON.stringify(data) });
+}
+
+/** 编辑访谈（仅提交人或管理员，限本学期；跨学期改期 409） */
+export function updateMentalInterview(
+  id: string,
+  data: MentalInterviewInput,
+): Promise<{ ok: true; done: number; levelSynced: boolean; levelSyncSkipped: boolean; studentName: string }> {
+  return request(`/mental/interviews/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(data) });
+}
+
+/** 软删访谈（计数回退，不回滚关注等级） */
+export function deleteMentalInterview(id: string): Promise<{ ok: true; done: number; studentName: string }> {
+  return request(`/mental/interviews/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+/** 本学期访谈任务总览（页面横幅；无 mentalInterview 权限时 403，调用方需先判权限） */
+export function getMentalInterviewOverview(): Promise<InterviewOverview> {
+  return request<InterviewOverview>('/mental/interview-overview');
+}
+
+/** 某学生的关注等级变更时间线（按可见范围） */
+export function getMentalLevelLogs(studentId: string): Promise<MentalLevelLog[]> {
+  return request<MentalLevelLog[]>(`/mental/level-logs?studentId=${encodeURIComponent(studentId)}`);
+}
+
+/* ==================== 心理访谈记录单模板 ==================== */
+
+/** 模板列表（含引用数；所有登录用户可取——渲染表单需先解析生效模板） */
+export function getInterviewTemplates(): Promise<InterviewTemplate[]> {
+  return request<InterviewTemplate[]>('/mental/interview-templates');
+}
+
+/** 新增模板（仅管理员或心理健康主负责） */
+export function createInterviewTemplate(
+  data: InterviewTemplateInput,
+): Promise<InterviewTemplate> {
+  return request<InterviewTemplate>('/mental/interview-templates', { method: 'POST', body: JSON.stringify(data) });
+}
+
+/** 修改模板（内容变更后版本 +1；仅管理员或心理健康主负责） */
+export function updateInterviewTemplate(
+  id: string,
+  data: InterviewTemplateInput,
+): Promise<InterviewTemplate> {
+  return request<InterviewTemplate>(`/mental/interview-templates/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+/** 删除模板（至少保留一个；历史记录不受影响） */
+export function deleteInterviewTemplate(id: string): Promise<{ ok: true; name: string }> {
+  return request<{ ok: true; name: string }>(`/mental/interview-templates/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+/** 生效表单模型兜底（视图接口异常时前端不空白） */
+export type { InterviewFormModel };
