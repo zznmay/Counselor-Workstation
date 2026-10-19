@@ -21,6 +21,7 @@ import { getStoredUser } from '@/lib/auth';
 import { currentSemester, previousSemester, todayCN } from '@/lib/semester';
 import type { InterviewFormModel, InterviewLevel, MentalInterview } from '@/types';
 import {
+  answerLength,
   collectAnswersWith,
   formQuestionMeta,
   groupTitleShort,
@@ -179,6 +180,12 @@ export default function InterviewFormSheet({ open, student, record, form, onClos
         jumpToField(key);
         return false;
       }
+      // 字数下限：min = 0 表示不限制（历史题目行为不变）
+      if (q.min > 0 && v.length < q.min) {
+        setError(`「${q.group}」一题不少于 ${q.min} 字，当前 ${v.length} 字，请补充后再提交`);
+        jumpToField(key);
+        return false;
+      }
     }
     return true;
   };
@@ -259,9 +266,17 @@ export default function InterviewFormSheet({ open, student, record, form, onClos
 
   const questionField = (key: string) => {
     const q = meta[key];
+    const len = answerLength(state[key]);
+    // 下限未达标时计数标红，给出即时反馈（提交时仍以 validateKeys 的拦截为准）
+    const belowMin = q.min > 0 && len < q.min;
     return (
       <div className="m-field" key={key} id={`iv-f-${key}`}>
         <label htmlFor={`iv-i-${key}`}>{q.text}<span className="m-req">*</span></label>
+        {q.min > 0 && (
+          <div className="m-t4" style={{ marginBottom: 4 }}>
+            本题不少于 {q.min} 字，最多 {q.max} 字
+          </div>
+        )}
         <textarea
           id={`iv-i-${key}`}
           className="m-inp"
@@ -271,8 +286,11 @@ export default function InterviewFormSheet({ open, student, record, form, onClos
           value={String(state[key] ?? '')}
           onChange={(e) => setState((s) => ({ ...s, [key]: e.target.value }))}
         />
-        <div className="m-t4" style={{ textAlign: 'right', marginTop: 2 }}>
-          {String(state[key] ?? '').length}/{q.max}
+        <div
+          className="m-t4"
+          style={{ textAlign: 'right', marginTop: 2, color: belowMin ? 'var(--warning-fg)' : undefined }}
+        >
+          {q.min > 0 ? `${len}/${q.min}-${q.max}` : `${len}/${q.max}`}
         </div>
       </div>
     );

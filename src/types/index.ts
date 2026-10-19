@@ -378,6 +378,50 @@ export interface MentalTimeline {
   list: Conversation[];
 }
 
+/* ==================== 心理健康关注名单批量导入 ==================== */
+
+/** 导入行（学号优先、姓名兜底；等级留空由服务端按「一般关注」处理） */
+export interface MentalImportRow {
+  row: number;
+  studentNo: string;
+  name: string;
+  level: string;
+  note?: string;
+}
+
+/** 导入成功明细：created 新建 / updated 变更 / unchanged 已存在且无变化 */
+export interface MentalImportSuccess {
+  row: number;
+  studentId: Id;
+  studentNo: string;
+  name: string;
+  className: string;
+  level: AttentionLevel;
+  previousLevel: AttentionLevel | null;
+  action: 'created' | 'updated' | 'unchanged';
+}
+
+/** 跳过明细：未在学生名册、学号与姓名不匹配、同名歧义、重复行等 */
+export interface MentalImportSkip {
+  row: number;
+  studentNo: string;
+  name: string;
+  reason: string;
+}
+
+/** 导入/预览汇总（dryRun=true 时为校验预览，不落库） */
+export interface MentalImportResult {
+  dryRun: boolean;
+  total: number;
+  successCount: number;
+  skippedCount: number;
+  createdCount: number;
+  updatedCount: number;
+  unchangedCount: number;
+  successes: MentalImportSuccess[];
+  skipped: MentalImportSkip[];
+}
+
 /* ==================== 心理访谈记录单模板 ==================== */
 
 /** 模板题目（key 为 answers JSON 的唯一标识，既有题目不可改 key） */
@@ -387,6 +431,8 @@ export interface InterviewTemplateQuestion {
   text: string;
   /** 预填提示（选填） */
   placeholder?: string;
+  /** 答案字数下限（非负整数；0 或缺省 = 不限制，历史题目保持此行为） */
+  min?: number;
   /** 答案字数上限 */
   max: number;
   /** 输入框行数 */
@@ -434,6 +480,50 @@ export interface InterviewTemplateInput {
   levels: string[];
   groups: InterviewTemplateGroup[];
   enabled?: boolean;
+}
+
+/* ==================== 心理访谈记录批量导出 ==================== */
+
+/** 导出查询入参（level 传「全部」或空 = 不限档位） */
+export interface InterviewExportQuery {
+  level?: string;
+  classId?: number;
+  dateFrom?: string;
+  dateTo?: string;
+  keyword?: string;
+  page: number;
+  pageSize: number;
+}
+
+/** 导出行：学生基本信息 + 记录关键字段 + 题目快照（用于展开动态问答列） */
+export interface InterviewExportRecord {
+  id: string;
+  studentId: Id;
+  studentName: string;
+  studentNo: string;
+  className: string;
+  grade: string;
+  /** 学生当前关注等级（导出筛选依据） */
+  currentLevel: AttentionLevel | null;
+  interviewDate: string;
+  interviewerName: string;
+  levelBefore: AttentionLevel | null;
+  levelAfter: AttentionLevel | null;
+  answers: Record<string, string>;
+  summary: string;
+  signatureName: string;
+  signedAt: string;
+  semesterLabel: string;
+  /** 填写时的题目快照（可能为 null：极老记录无快照） */
+  formGroups: InterviewTemplateGroup[] | null;
+}
+
+/** 导出查询分页结果 */
+export interface InterviewExportPage {
+  total: number;
+  page: number;
+  pageSize: number;
+  list: InterviewExportRecord[];
 }
 
 /* ==================== 心理访谈 ==================== */

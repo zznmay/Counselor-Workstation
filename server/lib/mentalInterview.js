@@ -25,7 +25,8 @@ const {
 /** 访谈后评估：与关注等级 5 档同源（含「无需关注」留档档位） */
 const INTERVIEW_LEVELS = LEVELS;
 const REQUIRED_COUNT = 2;
-const FORM_VERSION = 2;
+/** 记录单题目结构版本：3 起每题支持「字数下限 min」（0/缺省 = 不限制） */
+const FORM_VERSION = 3;
 const SEMESTER_RE = /^\d{4}-\d{4}-[12]$/;
 
 function fail(message, status = 400) {
@@ -149,6 +150,25 @@ function applyLevelInTx({ student, fromLevel, toLevel, user, refId, source, note
   return true;
 }
 
+/**
+ * 历史快照补齐字数下限：仅补 min 字段，不改写 key / text / max / rows。
+ * 老快照无 min → 补 0（不限制），使接口输出结构与新建记录一致，前端无需再兜底。
+ * （刻意不用 interviewTemplate.normalizeGroups：它会在 key 非法/重复时重新生成，
+ *   那会让历史记录的题目标识发生变化。）
+ */
+function withMinChars(groups) {
+  if (!Array.isArray(groups)) return groups;
+  return groups.map((g) => ({
+    ...g,
+    questions: Array.isArray(g?.questions)
+      ? g.questions.map((q) => ({
+        ...q,
+        min: Number.isInteger(q?.min) && q.min >= 0 ? q.min : 0,
+      }))
+      : [],
+  }));
+}
+
 function listRecords(studentId, semesterKey) {
   return dbx.all(
     `SELECT * FROM mentalInterviews
@@ -159,7 +179,7 @@ function listRecords(studentId, semesterKey) {
     let answers = {};
     try { answers = JSON.parse(r.answers ?? '{}'); } catch { answers = {}; }
     let formGroups = null;
-    try { formGroups = r.formSnapshot ? JSON.parse(r.formSnapshot) : null; } catch { formGroups = null; }
+    try { formGroups = r.formSnapshot ? withMinChars(JSON.parse(r.formSnapshot)) : null; } catch { formGroups = null; }
     return {
       id: r.id,
       studentId: r.studentId,
@@ -234,6 +254,108 @@ function semesterLabelOf(key) {
   const m = /^(\d{4})-(\d{4})-([12])$/.exec(String(key ?? ''));
   if (!m) return String(key ?? '');
   return `${m[1]}-${m[2]}学年${m[3] === '1' ? '第一' : '第二'}学期`;
+}
+
+/**
+ * 批量导出用：跨学生访谈记录查询（仅管理员 / 心理健康主负责调用，路由层鉴权）。
+ *
+ * 筛选（全部可选，默认导出「一般关注」学生）：
+ * - level：学生**当前**关注等级（mentalHealth.level）；'全部' 或缺省 = 不限档位
+ * - classId：班级 id
+ * - dateFrom / dateTo：访谈日期范围（YYYY-MM-DD，闭区间）
+ * - keyword：学生姓名 / 学号模糊匹配
+ * 分页：page 从 1 起，pageSize 上限 500。
+ */
+function listExportRecords(user, filters = {}) {
+  if (!isSystemAdmin(user) && !isModuleOwner(user, 'mentalHealth')) {
+    throw fail('仅管理员或心理健康主负责（心理辅导员）可批量导出访谈记录', 403);
+  }
+
+  const conds = ['iv.deletedAt IS NULL'];
+  const params = [];
+
+  const level = String(filters.level ?? '').trim();
+  if (level && level !== '全部') {
+    conds.push('mh.level = ?');
+    params.push(level);
+  }
+  const classId = Number(filters.classId);
+  if (Number.isInteger(classId) && classId > 0) {
+    conds.push('s.classId = ?');
+    params.push(classId);
+  }
+  const dateFrom = String(filters.dateFrom ?? '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateFrom)) {
+    conds.push('iv.interviewDate >= ?');
+    params.push(dateFrom);
+  }
+  const dateTo = String(filters.dateTo ?? '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateTo)) {
+    conds.push('iv.interviewDate <= ?');
+    params.push(dateTo);
+  }
+  const kw = String(filters.keyword ?? '').trim();
+  if (kw) {
+    conds.push('(s.name LIKE ? OR s.studentNo LIKE ?)');
+    params.push(`%${kw}%`, `%${kw}%`);
+  }
+  const where = conds.join(' AND ');
+
+  const page = Math.max(1, Number(filters.page) || 1);
+  const pageSize = Math.min(500, Math.max(1, Number(filters.pageSize) || 200));
+
+  const total = dbx.get(
+    `SELECT COUNT(*) AS c FROM mentalInterviews iv
+     JOIN students s ON s.id = iv.studentId
+     LEFT JOIN mentalHealth mh ON mh.studentId = iv.studentId
+     WHERE ${where}`,
+    params,
+  ).c;
+
+  const rows = dbx.all(
+    `SELECT iv.id, iv.studentId, s.name AS studentName, s.studentNo, s.className, s.grade,
+            iv.interviewDate, iv.interviewerName, iv.levelBefore, iv.levelAfter,
+            iv.answers, iv.summary, iv.signatureName, iv.signedAt,
+            iv.formSnapshot, iv.semesterLabel, mh.level AS currentLevel
+     FROM mentalInterviews iv
+     JOIN students s ON s.id = iv.studentId
+     LEFT JOIN mentalHealth mh ON mh.studentId = iv.studentId
+     WHERE ${where}
+     ORDER BY iv.interviewDate DESC, iv.createdAt DESC
+     LIMIT ? OFFSET ?`,
+    [...params, pageSize, (page - 1) * pageSize],
+  );
+
+  return {
+    total,
+    page,
+    pageSize,
+    list: rows.map((r) => {
+      let answers = {};
+      try { answers = JSON.parse(r.answers ?? '{}'); } catch { answers = {}; }
+      let formGroups = null;
+      try { formGroups = r.formSnapshot ? withMinChars(JSON.parse(r.formSnapshot)) : null; } catch { formGroups = null; }
+      return {
+        id: r.id,
+        studentId: r.studentId,
+        studentName: r.studentName,
+        studentNo: r.studentNo ?? '',
+        className: r.className ?? '',
+        grade: r.grade ?? '',
+        currentLevel: r.currentLevel ?? null,
+        interviewDate: r.interviewDate,
+        interviewerName: r.interviewerName ?? '',
+        levelBefore: r.levelBefore ?? null,
+        levelAfter: r.levelAfter ?? null,
+        answers,
+        summary: r.summary ?? '',
+        signatureName: r.signatureName ?? '',
+        signedAt: r.signedAt ?? '',
+        semesterLabel: r.semesterLabel ?? '',
+        formGroups,
+      };
+    }),
+  };
 }
 
 /** 新增访谈（幂等 + 事务） */
@@ -528,6 +650,7 @@ module.exports = {
   logLevelChange,
   applyLevelInTx,
   getInterviewView,
+  listExportRecords,
   createInterview,
   updateInterview,
   deleteInterview,

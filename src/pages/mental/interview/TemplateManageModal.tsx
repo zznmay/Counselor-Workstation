@@ -294,7 +294,18 @@ export default function TemplateManageModal({ open, onClose }: TemplateManageMod
                           onChange={(e) => ed.patchQuestion(gi, qi, { placeholder: e.target.value })}
                           style={{ flex: '1 1 220px' }}
                         />
-                        <Space size={4}>
+                        <Space size={4} wrap>
+                          <Typography.Text type="secondary" style={{ fontSize: 12 }}>字数下限</Typography.Text>
+                          <Tooltip title={`0-5000 的整数，0 表示不限制；不可超过字数上限（${q.max}）`}>
+                            <InputNumber
+                              min={0}
+                              max={q.max}
+                              step={10}
+                              value={q.min}
+                              onChange={(v) => ed.patchQuestion(gi, qi, { min: Number.isInteger(v) ? (v as number) : 0 })}
+                              style={{ width: 84 }}
+                            />
+                          </Tooltip>
                           <Typography.Text type="secondary" style={{ fontSize: 12 }}>字数上限</Typography.Text>
                           <InputNumber
                             min={10}

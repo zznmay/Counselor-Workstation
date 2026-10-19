@@ -216,6 +216,18 @@ export default function TemplateManageSheet({ open, onClose, onSaved, onDeleted 
                   </div>
                   <div style={{ display: 'flex', gap: 10 }}>
                     <div className="m-field" style={{ flex: 1 }}>
+                      <label>字数下限</label>
+                      <input
+                        className="m-inp"
+                        type="number"
+                        min={0}
+                        max={q.max}
+                        value={q.min}
+                        onChange={(e) => ed.patchQuestion(gi, qi, { min: Number.isInteger(Number(e.target.value)) ? Number(e.target.value) : 0 })}
+                      />
+                      <div className="m-t4">0-5000 的整数，0 表示不限制</div>
+                    </div>
+                    <div className="m-field" style={{ flex: 1 }}>
                       <label>字数上限</label>
                       <input
                         className="m-inp"

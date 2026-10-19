@@ -17,6 +17,7 @@ import {
   updateInterviewTemplate,
 } from '@/api/mental';
 import { getGradeOptions } from '@/api/classes';
+import { INTERVIEW_MIN_CHARS } from '@/constants/interview';
 import { ATTENTION_LEVELS } from '@/constants/mental';
 import type { InterviewTemplate, InterviewTemplateGroup, InterviewTemplateInput } from '@/types';
 
@@ -24,6 +25,8 @@ export interface DraftQuestion {
   key: string;
   text: string;
   placeholder: string;
+  /** 答案字数下限；0 = 不限制（与服务端 normalizeGroups / validateInput 同口径） */
+  min: number;
   max: number;
   rows: number;
 }
@@ -55,6 +58,8 @@ function questionOf(q: InterviewTemplateGroup['questions'][number]): DraftQuesti
     key: q.key,
     text: q.text,
     placeholder: q.placeholder ?? '',
+    // 历史题目没有下限字段：缺省按 0（不限制）处理，保证老模板打开即可编辑
+    min: Number.isInteger(q.min) && (q.min as number) >= 0 ? (q.min as number) : 0,
     max: q.max,
     rows: q.rows,
   };
@@ -82,8 +87,8 @@ export function emptyDraft(): TemplateDraft {
       {
         title: '一、',
         questions: [
-          { key: newKey(), text: '', placeholder: '', max: 500, rows: 3 },
-          { key: newKey(), text: '', placeholder: '', max: 500, rows: 3 },
+          { key: newKey(), text: '', placeholder: '', min: 0, max: 500, rows: 3 },
+          { key: newKey(), text: '', placeholder: '', min: 0, max: 500, rows: 3 },
         ],
       },
     ],
@@ -110,6 +115,14 @@ export function validateDraft(draft: TemplateDraft): string | null {
       if (!Number.isInteger(q.max) || q.max < 10 || q.max > 5000) {
         return `「${g.title.trim()}」第 ${qi + 1} 题字数上限需为 10-5000`;
       }
+      if (!Number.isInteger(q.min)
+        || q.min < INTERVIEW_MIN_CHARS.min
+        || q.min > INTERVIEW_MIN_CHARS.max) {
+        return `「${g.title.trim()}」第 ${qi + 1} 题字数下限需为 ${INTERVIEW_MIN_CHARS.min}-${INTERVIEW_MIN_CHARS.max} 的整数（0 表示不限制）`;
+      }
+      if (q.min > q.max) {
+        return `「${g.title.trim()}」第 ${qi + 1} 题字数下限（${q.min}）不可超过字数上限（${q.max}）`;
+      }
       if (!Number.isInteger(q.rows) || q.rows < 1 || q.rows > 20) {
         return `「${g.title.trim()}」第 ${qi + 1} 题行数需为 1-20`;
       }
@@ -134,6 +147,7 @@ export function draftToInput(draft: TemplateDraft): InterviewTemplateInput {
         key: q.key,
         text: q.text.trim(),
         ...(q.placeholder.trim() ? { placeholder: q.placeholder.trim() } : {}),
+        min: q.min,
         max: q.max,
         rows: q.rows,
       })),
@@ -258,7 +272,7 @@ export function useTemplateEditor(options: {
         ...d,
         groups: [
           ...d.groups,
-          { title: `${'一二三四五六七八九十'[Math.min(d.groups.length, 9)]}、`, questions: [{ key: newKey(), text: '', placeholder: '', max: 500, rows: 3 }] },
+          { title: `${'一二三四五六七八九十'[Math.min(d.groups.length, 9)]}、`, questions: [{ key: newKey(), text: '', placeholder: '', min: 0, max: 500, rows: 3 }] },
         ],
       }
       : d));
@@ -283,7 +297,7 @@ export function useTemplateEditor(options: {
       ? {
         ...d,
         groups: d.groups.map((g, i) => (i === gi
-          ? { ...g, questions: [...g.questions, { key: newKey(), text: '', placeholder: '', max: 500, rows: 3 }] }
+          ? { ...g, questions: [...g.questions, { key: newKey(), text: '', placeholder: '', min: 0, max: 500, rows: 3 }] }
           : g)),
       }
       : d));

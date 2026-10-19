@@ -75,8 +75,18 @@ export interface InterviewQuestionMeta {
   group: string;
   text: string;
   placeholder?: string;
+  /** 答案字数下限；0 = 不限制（历史题目缺省值） */
+  min: number;
   max: number;
   rows: number;
+}
+
+/**
+ * 统一字数统计口径：与既有逻辑完全一致 —— 先 trim 再取 length，
+ * 不计首尾空白与换行；服务端 validateAnswers 用同一规则（见 lib/interviewTemplate.js）。
+ */
+export function answerLength(value: unknown): number {
+  return String(value ?? '').trim().length;
 }
 
 export function formQuestionMeta(form: InterviewFormModel): Record<string, InterviewQuestionMeta> {
@@ -87,6 +97,8 @@ export function formQuestionMeta(form: InterviewFormModel): Record<string, Inter
         group: group.title,
         text: q.text,
         placeholder: q.placeholder,
+        // 历史题目/旧快照无 min 字段 → 0（不限制），保持既有行为
+        min: Number.isInteger(q.min) && (q.min as number) > 0 ? (q.min as number) : 0,
         max: q.max,
         rows: q.rows,
       }]),

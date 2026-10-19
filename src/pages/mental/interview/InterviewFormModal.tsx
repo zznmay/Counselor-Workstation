@@ -21,7 +21,7 @@ import { useIsMobile } from '@/hooks/useIsMobile';
 import { getStoredUser } from '@/lib/auth';
 import { currentSemester, previousSemester, todayCN } from '@/lib/semester';
 import type { Id, InterviewFormModel, InterviewLevel, MentalInterview } from '@/types';
-import { collectAnswersWith, formQuestionCount, recordFormOf } from './shared';
+import { collectAnswersWith, answerLength, formQuestionCount, recordFormOf } from './shared';
 
 type InterviewFormValues = {
   interviewDate: Dayjs;
@@ -175,25 +175,37 @@ export default function InterviewFormModal({
         {activeForm.groups.map((group) => (
           <div key={group.title} style={{ marginBottom: 8 }}>
             <div style={{ fontWeight: 600, margin: '6px 0 2px' }}>{group.title}</div>
-            {group.questions.map((q) => (
-              <Form.Item
-                key={q.key}
-                name={q.key}
-                label={q.text}
-                rules={[
-                  { required: true, message: '请填写本题' },
-                  { max: q.max, message: `不可超过 ${q.max} 字` },
-                ]}
-                style={{ marginBottom: 14 }}
-              >
-                <Input.TextArea
-                  rows={q.rows}
-                  maxLength={q.max}
-                  showCount
-                  placeholder={q.placeholder}
-                />
-              </Form.Item>
-            ))}
+            {group.questions.map((q) => {
+              const min = Number.isInteger(q.min) && (q.min as number) > 0 ? (q.min as number) : 0;
+              return (
+                <Form.Item
+                  key={q.key}
+                  name={q.key}
+                  label={q.text}
+                  // 字数统计与服务端一致：trim 后长度；min = 0 表示不限制
+                  rules={[
+                    { required: true, message: '请填写本题' },
+                    { max: q.max, message: `不可超过 ${q.max} 字` },
+                    ...(min > 0
+                      ? [{
+                        validator: (_r: unknown, v: string) => (answerLength(v) < min
+                          ? Promise.reject(new Error(`不少于 ${min} 字，请补充后再提交`))
+                          : Promise.resolve()),
+                      }]
+                      : []),
+                  ]}
+                  extra={min > 0 ? `本题不少于 ${min} 字，最多 ${q.max} 字` : undefined}
+                  style={{ marginBottom: 14 }}
+                >
+                  <Input.TextArea
+                    rows={q.rows}
+                    maxLength={q.max}
+                    showCount
+                    placeholder={q.placeholder}
+                  />
+                </Form.Item>
+              );
+            })}
           </div>
         ))}
 

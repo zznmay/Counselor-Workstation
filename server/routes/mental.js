@@ -18,6 +18,7 @@ const { currentSemester } = require('../lib/semester');
 const {
   REQUIRED_COUNT,
   getInterviewView,
+  listExportRecords,
   createInterview,
   updateInterview,
   deleteInterview,
@@ -170,6 +171,165 @@ router.get('/candidates', (req, res) => {
   res.json(rows);
 });
 
+/* ---------- 批量导入关注学生（管理员 / 心理健康主负责） ----------
+ * 逐条按「学号优先、姓名兜底」核对名册：
+ * - 命中名册 → 写入关注标记（已有记录则更新），并记录等级变更审计；
+ * - 未命中 → 不导入，原因统一为「学生未在学生名册中，确认学生是否在读」。
+ * dryRun=true 只做校验与汇总（确认前预览），不落库、不写审计。
+ */
+const IMPORT_MAX_ROWS = 1000;
+const IMPORT_DEFAULT_LEVEL = '一般关注';
+const MISSING_STUDENT_REASON = '学生未在学生名册中，确认学生是否在读';
+
+/** 按学号（优先）或姓名定位名册学生；返回 { student, reason } 二选一 */
+function findRosterStudent({ studentNo, name }) {
+  if (studentNo) {
+    const student = dbx.get(
+      'SELECT id, name, studentNo, className FROM students WHERE studentNo = ?',
+      [studentNo],
+    );
+    if (!student) return { student: null, reason: MISSING_STUDENT_REASON };
+    // 同时填了姓名时必须与学号对应学生一致，避免错行/错位导入
+    if (name && name !== student.name) {
+      return {
+        student: null,
+        reason: `学号与姓名不匹配：该学号在名册中为「${student.name}」，与填写的「${name}」不一致`,
+      };
+    }
+    return { student, reason: null };
+  }
+
+  const matches = dbx.all(
+    'SELECT id, name, studentNo, className FROM students WHERE name = ? ORDER BY studentNo',
+    [name],
+  );
+  if (matches.length === 0) return { student: null, reason: MISSING_STUDENT_REASON };
+  if (matches.length > 1) {
+    return { student: null, reason: `名册中有 ${matches.length} 名同名学生，请填写学号后重试` };
+  }
+  return { student: matches[0], reason: null };
+}
+
+router.post('/import', (req, res) => {
+  // 写权与关注标记维护同口径：管理员或心理健康主负责
+  if (!isModuleOwner(req.user, 'mentalHealth')) {
+    return res.status(403).json({ message: '仅管理员或心理健康主负责（心理辅导员）可批量导入关注学生' });
+  }
+
+  const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+  if (rows.length === 0) return res.status(400).json({ message: '没有可导入的数据行' });
+  if (rows.length > IMPORT_MAX_ROWS) {
+    return res.status(400).json({ message: `单次最多导入 ${IMPORT_MAX_ROWS} 行，请拆分文件后重试` });
+  }
+  const dryRun = req.body?.dryRun === true;
+
+  const pending = [];
+  const skipped = [];
+  /** 本表内 学生ID → 首次出现行号（同一学生多行只取首行） */
+  const seen = new Map();
+  /** 已有记录且等级、备注均无变化：不写库，避免无谓刷新 updatedAt */
+  const isNoop = (item) => !!item.before
+    && item.before.level === item.level
+    && (item.note === '' || item.note === item.before.note);
+
+  rows.forEach((raw, index) => {
+    const row = Number(raw?.row) || index + 2; // 第 1 行为表头
+    const studentNo = String(raw?.studentNo ?? '').trim();
+    const name = String(raw?.name ?? '').trim();
+    const levelRaw = String(raw?.level ?? '').trim();
+    const level = levelRaw || IMPORT_DEFAULT_LEVEL;
+    const note = String(raw?.note ?? '').trim();
+
+    const skip = (reason) => skipped.push({
+      row,
+      studentNo: studentNo || '—',
+      name: name || '—',
+      reason,
+    });
+
+    if (!studentNo && !name) return skip('学号与姓名均为空');
+    if (!LEVELS.includes(level)) return skip(`关注等级需为：${LEVELS.join('、')}`);
+    if (note.length > 200) return skip('关注备注不可超过 200 字');
+
+    const { student, reason } = findRosterStudent({ studentNo, name });
+    if (!student) return skip(reason);
+
+    if (seen.has(student.id)) {
+      return skip(`与第 ${seen.get(student.id)} 行指向同一名学生（${student.name}·${student.studentNo}），重复行已跳过`);
+    }
+    seen.set(student.id, row);
+
+    const before = dbx.get('SELECT level, note FROM mentalHealth WHERE studentId = ?', [student.id]) ?? null;
+    pending.push({ row, student, level, note, before });
+  });
+
+  if (!dryRun && pending.length > 0) {
+    dbx.withTransaction(() => {
+      for (const item of pending) {
+        if (isNoop(item)) continue;
+        const { row, student, level, note, before } = item;
+        // 未填写备注时保留原备注，避免批量导入覆盖手工维护的说明
+        const nextNote = note || before?.note || null;
+        dbx.run(
+          `INSERT INTO mentalHealth (studentId, level, note, updatedBy, updatedAt)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(studentId) DO UPDATE SET
+             level = excluded.level, note = excluded.note,
+             updatedBy = excluded.updatedBy, updatedAt = excluded.updatedAt`,
+          [student.id, level, nextNote, req.user.displayName, nowStr()],
+        );
+        if ((before?.level ?? null) !== level) {
+          logLevelChange({
+            studentId: student.id,
+            studentName: student.name,
+            fromLevel: before?.level ?? null,
+            toLevel: level,
+            source: 'manual',
+            user: req.user,
+            note: `批量导入（第 ${row} 行）`,
+          });
+        }
+      }
+    });
+  }
+
+  const successes = pending.map((item) => {
+    const { row, student, level, before } = item;
+    return {
+      row,
+      studentId: student.id,
+      studentNo: student.studentNo,
+      name: student.name,
+      className: student.className,
+      level,
+      previousLevel: before?.level ?? null,
+      // created：新建标记；updated：等级或备注变化；unchanged：已有记录且无变化
+      action: !before ? 'created' : isNoop(item) ? 'unchanged' : 'updated',
+    };
+  });
+
+  const countOf = (action) => successes.filter((s) => s.action === action).length;
+
+  if (!dryRun) {
+    logAccess(
+      req,
+      `批量导入心理关注学生：成功 ${successes.length} 名（新增 ${countOf('created')} / 更新 ${countOf('updated')} / 无变化 ${countOf('unchanged')}），跳过 ${skipped.length} 名`,
+    );
+  }
+
+  res.json({
+    dryRun,
+    total: rows.length,
+    successCount: successes.length,
+    skippedCount: skipped.length,
+    createdCount: countOf('created'),
+    updatedCount: countOf('updated'),
+    unchangedCount: countOf('unchanged'),
+    successes,
+    skipped,
+  });
+});
+
 /* ---------- 心理访谈：某学生某学期的记录与进度 ---------- */
 router.get('/interviews', (req, res) => {
   const studentId = String(req.query.studentId ?? '');
@@ -230,6 +390,26 @@ router.get('/interview-overview', (req, res) => {
     pendingCount: pending.length,
     pending,
   });
+});
+
+/* ---------- 批量导出用：跨学生访谈记录查询（管理员 / 心理健康主负责） ----------
+ * 支持筛选：关注等级（学生当前档位，默认「一般关注」）、班级、访谈日期范围、关键字。
+ * 前端分页循环拉取全部数据后，在浏览器端生成 Excel（与既有导出模式一致）。
+ */
+router.get('/interview-records', (req, res) => {
+  try {
+    res.json(listExportRecords(req.user, {
+      level: req.query.level,
+      classId: req.query.classId,
+      dateFrom: req.query.dateFrom,
+      dateTo: req.query.dateTo,
+      keyword: req.query.keyword,
+      page: req.query.page,
+      pageSize: req.query.pageSize,
+    }));
+  } catch (err) {
+    sendError(res, err);
+  }
 });
 
 /* ---------- 关注等级变更记录（审计时间线） ---------- */

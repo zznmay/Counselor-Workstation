@@ -10,6 +10,9 @@ import type { InterviewFormModel, InterviewLevel } from '@/types';
 /** 每名学生每学期至少提交次数（服务端 REQUIRED_COUNT 同值） */
 export const INTERVIEW_REQUIRED = 2;
 
+/** 题目字数下限取值范围（与服务端 MIN_CHARS_MIN/MAX 同值；0 = 不限制） */
+export const INTERVIEW_MIN_CHARS = { min: 0, max: 5000 } as const;
+
 /** 访谈后评估等级：与关注列表 5 档 ATTENTION_LEVELS 完全一致（含「无需关注」） */
 export const INTERVIEW_LEVELS: InterviewLevel[] = ['无需关注', '一般关注', '日常关注', '重点关注', '密切关注'];
 
@@ -19,6 +22,8 @@ export interface InterviewQuestion {
   text: string;
   /** 预填提示 */
   placeholder?: string;
+  /** 答案字数下限（0/缺省 = 不限制，与服务端 normalizeGroups 同口径） */
+  min?: number;
   max: number;
   rows: number;
 }

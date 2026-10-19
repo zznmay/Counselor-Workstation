@@ -26,6 +26,10 @@ const MAX_GROUPS = 20;
 const MAX_QUESTIONS_PER_GROUP = 30;
 const KEY_RE = /^[A-Za-z0-9_]{1,64}$/;
 
+/** 单题字数下限取值范围（非负整数；0 = 不限制，与历史题目缺省行为一致） */
+const MIN_CHARS_MIN = 0;
+const MIN_CHARS_MAX = 5000;
+
 function fail(message, status = 400) {
   const err = new Error(message);
   err.status = status;
@@ -59,7 +63,11 @@ function genKey() {
   return `q_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 }
 
-/** 规整分组结构（trim + 默认值 + key 补齐）；输出与前端 InterviewFormModel 同构 */
+/**
+ * 规整分组结构（trim + 默认值 + key 补齐）；输出与前端 InterviewFormModel 同构。
+ * min（字数下限）为可选字段：历史题目/快照缺失时补 0 —— 0 表示不做下限限制，
+ * 保证旧模板与旧访谈记录快照在新代码下继续可用。
+ */
 function normalizeGroups(rawGroups) {
   const used = new Set();
   return rawGroups.map((g) => ({
@@ -69,11 +77,18 @@ function normalizeGroups(rawGroups) {
       if (!KEY_RE.test(key) || used.has(key)) key = genKey();
       used.add(key);
       const placeholder = String(q?.placeholder ?? '').trim();
+      const max = Number(q?.max) || 500;
+      // 下限容错：非法/缺失一律视为 0（不限制），不因脏数据让历史记录无法渲染
+      const rawMin = Number(q?.min);
+      const min = Number.isInteger(rawMin) && rawMin >= MIN_CHARS_MIN && rawMin <= max
+        ? rawMin
+        : 0;
       return {
         key,
         text: String(q?.text ?? '').trim(),
         ...(placeholder ? { placeholder } : {}),
-        max: Number(q?.max) || 500,
+        min,
+        max,
         rows: Number(q?.rows) || 3,
       };
     }),
@@ -188,6 +203,15 @@ function validateInput(body) {
       if (!Number.isInteger(max) || max < 10 || max > 5000) {
         throw fail(`「${title}」第 ${qi + 1} 题字数上限需为 10-5000 的整数`);
       }
+      // 字数下限：缺省 / 非整数 / 越界 → 视为未设置（0 = 不限制）；
+      // 显式传了非法值则拒绝保存，避免模板里存下永远无法达成的题目。
+      const rawMin = q?.min === undefined || q?.min === null || q?.min === '' ? 0 : Number(q.min);
+      if (!Number.isInteger(rawMin) || rawMin < MIN_CHARS_MIN || rawMin > MIN_CHARS_MAX) {
+        throw fail(`「${title}」第 ${qi + 1} 题字数下限需为 ${MIN_CHARS_MIN}-${MIN_CHARS_MAX} 的整数（0 表示不限制）`);
+      }
+      if (rawMin > max) {
+        throw fail(`「${title}」第 ${qi + 1} 题字数下限（${rawMin}）不可超过字数上限（${max}）`);
+      }
       const rows = Number(q?.rows);
       if (!Number.isInteger(rows) || rows < 1 || rows > 20) {
         throw fail(`「${title}」第 ${qi + 1} 题行数需为 1-20 的整数`);
@@ -195,7 +219,7 @@ function validateInput(body) {
       let key = String(q?.key ?? '').trim();
       if (!KEY_RE.test(key) || usedKeys.has(key)) key = genKey();
       usedKeys.add(key);
-      return { key, text, placeholder: placeholder || undefined, max, rows };
+      return { key, text, placeholder: placeholder || undefined, min: rawMin, max, rows };
     });
     return { title, questions: qs };
   });
@@ -203,7 +227,11 @@ function validateInput(body) {
   return { name, grades, levels, groups };
 }
 
-/** 按模型校验 answers（逐题必填 + 字数上限；白名单外 key 直接忽略） */
+/**
+ * 按模型校验 answers（逐题必填 + 字数上下限；白名单外 key 直接忽略）。
+ * 字数统计与既有逻辑完全一致：先 trim 再取 length（不含首尾空白/换行），
+ * 下限 0 表示不限制（历史题目未设置下限时行为不变）。
+ */
 function validateAnswers(model, raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw fail('访谈内容不完整');
   const answers = {};
@@ -212,6 +240,9 @@ function validateAnswers(model, raw) {
       const v = String(raw[q.key] ?? '').trim();
       if (!v) throw fail(`请填写「${q.text.slice(0, 16)}…」`);
       if (v.length > q.max) throw fail(`「${q.text.slice(0, 16)}…」不可超过 ${q.max} 字`);
+      if (q.min > 0 && v.length < q.min) {
+        throw fail(`「${q.text.slice(0, 16)}…」不少于 ${q.min} 字（当前 ${v.length} 字），请补充后再提交`);
+      }
       answers[q.key] = v;
     }
   }
@@ -323,6 +354,8 @@ module.exports = {
   DEFAULT_TEMPLATE_NAME,
   MAX_GROUPS,
   MAX_QUESTIONS_PER_GROUP,
+  MIN_CHARS_MIN,
+  MIN_CHARS_MAX,
   genKey,
   normalizeGroups,
   gradesOf,

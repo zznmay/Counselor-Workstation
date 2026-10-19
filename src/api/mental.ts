@@ -2,6 +2,8 @@
 import { request } from './request';
 import type {
   AttentionLevel,
+  InterviewExportPage,
+  InterviewExportQuery,
   InterviewFormModel,
   InterviewLevel,
   InterviewOverview,
@@ -9,6 +11,8 @@ import type {
   InterviewTemplateInput,
   MentalCandidate,
   MentalConcern,
+  MentalImportResult,
+  MentalImportRow,
   MentalInterviewView,
   MentalLevelLog,
   MentalLevelSummary,
@@ -54,6 +58,20 @@ export function setAttention(
 export function getMentalCandidates(keyword = ''): Promise<MentalCandidate[]> {
   const sp = keyword ? `?keyword=${encodeURIComponent(keyword)}` : '';
   return request<MentalCandidate[]>(`/mental/candidates${sp}`);
+}
+
+/**
+ * 批量导入关注学生（仅管理员 / 心理健康主负责）。
+ * dryRun=true 时仅逐条核对名册并返回汇总，不写入数据库（确认前预览）。
+ */
+export function importMentalConcerns(
+  rows: MentalImportRow[],
+  dryRun = false,
+): Promise<MentalImportResult> {
+  return request<MentalImportResult>('/mental/import', {
+    method: 'POST',
+    body: JSON.stringify({ rows, dryRun }),
+  });
 }
 
 /** 某学生的全部谈心谈话记录（只读打通；仅带班范围内学生） */
@@ -105,6 +123,23 @@ export function deleteMentalInterview(id: string): Promise<{ ok: true; done: num
 /** 本学期访谈任务总览（页面横幅；无 mentalInterview 权限时 403，调用方需先判权限） */
 export function getMentalInterviewOverview(): Promise<InterviewOverview> {
   return request<InterviewOverview>('/mental/interview-overview');
+}
+
+/**
+ * 批量导出用：跨学生访谈记录查询（仅管理员 / 心理健康主负责；服务端分页）。
+ * 前端分页循环拉取全部数据后在浏览器端生成 Excel。
+ */
+export function listMentalInterviewRecords(params: InterviewExportQuery): Promise<InterviewExportPage> {
+  const sp = new URLSearchParams({
+    page: String(params.page),
+    pageSize: String(params.pageSize),
+  });
+  if (params.level && params.level !== '全部') sp.set('level', params.level);
+  if (params.classId) sp.set('classId', String(params.classId));
+  if (params.dateFrom) sp.set('dateFrom', params.dateFrom);
+  if (params.dateTo) sp.set('dateTo', params.dateTo);
+  if (params.keyword?.trim()) sp.set('keyword', params.keyword.trim());
+  return request<InterviewExportPage>(`/mental/interview-records?${sp.toString()}`);
 }
 
 /** 某学生的关注等级变更时间线（按可见范围） */

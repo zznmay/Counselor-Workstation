@@ -31,6 +31,8 @@ import type {
 import { canAccessModule, canStartTalkRecord, getStoredUser, isModuleOwner, isSystemAdmin, subscribeSession } from '@/lib/auth';
 import InterviewFormSheet, { type InterviewStudentRefM } from './interview/InterviewFormSheet';
 import TemplateManageSheet from './interview/TemplateManageSheet';
+import ExportInterviewDialog from './ExportInterviewDialog';
+import ImportConcernDialog from './ImportConcernDialog';
 import {
   LEVEL_LOG_SOURCE_LABELS,
   levelLogText,
@@ -133,6 +135,10 @@ export default function MentalMobile() {
   const [deletingRecordId, setDeletingRecordId] = useState<string | null>(null);
   /** 记录单模板管理面板（管理员/心理主负责） */
   const [tplSheetOpen, setTplSheetOpen] = useState(false);
+  /** 批量导入关注学生（管理员/心理主负责） */
+  const [importOpen, setImportOpen] = useState(false);
+  /** 批量导出访谈记录（管理员/心理主负责） */
+  const [exportOpen, setExportOpen] = useState(false);
 
   const [toast, setToast] = useState('');
   const showToast = (msg: string) => {
@@ -555,6 +561,14 @@ export default function MentalMobile() {
             <MIcon name="file" size={16} />
             访谈记录单模板
           </button>
+          <button type="button" className="m-btn m-btn-ghost m-btn-block" onClick={() => setImportOpen(true)}>
+            <MIcon name="upload" size={16} />
+            批量导入关注学生
+          </button>
+          <button type="button" className="m-btn m-btn-ghost m-btn-block" onClick={() => setExportOpen(true)}>
+            <MIcon name="download" size={16} />
+            导出访谈记录
+          </button>
           <button type="button" className="m-btn m-btn-ghost m-btn-block" onClick={openCreate}>
             <MIcon name="plus" size={16} />
             新增关注
@@ -879,6 +893,19 @@ export default function MentalMobile() {
         onSaved={(t) => showToast(`已保存模板「${t.name}」（v${t.version}）`)}
         onDeleted={(t) => showToast(`已删除模板「${t.name}」`)}
       />
+
+      {/* 批量导入关注学生（管理员/心理主负责） */}
+      <ImportConcernDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImported={() => {
+          void reloadAll(level, classId, kw);
+          reloadOverview();
+        }}
+      />
+
+      {/* 批量导出访谈记录（管理员/心理主负责） */}
+      <ExportInterviewDialog open={exportOpen} onClose={() => setExportOpen(false)} />
 
       {toast && <div className="m-toast success">{toast}</div>}
     </>

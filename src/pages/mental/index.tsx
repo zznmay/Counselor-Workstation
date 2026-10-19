@@ -1,4 +1,4 @@
-import { ExportOutlined, FileTextOutlined, HeartOutlined, PlusOutlined, RedoOutlined, SearchOutlined } from '@ant-design/icons';
+import { DownloadOutlined, ExportOutlined, FileTextOutlined, HeartOutlined, PlusOutlined, RedoOutlined, SearchOutlined, UploadOutlined } from '@ant-design/icons';
 import {
   Alert,
   App,
@@ -57,6 +57,8 @@ import { useList } from '@/hooks/useList';
 import { canAccessModule, canStartTalkRecord, getStoredUser, isModuleOwner, isSystemAdmin, subscribeSession } from '@/lib/auth';
 import InterviewFormModal, { type InterviewStudentRef } from './interview/InterviewFormModal';
 import TemplateManageModal from './interview/TemplateManageModal';
+import ExportInterviewDialog from './ExportInterviewDialog';
+import ImportConcernDialog from './ImportConcernDialog';
 import {
   LEVEL_LOG_SOURCE_COLORS,
   LEVEL_LOG_SOURCE_LABELS,
@@ -156,6 +158,10 @@ function MentalHealthDesktop() {
   const [deletingRecordId, setDeletingRecordId] = useState<string | null>(null);
   /** 记录单模板管理弹窗（管理员/心理主负责） */
   const [tplModalOpen, setTplModalOpen] = useState(false);
+  /** 批量导入关注学生（管理员/心理主负责） */
+  const [importOpen, setImportOpen] = useState(false);
+  /** 批量导出访谈记录（管理员/心理主负责） */
+  const [exportOpen, setExportOpen] = useState(false);
 
   const reloadSummary = () => {
     getMentalSummary().then(setSummary).catch(() => undefined);
@@ -476,6 +482,16 @@ function MentalHealthDesktop() {
             {canMentalWrite && (
               <Button icon={<FileTextOutlined />} onClick={() => setTplModalOpen(true)}>
                 记录单模板
+              </Button>
+            )}
+            {canMentalWrite && (
+              <Button icon={<UploadOutlined />} onClick={() => setImportOpen(true)}>
+                批量导入
+              </Button>
+            )}
+            {canMentalWrite && (
+              <Button icon={<DownloadOutlined />} onClick={() => setExportOpen(true)}>
+                导出访谈记录
               </Button>
             )}
             {canMentalWrite && (
@@ -883,6 +899,20 @@ function MentalHealthDesktop() {
 
       {/* 心理访谈记录单模板（管理员/心理主负责） */}
       <TemplateManageModal open={tplModalOpen} onClose={() => setTplModalOpen(false)} />
+
+      {/* 批量导入关注学生（管理员/心理主负责） */}
+      <ImportConcernDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImported={() => {
+          reloadSummary();
+          refresh();
+          reloadOverview();
+        }}
+      />
+
+      {/* 批量导出访谈记录（管理员/心理主负责） */}
+      <ExportInterviewDialog open={exportOpen} onClose={() => setExportOpen(false)} />
     </div>
   );
 }
