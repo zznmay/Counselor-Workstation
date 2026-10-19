@@ -1,11 +1,11 @@
-/** 首页工作台聚合统计（学生数为全校在读；谈话/预警/审批按带班口径） */
+/** 首页工作台聚合统计（学生数为名册口径：管理员/辅导员全校，其他用户所带班级；谈话/预警/审批按带班口径） */
 const express = require('express');
 const dayjs = require('dayjs');
 
 const dbx = require('../lib/db');
 const auth = require('../lib/auth');
 const { requirePermission } = require('../lib/permissions');
-const { sensitiveScope } = require('../lib/scope');
+const { sensitiveScope, rosterScope } = require('../lib/scope');
 
 const router = express.Router();
 router.use(auth.authMiddleware);
@@ -16,9 +16,11 @@ router.get('/', (req, res) => {
   const monthStr = dayjs().format('YYYY-MM');
 
   const wScope = sensitiveScope(req.user, 'x');
-
+  // 在读学生数与名册同口径：管理员/辅导员全校，其他用户仅所带班级（rosterScope 需表别名）
+  const rScope = rosterScope(req.user, 's');
   const studentCount = dbx.get(
-    "SELECT COUNT(*) AS c FROM students WHERE status = '在读'",
+    `SELECT COUNT(*) AS c FROM students s WHERE s.status = '在读'${rScope ? ` AND ${rScope.sql}` : ''}`,
+    rScope ? rScope.params : [],
   ).c;
 
   const monthTalkCount = dbx.get(

@@ -16,13 +16,14 @@ const { hasPermission, isSystemAdmin, isModuleOwner } = require('./permissions')
 const { canManageStudent, classIdsOfUser } = require('./scope');
 const { currentSemester, previousSemester, semesterOf, todayCN, inSemester, parseYmd } = require('./semester');
 const {
+  LEVELS,
   formModelFromGroups,
   resolveFormModel,
   validateAnswers,
 } = require('./interviewTemplate');
 
-/** 访谈后评估：含「无需关注」，与关注列表 5 档 ATTENTION_LEVELS 对齐 */
-const INTERVIEW_LEVELS = ['无需关注', '一般关注', '日常关注', '重点关注', '密切关注'];
+/** 访谈后评估：与关注等级 5 档同源（含「无需关注」留档档位） */
+const INTERVIEW_LEVELS = LEVELS;
 const REQUIRED_COUNT = 2;
 const FORM_VERSION = 2;
 const SEMESTER_RE = /^\d{4}-\d{4}-[12]$/;
@@ -213,7 +214,8 @@ function getInterviewView(user, studentId, semesterKeyRaw) {
   const mh = dbx.get('SELECT level FROM mentalHealth WHERE studentId = ?', [studentId]);
   const done = countDone(studentId, semesterKey);
   const list = listRecords(studentId, semesterKey);
-  const form = resolveFormModel(student.grade);
+  /** 该生当前生效的记录单模板（按年级 + 当前关注等级解析；前端渲染表单与历史问答兜底用） */
+  const form = resolveFormModel(student.grade, mh?.level ?? null);
   return {
     student,
     semester,
@@ -240,19 +242,14 @@ function createInterview(user, body) {
   if (!studentId) throw fail('缺少学生');
   const student = dbx.get('SELECT id, name, studentNo, className, grade FROM students WHERE id = ?', [studentId]);
   if (!student) throw fail('学生不存在', 404);
+  const mhBefore = dbx.get('SELECT level FROM mentalHealth WHERE studentId = ?', [studentId]);
 
-  // 按学生年级解析生效记录单模板（写入时快照，后续改题不影响本条记录）
-  const model = resolveFormModel(student.grade);
-  const values = validatePayload(body, { model });
-
-  const { semester } = values;
-
+  // 幂等优先于一切校验：重复提交（网络重试/双击）时学生状态可能已变化
+  // （如等级已联动为「无需关注」导致模版解析转向），先按提交标识返回既有记录
   const clientRequestId = String(body?.clientRequestId ?? '').trim();
   if (!/^[A-Za-z0-9_-]{8,64}$/.test(clientRequestId)) {
     throw fail('提交标识无效，请刷新后重试');
   }
-
-  // 幂等：同一提交标识直接返回已有记录
   const existed = dbx.get('SELECT * FROM mentalInterviews WHERE clientRequestId = ?', [clientRequestId]);
   if (existed) {
     return {
@@ -264,7 +261,12 @@ function createInterview(user, body) {
     };
   }
 
-  const mhBefore = dbx.get('SELECT level FROM mentalHealth WHERE studentId = ?', [studentId]);
+  // 按学生年级 + 当前关注等级解析生效记录单模板（写入时快照，后续改题不影响本条记录）
+  const model = resolveFormModel(student.grade, mhBefore?.level ?? null);
+  const values = validatePayload(body, { model });
+
+  const { semester } = values;
+
   const doneBefore = countDone(studentId, semester.key);
   if (!canInterviewStudent(user, studentId, mhBefore?.level ?? null, doneBefore)) {
     throw fail('当前无权为该学生填写心理访谈（仅限所带班级的「一般关注」学生）', 403);
@@ -359,7 +361,8 @@ function updateInterview(user, id, body) {
     model = formModelFromGroups(snapshotGroups);
   } else {
     const student = dbx.get('SELECT grade FROM students WHERE id = ?', [record.studentId]);
-    model = resolveFormModel(student?.grade);
+    const mh = dbx.get('SELECT level FROM mentalHealth WHERE studentId = ?', [record.studentId]);
+    model = resolveFormModel(student?.grade, mh?.level ?? null);
   }
 
   const values = validatePayload(body, { model, semesterKey: record.semesterKey });

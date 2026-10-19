@@ -1,6 +1,6 @@
 /**
  * PC 端「心理访谈记录单模板」管理弹窗：
- * 左侧模板列表（适用年级 / 版本 / 引用数），右侧编辑器（名称 + 适用年级 + 分组题目）。
+ * 左侧模板列表（适用年级/等级 / 版本 / 引用数），右侧编辑器（名称 + 适用年级 + 适用关注等级 + 分组题目）。
  * 入口在心理健康页页头（仅管理员或心理健康主负责可见）。
  */
 import {
@@ -15,9 +15,10 @@ import {
   Select,
   Space,
   Tag,
+  Tooltip,
   Typography,
 } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import { CopyOutlined, PlusOutlined } from '@ant-design/icons';
 
 import type { InterviewTemplate } from '@/types';
 import { useTemplateEditor } from './templateShared';
@@ -33,6 +34,16 @@ function GradesTag({ grades }: { grades: string[] }) {
   return (
     <Space size={4} wrap>
       {grades.map((g) => <Tag key={g} color="blue" style={{ marginInlineEnd: 0 }}>{g}</Tag>)}
+    </Space>
+  );
+}
+
+/** 适用关注等级展示：空 = 不限等级 */
+function LevelsTag({ levels }: { levels: string[] }) {
+  if (levels.length === 0) return <Tag style={{ marginInlineEnd: 0 }}>不限等级</Tag>;
+  return (
+    <Space size={4} wrap>
+      {levels.map((l) => <Tag key={l} color="purple" style={{ marginInlineEnd: 0 }}>{l}</Tag>)}
     </Space>
   );
 }
@@ -86,7 +97,7 @@ export default function TemplateManageModal({ open, onClose }: TemplateManageMod
         type="info"
         showIcon
         style={{ marginBottom: 12 }}
-        message="记录单模板决定访谈表单的题目。适用年级不选 = 全部年级通用；同一年级命中多个模板时，按最近编辑的生效。历史记录按填写时的题目快照展示，改题不影响已填记录。"
+        message="记录单模板决定访谈表单的题目。适用年级不选 = 全部年级通用，适用关注等级不选 = 不限等级；年级与等级都命中的模板优先，同分按最近编辑的生效。历史记录按填写时的题目快照展示，改题不影响已填记录。"
       />
 
       <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
@@ -109,28 +120,60 @@ export default function TemplateManageModal({ open, onClose }: TemplateManageMod
             {ed.templates.map((t) => {
               const active = ed.draft?.id === t.id;
               return (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => ed.startEdit(t)}
-                  style={{
-                    textAlign: 'left',
-                    border: `1px solid ${active ? '#5F86FF' : '#e5e9f2'}`,
-                    background: active ? 'rgba(95, 134, 255, 0.06)' : '#fff',
-                    borderRadius: 10,
-                    padding: '8px 10px',
-                    cursor: 'pointer',
-                  }}
-                >
-                  <div style={{ fontWeight: 600, fontSize: 13 }}>{t.name}</div>
-                  <div style={{ marginTop: 4 }}>
-                    <GradesTag grades={t.grades} />
-                  </div>
-                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                    v{t.version} · {t.usageCount} 条记录引用 · {t.updatedAt?.slice(0, 10) ?? ''}
-                    {t.updatedBy ? ` · ${t.updatedBy}` : ''}
-                  </Typography.Text>
-                </button>
+                <div key={t.id} style={{ position: 'relative' }}>
+                  <button
+                    type="button"
+                    onClick={() => ed.startEdit(t)}
+                    style={{
+                      width: '100%',
+                      textAlign: 'left',
+                      border: `1px solid ${active ? '#5F86FF' : '#e5e9f2'}`,
+                      background: active ? 'rgba(95, 134, 255, 0.06)' : '#fff',
+                      borderRadius: 10,
+                      padding: '8px 10px',
+                      paddingRight: 34,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <div style={{ fontWeight: 600, fontSize: 13 }}>{t.name}</div>
+                    <div style={{ marginTop: 4, display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+                      <GradesTag grades={t.grades} />
+                      <LevelsTag levels={t.levels ?? []} />
+                    </div>
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                      v{t.version} · {t.usageCount} 条记录引用 · {t.updatedAt?.slice(0, 10) ?? ''}
+                      {t.updatedBy ? ` · ${t.updatedBy}` : ''}
+                    </Typography.Text>
+                  </button>
+                  {/* 复制：以该模板为蓝本新建草稿（独立兄弟按钮，避免按钮嵌套） */}
+                  <Tooltip title="复制为新模板">
+                    <button
+                      type="button"
+                      aria-label={`复制模板「${t.name}」`}
+                      onClick={() => ed.startDuplicate(t)}
+                      disabled={ed.saving}
+                      style={{
+                        position: 'absolute',
+                        top: 6,
+                        right: 6,
+                        width: 24,
+                        height: 24,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        border: 'none',
+                        borderRadius: 6,
+                        background: 'transparent',
+                        color: '#8a94a6',
+                        cursor: ed.saving ? 'not-allowed' : 'pointer',
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(95, 134, 255, 0.12)'; e.currentTarget.style.color = '#4568D8'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#8a94a6'; }}
+                    >
+                      <CopyOutlined style={{ fontSize: 13 }} />
+                    </button>
+                  </Tooltip>
+                </div>
               );
             })}
           </div>
@@ -166,6 +209,20 @@ export default function TemplateManageModal({ open, onClose }: TemplateManageMod
                     onChange={(grades) => ed.patchDraft({ grades })}
                     options={ed.gradeOptions.map((g) => ({ value: g, label: g }))}
                     optionFilterProp="label"
+                  />
+                </div>
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <Typography.Text strong>适用关注等级</Typography.Text>
+                <div style={{ marginTop: 4 }}>
+                  <Select
+                    mode="multiple"
+                    style={{ width: '100%' }}
+                    placeholder="不选 = 不限关注等级"
+                    value={ed.draft.levels}
+                    onChange={(levels) => ed.patchDraft({ levels })}
+                    options={ed.levelOptions.map((l) => ({ value: l, label: l }))}
                   />
                 </div>
               </div>

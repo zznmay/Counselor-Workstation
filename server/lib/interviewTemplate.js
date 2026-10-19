@@ -3,19 +3,24 @@
  *
  * 职责：
  * - 模板增删改查（写权限由路由层判定：管理员或心理健康主负责）；
- * - 按学生年级解析生效模板（年级精确匹配优先，其次「全部年级」模板，再按最近编辑）；
+ * - 按学生年级 + 当前关注等级解析生效模板（年级/等级精确匹配优先，其次「不限」模板，
+ *   同分取最近编辑；无任何兼容模板时回退内置默认记录单）；
  * - 访谈 answers 的动态白名单校验（题目以模板为准，取代旧硬编码题单）。
  *
  * 解析规则（resolveFormModel）：
- *   1. 适用年级包含学生年级的模板中取最近编辑的一个；
- *   2. 否则取「全部年级适用（grades 为空）」中最近编辑的一个；
- *   3. 库内无启用模板时回退内置默认记录单（lib/interviewFormDefault.js）。
+ *   1. 「适用年级包含学生年级」且「适用关注等级包含当前等级（或不限）」的模板中，
+ *      按匹配精度（精确 2 分 / 不限 1 分）与最近编辑取一个；
+ *   2. 库内无启用模板、或所有模板的范围均不含该生时，回退内置默认记录单。
  * 访谈记录落库时携带 templateId/templateVersion/formSnapshot，
  * 模板后续改题不影响历史记录的问答渲染与再编辑校验。
  */
 const dbx = require('./db');
 const { nowStr } = require('./audit');
 const { DEFAULT_TEMPLATE_ID, DEFAULT_TEMPLATE_NAME, DEFAULT_FORM_GROUPS } = require('./interviewFormDefault');
+
+/** 关注等级（展示顺序即紧急程度从高到低；末位「无需关注」为留档档位，不安排访谈）。
+ *  单一事实源：routes/mental.js 与访谈评估选项均引用此处。 */
+const LEVELS = ['密切关注', '重点关注', '日常关注', '一般关注', '无需关注'];
 
 const MAX_GROUPS = 20;
 const MAX_QUESTIONS_PER_GROUP = 30;
@@ -38,6 +43,11 @@ function parseJsonArray(raw) {
 
 function gradesOf(row) {
   return parseJsonArray(row?.grades).filter((g) => typeof g === 'string' && g.trim());
+}
+
+/** 适用关注等级（空数组 = 不限等级） */
+function levelsOf(row) {
+  return parseJsonArray(row?.levels).filter((l) => typeof l === 'string' && l.trim());
 }
 
 function groupsOf(row) {
@@ -82,6 +92,7 @@ function templateView(row) {
     id: row.id,
     name: row.name,
     grades: gradesOf(row),
+    levels: levelsOf(row),
     groups: normalizeGroups(groupsOf(row)),
     enabled: !!row.enabled,
     version: row.version ?? 1,
@@ -99,6 +110,7 @@ function formModel(row) {
     id: row?.id ?? null,
     name: row?.name ?? DEFAULT_TEMPLATE_NAME,
     grades: gradesOf(row),
+    levels: levelsOf(row),
     groups: normalizeGroups(groupsOf(row)),
     version: row?.version ?? 1,
   };
@@ -110,6 +122,7 @@ function defaultFormModel() {
     id: null,
     name: DEFAULT_TEMPLATE_NAME,
     grades: [],
+    levels: [],
     groups: normalizeGroups(DEFAULT_FORM_GROUPS),
     version: 1,
   };
@@ -121,14 +134,16 @@ function formModelFromGroups(groups) {
     id: null,
     name: DEFAULT_TEMPLATE_NAME,
     grades: [],
+    levels: [],
     groups: normalizeGroups(groups ?? []),
     version: 1,
   };
 }
 
 /**
- * 校验模板入参并规整；返回 { name, grades, groups }。
- * grades 空数组 = 全部年级适用；传入的年级必须存在于年级字典。
+ * 校验模板入参并规整；返回 { name, grades, levels, groups }。
+ * grades 空数组 = 全部年级适用（传入年级必须存在于年级字典）；
+ * levels 空数组 = 不限关注等级（传入等级必须是合法档位）。
  */
 function validateInput(body) {
   const name = String(body?.name ?? '').trim();
@@ -142,6 +157,13 @@ function validateInput(body) {
     const known = new Set(dbx.all('SELECT name FROM grades').map((r) => r.name));
     const unknown = grades.filter((g) => !known.has(g));
     if (unknown.length > 0) throw fail(`年级不存在：${unknown.join('、')}`);
+  }
+
+  const levels = Array.isArray(body?.levels)
+    ? [...new Set(body.levels.map((l) => String(l ?? '').trim()).filter(Boolean))]
+    : [];
+  if (levels.some((l) => !LEVELS.includes(l))) {
+    throw fail(`适用关注等级需为：${LEVELS.join('、')}`);
   }
 
   const rawGroups = Array.isArray(body?.groups) ? body.groups : [];
@@ -178,7 +200,7 @@ function validateInput(body) {
     return { title, questions: qs };
   });
 
-  return { name, grades, groups };
+  return { name, grades, levels, groups };
 }
 
 /** 按模型校验 answers（逐题必填 + 字数上限；白名单外 key 直接忽略） */
@@ -208,29 +230,48 @@ function getTemplate(id) {
   return templateView(row);
 }
 
-/** 按年级解析生效表单模型（见文件头规则） */
-function resolveFormModel(grade) {
+/**
+ * 按学生年级 + 当前关注等级解析生效表单模型（见文件头规则）。
+ * 匹配打分：年级/等级「明确命中」各 2 分、「不限」各 1 分、明确不含该生则排除；
+ * 同分取最近更新的模板。无任何兼容模板时回退内置默认记录单
+ * （默认种子模板年级/等级均不限，正常情况下恒有兜底）。
+ */
+function resolveFormModel(grade, level) {
   const rows = dbx.all(
     'SELECT * FROM mentalInterviewTemplates WHERE enabled = 1 ORDER BY updatedAt DESC, version DESC, id',
   );
   if (rows.length === 0) return defaultFormModel();
   const g = String(grade ?? '').trim();
-  const specific = g ? rows.filter((r) => gradesOf(r).includes(g)) : [];
-  const general = rows.filter((r) => gradesOf(r).length === 0);
-  return formModel(specific[0] ?? general[0] ?? rows[0]);
+  const lv = String(level ?? '').trim();
+  let best = null;
+  let bestScore = 0;
+  for (const row of rows) {
+    const grades = gradesOf(row);
+    const levels = levelsOf(row);
+    const gradeScore = grades.length === 0 ? 1 : (g && grades.includes(g) ? 2 : 0);
+    if (gradeScore === 0) continue;
+    const levelScore = levels.length === 0 ? 1 : (lv && levels.includes(lv) ? 2 : 0);
+    if (levelScore === 0) continue;
+    const score = gradeScore + levelScore;
+    if (score > bestScore) {
+      bestScore = score;
+      best = row;
+    }
+  }
+  return best ? formModel(best) : defaultFormModel();
 }
 
 /* ---------- 写操作（权限由路由层判定） ---------- */
 
 function createTemplate(user, body) {
-  const { name, grades, groups } = validateInput(body);
+  const { name, grades, levels, groups } = validateInput(body);
   const id = `tpl_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
   const now = nowStr();
   dbx.run(
     `INSERT INTO mentalInterviewTemplates
-       (id, name, grades, groups, enabled, version, createdBy, updatedBy, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, 1, 1, ?, ?, ?, ?)`,
-    [id, name, JSON.stringify(grades), JSON.stringify(groups), user?.displayName ?? '', user?.displayName ?? '', now, now],
+       (id, name, grades, levels, groups, enabled, version, createdBy, updatedBy, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, 1, 1, ?, ?, ?, ?)`,
+    [id, name, JSON.stringify(grades), JSON.stringify(levels), JSON.stringify(groups), user?.displayName ?? '', user?.displayName ?? '', now, now],
   );
   return templateView(dbx.get('SELECT * FROM mentalInterviewTemplates WHERE id = ?', [id]));
 }
@@ -242,17 +283,19 @@ function updateTemplate(user, id, body) {
 
   const changed = row.name !== next.name
     || JSON.stringify(gradesOf(row)) !== JSON.stringify(next.grades)
+    || JSON.stringify(levelsOf(row)) !== JSON.stringify(next.levels)
     || JSON.stringify(groupsOf(row)) !== JSON.stringify(next.groups);
   const version = changed ? (row.version ?? 1) + 1 : (row.version ?? 1);
   const enabled = body?.enabled === undefined ? !!row.enabled : !!body.enabled;
 
   dbx.run(
     `UPDATE mentalInterviewTemplates
-       SET name = ?, grades = ?, groups = ?, enabled = ?, version = ?, updatedBy = ?, updatedAt = ?
+       SET name = ?, grades = ?, levels = ?, groups = ?, enabled = ?, version = ?, updatedBy = ?, updatedAt = ?
      WHERE id = ?`,
     [
       next.name,
       JSON.stringify(next.grades),
+      JSON.stringify(next.levels),
       JSON.stringify(next.groups),
       enabled ? 1 : 0,
       version,
@@ -275,6 +318,7 @@ function deleteTemplate(id) {
 }
 
 module.exports = {
+  LEVELS,
   DEFAULT_TEMPLATE_ID,
   DEFAULT_TEMPLATE_NAME,
   MAX_GROUPS,
@@ -282,6 +326,7 @@ module.exports = {
   genKey,
   normalizeGroups,
   gradesOf,
+  levelsOf,
   groupsOf,
   templateView,
   formModel,

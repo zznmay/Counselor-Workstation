@@ -150,6 +150,7 @@ export const DEFAULT_INTERVIEW_FORM: InterviewFormModel = {
   id: null,
   name: '内置默认记录单',
   grades: [],
+  levels: [],
   groups: INTERVIEW_QUESTION_GROUPS,
   version: 1,
 };

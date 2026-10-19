@@ -34,6 +34,7 @@ Thumbs.db
 .mimosa/
 .zcode/
 .workbuddy/
+.workbuddy-ai/
 
 # ===== WorkBuddy 应用发布标记（本地生成，与源码无关）=====
 .wbapp_*.genie

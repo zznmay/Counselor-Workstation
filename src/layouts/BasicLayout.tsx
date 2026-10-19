@@ -153,6 +153,32 @@ export default function BasicLayout() {
     return () => { alive = false; };
   }, [location.pathname]);
 
+  /**
+   * 窗口回到前台时同步会话（5s 节流）：管理员调整角色后，
+   * 用户无需切换路由或重新登录，回到窗口即按当前角色重算权限与可见范围。
+   */
+  useEffect(() => {
+    let lastSyncAt = 0;
+    const sync = () => {
+      const now = Date.now();
+      if (now - lastSyncAt < 5000) return;
+      lastSyncAt = now;
+      getMe()
+        .then((user) => {
+          setStoredUser(user);
+          setAuthUser(user);
+        })
+        .catch(() => undefined);
+    };
+    const onVisible = () => { if (document.visibilityState === 'visible') sync(); };
+    window.addEventListener('focus', sync);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('focus', sync);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
+
   /** 权限被收回时立即离开当前模块，避免停留在无权限页面继续发请求 */
   useEffect(() => {
     if (!authUser) return;

@@ -21,6 +21,11 @@ function gradesText(grades: string[]): string {
   return grades.length > 0 ? grades.join('、') : '全部年级';
 }
 
+/** 适用关注等级展示：空 = 不限等级 */
+function levelsText(levels: string[]): string {
+  return levels.length > 0 ? levels.join('、') : '不限等级';
+}
+
 export default function TemplateManageSheet({ open, onClose, onSaved, onDeleted }: TemplateManageSheetProps) {
   const ed = useTemplateEditor({ onSaved, onDeleted });
 
@@ -52,7 +57,7 @@ export default function TemplateManageSheet({ open, onClose, onSaved, onDeleted 
     >
       <div className="m-notice-card m-card" data-tone="info" style={{ padding: '8px 12px' }}>
         <div className="m-t4" style={{ lineHeight: 1.7 }}>
-          模板决定访谈表单题目；适用年级不选 = 全部年级通用，同一年级多个模板按最近编辑生效；改题不影响已填记录。
+          模板决定访谈表单题目；适用年级不选 = 全部年级通用，适用关注等级不选 = 不限等级；年级与等级都命中优先、同分按最近编辑生效；改题不影响已填记录。
         </div>
       </div>
 
@@ -71,6 +76,7 @@ export default function TemplateManageSheet({ open, onClose, onSaved, onDeleted 
             t={t}
             active={ed.draft?.id === t.id}
             onEdit={() => ed.startEdit(t)}
+            onDuplicate={() => ed.startDuplicate(t)}
             onDelete={() => void ed.remove(t.id)}
           />
         ))}
@@ -107,6 +113,23 @@ export default function TemplateManageSheet({ open, onClose, onSaved, onDeleted 
                   onClick={() => ed.toggleGrade(g)}
                 >
                   {g}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="m-field">
+            <label>适用关注等级（不选 = 不限等级）</label>
+            <div className="m-seg" style={{ flexWrap: 'wrap' }}>
+              {ed.levelOptions.map((l) => (
+                <button
+                  key={l}
+                  type="button"
+                  className={`m-seg-btn${ed.draft!.levels.includes(l) ? ' on' : ''}`}
+                  style={{ flex: '0 0 auto', whiteSpace: 'nowrap', paddingInline: 12 }}
+                  onClick={() => ed.toggleLevel(l)}
+                >
+                  {l}
                 </button>
               ))}
             </div>
@@ -250,11 +273,13 @@ function TemplateRow({
   t,
   active,
   onEdit,
+  onDuplicate,
   onDelete,
 }: {
   t: InterviewTemplate;
   active: boolean;
   onEdit: () => void;
+  onDuplicate: () => void;
   onDelete: () => void;
 }) {
   return (
@@ -267,6 +292,7 @@ function TemplateRow({
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
           <span className="m-t2" style={{ fontWeight: 600 }}>{t.name}</span>
           <span className="m-tag info">{gradesText(t.grades)}</span>
+          <span className="m-tag neutral">{levelsText(t.levels ?? [])}</span>
           <span className="m-t4">v{t.version}</span>
         </div>
         <div className="m-t4" style={{ marginTop: 2 }}>
@@ -277,6 +303,10 @@ function TemplateRow({
         <button type="button" className="m-btn m-btn-soft" style={{ flex: 1, minHeight: 30 }} onClick={onEdit}>
           <MIcon name="edit" size={14} />
           编辑
+        </button>
+        <button type="button" className="m-btn m-btn-soft" style={{ flex: 1, minHeight: 30 }} onClick={onDuplicate}>
+          <MIcon name="copy" size={14} />
+          复制
         </button>
         <button
           type="button"

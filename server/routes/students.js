@@ -1,9 +1,13 @@
-/** 学生名册：列表/筛选/分页、增删改查、批量导入（查看全员放开；编辑/删除限带班辅导员或管理员） */
+/**
+ * 学生名册：列表/筛选/分页、增删改查、批量导入。
+ * 查看范围按角色收口（lib/scope.js rosterScope）：管理员或含辅导员角色全员可见，
+ * 其他角色仅见所带班级学生（多角色按最大范围合并）；编辑/删除限带班辅导员或管理员。
+ */
 const express = require('express');
 
 const dbx = require('../lib/db');
 const auth = require('../lib/auth');
-const { canManageStudent } = require('../lib/scope');
+const { canManageStudent, isAdmin, rosterScope } = require('../lib/scope');
 const { requirePermission } = require('../lib/permissions');
 const { logAccess, nowStr } = require('../lib/audit');
 
@@ -82,34 +86,53 @@ function buildStudentFilter(query) {
   return { where: conds.join(' AND '), params };
 }
 
-/** 列表：关键字 + 年级/班级/专业/学籍状态筛选 + 分页（基础信息全员可见，不再按带班过滤） */
+/** 列表：关键字 + 年级/班级/专业/学籍状态筛选 + 分页（管理员/辅导员全员可见，其他角色仅所带班级） */
 router.get('/', (req, res) => {
   const page = Math.max(1, parseInt(req.query.page) || 1);
   const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize) || 10));
   const { where, params } = buildStudentFilter(req.query);
+  const scope = rosterScope(req.user);
+  const conds = [where];
+  if (scope) {
+    conds.push(scope.sql);
+    params.push(...scope.params);
+  }
+  const finalWhere = conds.join(' AND ');
   const total = dbx.get(
-    `SELECT COUNT(*) AS c FROM students s WHERE ${where}`,
+    `SELECT COUNT(*) AS c FROM students s WHERE ${finalWhere}`,
     params,
   ).c;
   const rows = dbx.all(
-    `SELECT s.* FROM students s WHERE ${where} ORDER BY s.studentNo DESC LIMIT ? OFFSET ?`,
+    `SELECT s.* FROM students s WHERE ${finalWhere} ORDER BY s.studentNo DESC LIMIT ? OFFSET ?`,
     [...params, pageSize, (page - 1) * pageSize],
   );
   res.json({ list: rows, total, page, pageSize });
 });
 
-/** 表单下拉：在读学生精简列表（全量；带班班级字段供前端按权限过滤） */
+/**
+ * 表单下拉：在读学生精简列表（可见范围内）。
+ * 与列表同口径：无辅导员/管理员角色的用户仅返回所带班级学生，避免下拉框泄露其他班级的学生姓名/学号。
+ */
 router.get('/options', (req, res) => {
+  const scope = rosterScope(req.user);
   const rows = dbx.all(
     `SELECT s.id, s.name, s.studentNo, s.className, s.classId FROM students s
-     WHERE s.status = '在读' ORDER BY s.studentNo`,
+     WHERE s.status = '在读'${scope ? ` AND ${scope.sql}` : ''} ORDER BY s.studentNo`,
+    scope ? scope.params : [],
   );
   res.json(rows);
 });
 
-/** 导入查重用：全部学号（学号全局唯一） */
+/**
+ * 导入查重用：可见范围内学号（学号全局唯一，导入接口仍做全局查重兜底，
+ * 故收口到可见范围不会放过重复学号，只影响前端预检提示的覆盖度）。
+ */
 router.get('/nos', (req, res) => {
-  const rows = dbx.all('SELECT s.studentNo FROM students s');
+  const scope = rosterScope(req.user);
+  const rows = dbx.all(
+    `SELECT s.studentNo FROM students s${scope ? ` WHERE ${scope.sql}` : ''}`,
+    scope ? scope.params : [],
+  );
   res.json(rows.map((r) => r.studentNo));
 });
 
@@ -133,6 +156,15 @@ router.get('/briefs', auth.adminOnly, (req, res) => {
 router.get('/:id', (req, res) => {
   const row = dbx.get('SELECT s.* FROM students s WHERE s.id = ?', [req.params.id]);
   if (!row) return res.status(404).json({ message: '学生不存在' });
+  // 与列表同口径：收口用户仅可查看其所带班级的学生（防绕过列表直达详情）
+  const scope = rosterScope(req.user);
+  if (scope) {
+    const inScope = dbx.get(
+      `SELECT 1 FROM students s WHERE s.id = ? AND ${scope.sql}`,
+      [req.params.id, ...scope.params],
+    );
+    if (!inScope) return res.status(403).json({ message: '仅可查看其所带班级的学生' });
+  }
   res.json({ ...row, coManagerIds: coManagersOf(req.params.id).map((u) => u.id), coManagers: coManagersOf(req.params.id) });
 });
 

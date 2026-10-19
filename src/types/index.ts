@@ -399,13 +399,15 @@ export interface InterviewTemplateGroup {
   questions: InterviewTemplateQuestion[];
 }
 
-/** 生效表单模型（前端渲染记录单用；服务端按学生年级解析） */
+/** 生效表单模型（前端渲染记录单用；服务端按学生年级 + 当前关注等级解析） */
 export interface InterviewFormModel {
-  /** 模板 ID；null = 内置默认记录单（库内无启用模板时兜底） */
+  /** 模板 ID；null = 内置默认记录单（库内无兼容模板时兜底） */
   id: string | null;
   name: string;
   /** 适用年级名；空数组 = 全部年级适用 */
   grades: string[];
+  /** 适用关注等级；空数组 = 不限等级 */
+  levels: string[];
   groups: InterviewTemplateGroup[];
   /** 模板版本（每保存一次内容变更 +1） */
   version: number;
@@ -428,6 +430,8 @@ export interface InterviewTemplate extends InterviewFormModel {
 export interface InterviewTemplateInput {
   name: string;
   grades: string[];
+  /** 适用关注等级；空数组 = 不限等级 */
+  levels: string[];
   groups: InterviewTemplateGroup[];
   enabled?: boolean;
 }

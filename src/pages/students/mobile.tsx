@@ -6,7 +6,7 @@ import { getWarnings } from '@/api/warning';
 import { getGradeOptions } from '@/api/classes';
 import FilterSheet from '@/components/mobile/FilterSheet';
 import { MIcon } from '@/components/mobile/icons';
-import { canManageStudentFront, getStoredUser } from '@/lib/auth';
+import { canManageStudentFront, canViewAllStudents, getStoredUser, subscribeSession } from '@/lib/auth';
 import { MAJORS, STUDENT_STATUSES } from '@/constants';
 import type { Student, StudentQuery, StudentStatus, WarningLevel } from '@/types';
 
@@ -34,7 +34,8 @@ function maskPhone(phone: string): string {
  */
 export default function StudentsMobile() {
   const navigate = useNavigate();
-  const authUser = getStoredUser();
+  /** 角色/权限变更后实时重算卡片操作按钮（布局层 /auth/me 刷新时广播） */
+  const [authUser, setAuthUser] = useState(getStoredUser);
 
   const [list, setList] = useState<Student[]>([]);
   const [total, setTotal] = useState(0);
@@ -94,6 +95,12 @@ export default function StudentsMobile() {
     [],
   );
 
+  /* 角色/权限/带班范围变更后：同步角色快照并重新拉取第 1 页（服务端按当前角色实时收口，避免旧数据滞留） */
+  useEffect(() => subscribeSession((user) => {
+    setAuthUser(user);
+    void fetchPage(1, { keyword, filters });
+  }), [fetchPage, keyword, filters]);
+
   /* 关键词防抖 300ms；筛选变化立即回到第 1 页 */
   const firstRun = useRef(true);
   useEffect(() => {
@@ -148,7 +155,10 @@ export default function StudentsMobile() {
       </div>
 
       <div className="m-t4" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        共 {total} 名学生{Object.values(filters).some(Boolean) ? '（已筛选）' : ''}
+        <span>
+          共 {total} 名学生{Object.values(filters).some(Boolean) ? '（已筛选）' : ''}
+          {!canViewAllStudents(authUser) && '（仅您所带班级）'}
+        </span>
         <button type="button" className="m-refresh" style={{ marginLeft: 'auto', width: 40, height: 40 }} aria-label="刷新列表" onClick={() => void fetchPage(1, { keyword, filters })}>
           <MIcon name="refresh" size={16} />
         </button>

@@ -31,8 +31,9 @@ const router = express.Router();
 router.use(auth.authMiddleware);
 router.use(requirePermission('mentalHealth'));
 
-/** 关注等级（展示顺序即紧急程度从高到低；末位「无需关注」为留档档位，不安排访谈） */
-const LEVELS = ['密切关注', '重点关注', '日常关注', '一般关注', '无需关注'];
+/** 关注等级（展示顺序即紧急程度从高到低；末位「无需关注」为留档档位，不安排访谈）。
+ *  与模版适用等级、访谈评估选项同源（lib/interviewTemplate.js）。 */
+const LEVELS = tpl.LEVELS;
 
 /** 可见范围条件：管理员或心理健康主负责 1=1（全院）；其他角色 s.classId 必须命中所辖班级（别名固定为 s） */
 function classScopeSql(user) {
@@ -262,7 +263,7 @@ router.post('/interview-templates', (req, res) => {
   }
   try {
     const out = tpl.createTemplate(req.user, req.body ?? {});
-    logAccess(req, `新增访谈记录单模板：${out.name}（适用年级：${out.grades.length ? out.grades.join('、') : '全部'}）`);
+    logAccess(req, `新增访谈记录单模板：${out.name}（适用年级：${out.grades.length ? out.grades.join('、') : '全部'}；适用等级：${out.levels.length ? out.levels.join('、') : '不限'}）`);
     res.json(out);
   } catch (err) {
     sendError(res, err);
@@ -275,7 +276,7 @@ router.put('/interview-templates/:id', (req, res) => {
   }
   try {
     const out = tpl.updateTemplate(req.user, req.params.id, req.body ?? {});
-    logAccess(req, `修改访谈记录单模板：${out.name}（v${out.version}，适用年级：${out.grades.length ? out.grades.join('、') : '全部'}）`);
+    logAccess(req, `修改访谈记录单模板：${out.name}（v${out.version}，适用年级：${out.grades.length ? out.grades.join('、') : '全部'}；适用等级：${out.levels.length ? out.levels.join('、') : '不限'}）`);
     res.json(out);
   } catch (err) {
     sendError(res, err);

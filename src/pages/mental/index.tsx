@@ -54,7 +54,7 @@ import {
 } from '@/constants/mental';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useList } from '@/hooks/useList';
-import { canAccessModule, getStoredUser, isModuleOwner, isSystemAdmin } from '@/lib/auth';
+import { canAccessModule, canStartTalkRecord, getStoredUser, isModuleOwner, isSystemAdmin, subscribeSession } from '@/lib/auth';
 import InterviewFormModal, { type InterviewStudentRef } from './interview/InterviewFormModal';
 import TemplateManageModal from './interview/TemplateManageModal';
 import {
@@ -106,14 +106,19 @@ interface InterviewModalState {
 function MentalHealthDesktop() {
   const isMobile = useIsMobile();
   const { message } = App.useApp();
-  const authUser = getStoredUser();
+  /** 角色/权限变更后实时重算（布局层 /auth/me 刷新时广播），避免沿用挂载时的旧角色快照 */
+  const [authUser, setAuthUser] = useState(getStoredUser);
+  useEffect(() => subscribeSession(setAuthUser), []);
   const isAdmin = isSystemAdmin(authUser);
   /** 心理健康主负责（含管理员）：查看全院 + 全部写操作 */
   const isMentalOwner = isModuleOwner(authUser, 'mentalHealth');
   /** 关注写权限（新增/调整/取消）：严格口径 —— 管理员或心理健康主负责 */
   const canMentalWrite = isAdmin || isMentalOwner;
-  /** 保留原口径：仅「新增谈话」外链按钮继续使用（辅导员权限 + 三类关注学生，不随主负责收紧） */
-  const canWrite = isAdmin || (authUser?.classIds ?? []).length > 0;
+  /**
+   * 「新增谈话」外链显隐：系统管理员或角色列表含辅导员角色（counselor）的用户可见。
+   * 单一班主任、心理健康主负责等其他角色一律隐藏（不看主负责、不看带班数量）。
+   */
+  const canWrite = canStartTalkRecord(authUser);
   /** 心理访谈任务提醒：仅持有访谈权限的角色（班主任/管理员/主负责）拉取 */
   const canInterviewPerm = canAccessModule(authUser, 'mentalInterview');
 
@@ -413,12 +418,14 @@ function MentalHealthDesktop() {
       title: '操作',
       key: 'action',
       width: 260,
+      // 表格总宽 1240 在 1440/1280 分辨率下需横向滚动，操作列固定右侧避免按钮被裁切
+      fixed: 'right',
       render: (_, record) => (
         <Space size={2} wrap>
           <Button type="link" size="small" onClick={() => openTalks(record)}>
             谈话记录
           </Button>
-          {/* 新增谈话：仅辅导员权限（canWrite）且为三类关注学生时可见；点击跳转学校外部谈话平台（不随主负责收紧） */}
+          {/* 新增谈话：管理员/辅导员角色 + 三类关注学生时可见；点击跳转学校外部谈话平台 */}
           {canWrite && TALK_RECORD_TARGET_LEVELS.includes(record.level) && (
             <Tooltip title="前往学校谈话平台填写谈话记录">
               <Button

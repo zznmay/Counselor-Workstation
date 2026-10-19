@@ -3,7 +3,8 @@
  * FilterSheet 共用）。UI 各自渲染，逻辑全部收敛在本文件。
  *
  * 业务规则（与服务端 lib/interviewTemplate.js 同口径）：
- * - 适用年级多选；不选 = 全部年级适用；同一年级命中多个模板时按最近编辑的生效；
+ * - 适用年级多选；不选 = 全部年级适用；适用关注等级多选；不选 = 不限等级；
+ * - 年级 + 等级双维匹配，精确命中优先，同分取最近编辑的模板；
  * - 题目 key 一经使用不可变更（变更等于丢失该题历史答案）——编辑只改题干/上限/行数；
  * - 删除模板至少保留一个；历史记录用填写时的快照渲染，不受改题影响。
  */
@@ -16,6 +17,7 @@ import {
   updateInterviewTemplate,
 } from '@/api/mental';
 import { getGradeOptions } from '@/api/classes';
+import { ATTENTION_LEVELS } from '@/constants/mental';
 import type { InterviewTemplate, InterviewTemplateGroup, InterviewTemplateInput } from '@/types';
 
 export interface DraftQuestion {
@@ -36,6 +38,8 @@ export interface TemplateDraft {
   id: string | null;
   name: string;
   grades: string[];
+  /** 适用关注等级；空数组 = 不限等级 */
+  levels: string[];
   groups: DraftGroup[];
 }
 
@@ -62,6 +66,7 @@ export function draftFromTemplate(t: InterviewTemplate): TemplateDraft {
     id: t.id,
     name: t.name,
     grades: [...t.grades],
+    levels: [...(t.levels ?? [])],
     groups: t.groups.map((g) => ({ title: g.title, questions: g.questions.map(questionOf) })),
   };
 }
@@ -72,6 +77,7 @@ export function emptyDraft(): TemplateDraft {
     id: null,
     name: '',
     grades: [],
+    levels: [],
     groups: [
       {
         title: '一、',
@@ -121,6 +127,7 @@ export function draftToInput(draft: TemplateDraft): InterviewTemplateInput {
   return {
     name: draft.name.trim(),
     grades: [...draft.grades],
+    levels: [...draft.levels],
     groups: draft.groups.map((g) => ({
       title: g.title.trim(),
       questions: g.questions.map((q) => ({
@@ -153,9 +160,15 @@ export interface TemplateEditorApi {
   error: string;
   startCreate: () => void;
   startEdit: (t: InterviewTemplate) => void;
+  /** 以现有模板为蓝本复制一份新草稿（id 置空，名称加「（副本）」；保存后创建新模板） */
+  startDuplicate: (t: InterviewTemplate) => void;
   cancelEdit: () => void;
   patchDraft: (patch: Partial<TemplateDraft>) => void;
   toggleGrade: (grade: string) => void;
+  /** 适用关注等级多选切换（移动端 chips 用） */
+  toggleLevel: (level: string) => void;
+  /** 适用关注等级选项（5 档，与服务端同源） */
+  levelOptions: string[];
   addGroup: () => void;
   removeGroup: (gi: number) => void;
   moveGroup: (gi: number, dir: -1 | 1) => void;
@@ -207,6 +220,17 @@ export function useTemplateEditor(options: {
     setDraft(draftFromTemplate(t));
   }, []);
 
+  /**
+   * 复制为草稿：沿用来源模板的全部题目/适用范围，仅 id 置空并追加「（副本）」后缀，
+   * 保存时走新建接口——避免从零重搭一份相同题目。名称超长按 50 字截断。
+   */
+  const startDuplicate = useCallback((t: InterviewTemplate) => {
+    setError('');
+    const base = draftFromTemplate(t);
+    const name = `${t.name}（副本）`.slice(0, 50);
+    setDraft({ ...base, id: null, name });
+  }, []);
+
   const cancelEdit = useCallback(() => {
     setError('');
     setDraft(null);
@@ -219,6 +243,12 @@ export function useTemplateEditor(options: {
   const toggleGrade = useCallback((grade: string) => {
     setDraft((d) => (d
       ? { ...d, grades: d.grades.includes(grade) ? d.grades.filter((g) => g !== grade) : [...d.grades, grade] }
+      : d));
+  }, []);
+
+  const toggleLevel = useCallback((level: string) => {
+    setDraft((d) => (d
+      ? { ...d, levels: d.levels.includes(level) ? d.levels.filter((l) => l !== level) : [...d.levels, level] }
       : d));
   }, []);
 
@@ -339,13 +369,16 @@ export function useTemplateEditor(options: {
     loading,
     saving,
     gradeOptions,
+    levelOptions: ATTENTION_LEVELS,
     draft,
     error,
     startCreate,
     startEdit,
+    startDuplicate,
     cancelEdit,
     patchDraft,
     toggleGrade,
+    toggleLevel,
     addGroup,
     removeGroup,
     moveGroup,
@@ -358,7 +391,7 @@ export function useTemplateEditor(options: {
     remove,
   }), [
     templates, loading, saving, gradeOptions, draft, error,
-    startCreate, startEdit, cancelEdit, patchDraft, toggleGrade,
+    startCreate, startEdit, startDuplicate, cancelEdit, patchDraft, toggleGrade, toggleLevel,
     addGroup, removeGroup, moveGroup, patchGroupTitle,
     addQuestion, removeQuestion, moveQuestion, patchQuestion,
     save, remove,

@@ -5,7 +5,7 @@ import { getStudent } from '@/api/student';
 import MaskedValue, { maskValue } from '@/components/mobile/MaskedValue';
 import { MIcon } from '@/components/mobile/icons';
 import { useIsMobile } from '@/hooks/useIsMobile';
-import { canManageStudentFront, getStoredUser } from '@/lib/auth';
+import { canManageStudentFront, getStoredUser, subscribeSession } from '@/lib/auth';
 import type { Student, StudentStatus } from '@/types';
 
 /** 学籍状态 → 语义标签（颜色 + 文字，不引入裸 hex） */
@@ -61,6 +61,9 @@ export default function StudentDetailMobile() {
   const [student, setStudent] = useState<Student | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
+  /** 角色/权限变更后重新校验可见范围（服务端按当前角色收口，越权详情会返回 403） */
+  const [sessionTick, setSessionTick] = useState(0);
+  useEffect(() => subscribeSession(() => setSessionTick((t) => t + 1)), []);
 
   useEffect(() => {
     if (!isMobile) return undefined;
@@ -74,7 +77,7 @@ export default function StudentDetailMobile() {
     return () => {
       alive = false;
     };
-  }, [id, isMobile]);
+  }, [id, isMobile, sessionTick]);
 
   /* 桌面端不提供全屏详情页（沿用列表弹窗），避免出现无样式的移动端组件 */
   if (!isMobile) return <Navigate to="/students" replace />;

@@ -27,6 +27,35 @@ export function isSystemAdmin(user: AuthUser | null): boolean {
   return (user.roleKeys ?? []).includes('admin');
 }
 
+/** 角色集合（与服务端 roleKeysOfUser 同口径；旧会话缓存无 roleKeys 时回退主角色） */
+export function roleKeysOf(user: AuthUser | null): string[] {
+  if (!user) return [];
+  const keys = user.roleKeys;
+  if (Array.isArray(keys) && keys.length > 0) return keys;
+  return user.role ? [user.role] : [];
+}
+
+/**
+ * 名册「全员可见」口径（与服务端 rosterScope 同源）：
+ * 系统管理员，或角色集合（多角色并集）含辅导员角色（counselor）。
+ * 其他用户（单一班主任、班主任+非辅导员角色、心理健康主负责、自定义角色等）仅可见所带班级学生。
+ */
+export function canViewAllStudents(user: AuthUser | null): boolean {
+  if (isSystemAdmin(user)) return true;
+  return roleKeysOf(user).includes('counselor');
+}
+
+/**
+ * 「新增谈话」外链显隐口径（心理健康列表三类关注学生行内）：
+ * - 系统管理员：恒可见（与站内 isSystemAdmin 全量权限口径一致）；
+ * - 其他用户：角色列表（多角色并集）含 counselor 才可见——单一班主任与心理健康主负责等其他角色一律隐藏，
+ *   与主角色展示无关；叠加辅导员角色后即按辅导员口径展示。
+ */
+export function canStartTalkRecord(user: AuthUser | null): boolean {
+  if (isSystemAdmin(user)) return true;
+  return roleKeysOf(user).includes('counselor');
+}
+
 /**
  * 前端模块权限判定：与服务端 requirePermission 同口径——
  * 系统管理员全量；其他用户看服务端下发的 permissions 并集是否包含目标模块。
@@ -99,8 +128,35 @@ export function getStoredUser(): AuthUser | null {
   }
 }
 
+/** 会话变更事件：角色/权限/所辖班级变化时通知已挂载页面重算（避免页面持有旧角色快照） */
+const SESSION_EVENT = 'workbench:session-updated';
+
+/** 权限指纹：只比较与权限/数据范围相关的字段，展示名等变化不触发页面重算 */
+function sessionFingerprint(user: AuthUser | null): string {
+  if (!user) return '';
+  return JSON.stringify({
+    role: user.role,
+    roleKeys: user.roleKeys ?? [],
+    permissions: user.permissions ?? [],
+    classIds: user.classIds ?? [],
+    ownerModules: user.ownerModules ?? [],
+  });
+}
+
+/** 订阅会话更新（返回取消订阅函数）；仅在权限/范围指纹变化时触发 */
+export function subscribeSession(listener: (user: AuthUser) => void): () => void {
+  const handler = (e: Event) => listener((e as CustomEvent<AuthUser>).detail);
+  window.addEventListener(SESSION_EVENT, handler);
+  return () => window.removeEventListener(SESSION_EVENT, handler);
+}
+
 export function setStoredUser(user: AuthUser): void {
+  const prev = getStoredUser();
   localStorage.setItem(USER_KEY, JSON.stringify(user));
+  // 角色/权限/带班范围变化才广播：已打开页面的按钮显隐与数据范围随之实时重算
+  if (sessionFingerprint(prev) !== sessionFingerprint(user)) {
+    window.dispatchEvent(new CustomEvent<AuthUser>(SESSION_EVENT, { detail: user }));
+  }
 }
 
 export function clearAuth(): void {

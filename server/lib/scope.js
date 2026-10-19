@@ -1,5 +1,6 @@
 /** 数据权限：按「带班」判定（用户管理分配的所辖班级，classCounselors）；管理员全量 */
 const dbx = require('./db');
+const { roleKeysOfUser } = require('./permissions');
 
 function isAdmin(user) {
   // 主角色规则：集合含 admin 时 users.role 已同步为 admin；roleKeys 兜底防御脏数据
@@ -30,6 +31,22 @@ function sensitiveScope(user, alias = 'x') {
   };
 }
 
+/**
+ * 名册查看范围：管理员或角色集合含 counselor（辅导员）→ null（全员可见）；
+ * 其他用户一律按带班收口（classCounselors），带班为空则可见 0 人。
+ * 多角色并存按最大范围合并（含 counselor 即放行）；roleKeys 缺失时由 roleKeysOfUser 回退主角色。
+ * 学生 classId 为空（历史数据）对收口用户天然不可见，仅管理员/辅导员可见。
+ */
+function rosterScope(user, alias = 's') {
+  if (isAdmin(user)) return null;
+  const keys = roleKeysOfUser(user);
+  if (keys.includes('counselor')) return null;
+  return {
+    sql: `${alias}.classId IN (SELECT classId FROM classCounselors WHERE userId = ?)`,
+    params: [user.id],
+  };
+}
+
 /** 会话下发用：用户所辖班级 id 列表（管理员返回空数组） */
 function classIdsOfUser(user) {
   if (!user || isAdmin(user)) return [];
@@ -37,4 +54,4 @@ function classIdsOfUser(user) {
     .map((r) => r.classId);
 }
 
-module.exports = { isAdmin, canManageStudent, sensitiveScope, classIdsOfUser };
+module.exports = { isAdmin, canManageStudent, sensitiveScope, classIdsOfUser, rosterScope };

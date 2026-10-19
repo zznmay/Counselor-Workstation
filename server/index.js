@@ -7,9 +7,17 @@ const express = require('express');
 
 const config = require('./lib/config');
 const auth = require('./lib/auth');
+const { ensureEntryHtml, assetSnapshot } = require('./lib/entryHtml');
 const { auditWrite } = require('./lib/audit');
 
 config.ensureDirs();
+
+/**
+ * SPA 入口自愈（启动时执行一次）：
+ * dist/index.html 可能仍指向旧构建（发布链路不更新该文件），按 dist/assets 中最新资产
+ * 改写出 dist/entry.html 作为实际入口，避免线上一直加载旧包。
+ */
+const entryFile = fs.existsSync(config.DIST_DIR) ? ensureEntryHtml() : null;
 
 const app = express();
 app.disable('x-powered-by');
@@ -34,6 +42,17 @@ api.use('/scheduler', require('./routes/scheduler'));
 api.use('/dashboard', require('./routes/dashboard'));
 api.use('/logs', require('./routes/logs'));
 
+// ---- 健康检查（免鉴权）：排查「改了代码线上没生效」用，只回构建指纹，不含业务数据 ----
+api.get('/health', (req, res) => {
+  res.json({
+    ok: true,
+    time: new Date().toISOString(),
+    entrySelfHeal: true,
+    servedEntry: entryFile ? path.basename(entryFile) : 'index.html',
+    assets: assetSnapshot(),
+  });
+});
+
 api.use((req, res) => res.status(404).json({ message: '接口不存在' }));
 api.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
   console.error('[api]', err.message);
@@ -43,12 +62,21 @@ app.use('/api', api);
 
 // ---- 静态托管前端构建产物（SPA 回退） ----
 if (fs.existsSync(config.DIST_DIR)) {
+  if (entryFile) {
+    console.error(`[entry] SPA 入口: ${path.basename(entryFile)}（${path.dirname(entryFile)}）`);
+  }
+  const sendEntry = (res) => res.sendFile(
+    entryFile && fs.existsSync(entryFile) ? entryFile : path.join(config.DIST_DIR, 'index.html'),
+  );
+  app.use((req, res, next) => {
+    // 根路径与 *.html 走自愈入口（必须在 express.static 之前，否则 / 会被 dist/index.html 抢先命中）
+    if (req.method === 'GET' && (req.path === '/' || req.path.endsWith('.html'))) return sendEntry(res);
+    return next();
+  });
   app.use(express.static(config.DIST_DIR));
   app.use((req, res, next) => {
-    if (req.method === 'GET' && !req.path.startsWith('/api')) {
-      return res.sendFile(path.join(config.DIST_DIR, 'index.html'));
-    }
-    next();
+    if (req.method === 'GET' && !req.path.startsWith('/api')) return sendEntry(res);
+    return next();
   });
 } else {
   console.warn('[warn] 未找到前端构建目录 dist/，请先在项目根目录执行 npm run build');

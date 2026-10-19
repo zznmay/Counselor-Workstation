@@ -142,12 +142,14 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_mi_student_sem ON mentalInterviews(studentId, semesterKey)`,
   `CREATE INDEX IF NOT EXISTS idx_mi_sem_deleted ON mentalInterviews(semesterKey, deletedAt)`,
   /* 心理访谈记录单模板：表单内容（题目分组/题干/上限）由管理员或心理辅导员维护，
-     grades 为适用年级名 JSON 数组（空数组 = 全部年级适用）；groups 结构见
+     grades 为适用年级名 JSON 数组（空数组 = 全部年级适用），
+     levels 为适用关注等级 JSON 数组（空数组 = 不限等级）；groups 结构见
      lib/interviewTemplate.js（与前端 InterviewFormModel 同构）。 */
   `CREATE TABLE IF NOT EXISTS mentalInterviewTemplates (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     grades TEXT NOT NULL DEFAULT '[]',
+    levels TEXT NOT NULL DEFAULT '[]',
     groups TEXT NOT NULL,
     enabled INTEGER NOT NULL DEFAULT 1,
     version INTEGER NOT NULL DEFAULT 1,
@@ -293,6 +295,12 @@ for (const [col, ddl] of [
   ['formSnapshot', 'ALTER TABLE mentalInterviews ADD COLUMN formSnapshot TEXT'],
 ]) {
   if (!interviewCols.includes(col)) db.prepare(ddl).run();
+}
+
+/** 老库升级：mentalInterviewTemplates 补加适用关注等级列（新库建表语句已含，幂等跳过） */
+const tplCols = db.prepare('PRAGMA table_info(mentalInterviewTemplates)').all().map((c) => c.name);
+if (!tplCols.includes('levels')) {
+  db.prepare("ALTER TABLE mentalInterviewTemplates ADD COLUMN levels TEXT NOT NULL DEFAULT '[]'").run();
 }
 
 /**
@@ -476,7 +484,7 @@ ensureDefaultInterviewTemplate();
 
 /**
  * 心理访谈记录单默认模板（幂等）：库内没有任何模板时播种内置默认模板
- * （题目与纸质记录单逐字对齐，适用年级 = 全部）。管理员后续的增改不受影响；
+ * （题目与纸质记录单逐字对齐，适用年级/关注等级 = 不限）。管理员后续的增改不受影响；
  * 默认模板被删除后不会重新播种（由模板管理保证至少保留一个）。
  */
 function ensureDefaultInterviewTemplate() {
@@ -486,8 +494,8 @@ function ensureDefaultInterviewTemplate() {
   const now = new Date().toISOString().slice(0, 16).replace('T', ' ');
   db.prepare(
     `INSERT INTO mentalInterviewTemplates
-       (id, name, grades, groups, enabled, version, createdBy, updatedBy, createdAt, updatedAt)
-     VALUES (?, ?, '[]', ?, 1, 1, '系统', '系统', ?, ?)`,
+       (id, name, grades, levels, groups, enabled, version, createdBy, updatedBy, createdAt, updatedAt)
+     VALUES (?, ?, '[]', '[]', ?, 1, 1, '系统', '系统', ?, ?)`,
   ).run(DEFAULT_TEMPLATE_ID, DEFAULT_TEMPLATE_NAME, JSON.stringify(DEFAULT_FORM_GROUPS), now, now);
   console.log('[db] 心理访谈记录单默认模板已播种。');
 }

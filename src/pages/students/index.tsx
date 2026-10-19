@@ -41,7 +41,7 @@ import ConversationFormFields, {
 } from '@/components/ConversationFormFields';
 import type { ConversationFormValues } from '@/components/ConversationFormFields';
 import PageHeader from '@/components/PageHeader';
-import { canManageStudentFront, getStoredUser, isSystemAdmin } from '@/lib/auth';
+import { canManageStudentFront, canViewAllStudents, getStoredUser, isSystemAdmin, subscribeSession } from '@/lib/auth';
 import {
   GENDERS,
   MAJORS,
@@ -100,7 +100,8 @@ interface StudentFormValues {
 function StudentsDesktop() {
   const isMobile = useIsMobile();
   const { message } = App.useApp();
-  const authUser = getStoredUser();
+  /** 角色/权限变更后实时重算按钮显隐（布局层 /auth/me 刷新时广播），避免沿用挂载时的旧角色快照 */
+  const [authUser, setAuthUser] = useState(getStoredUser);
   const [form] = Form.useForm<StudentFormValues>();
 
   const { query, patchQuery, data, loading, refresh } = useList<Student, StudentQuery>(getStudents, {
@@ -113,6 +114,20 @@ function StudentsDesktop() {
   const [modalOpen, setModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [detail, setDetail] = useState<Student | null>(null);
+
+  /**
+   * 角色/权限/带班范围变更后同步角色快照并回到第 1 页重新拉取：
+   * 可见范围由服务端按当前角色实时计算（仅班主任时只剩所带班级），
+   * 若停留在旧页码可能落在收窄后的范围之外，故统一重置分页；
+   * 同时关闭详情/编辑弹窗，避免继续展示已不在可见范围内的学生信息。
+   */
+  useEffect(() => subscribeSession((user) => {
+    setAuthUser(user);
+    setDetail(null);
+    setEditing(null);
+    setModalOpen(false);
+    patchQuery({ page: 1 });
+  }), [patchQuery]);
 
   /* ---------- 年级/班级字典（由「班级管理」模块维护，动态获取） ---------- */
   const [gradeOptions, setGradeOptions] = useState<GradeOption[]>([]);
@@ -496,7 +511,9 @@ function StudentsDesktop() {
     <div className="page">
       <PageHeader
         title="学生名册"
-        subtitle="全体学生的基础信息、学籍状态与重点关注事项；谈话与预警仅所带班级的学生可维护"
+        subtitle={!canViewAllStudents(authUser)
+          ? '仅显示您所带班级的学生'
+          : '全体学生的基础信息、学籍状态与重点关注事项；谈话与预警仅所带班级的学生可维护'}
       />
 
       <div className="toolbar">
