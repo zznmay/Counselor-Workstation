@@ -168,6 +168,33 @@ router.get('/:id', (req, res) => {
   res.json({ ...row, coManagerIds: coManagersOf(req.params.id).map((u) => u.id), coManagers: coManagersOf(req.params.id) });
 });
 
+/**
+ * 同宿舍学生（详情页模块）：宿舍文本相同（去首尾空白后比对）的在读学生，不含本人。
+ * 与详情同口径：收口用户仅可见其所带班级的室友，防绕过列表直达详情泄露他班学生。
+ * 学生未登记宿舍时返回空列表，由前端区分「未登记宿舍」与「无室友」两种空态。
+ */
+router.get('/:id/roommates', (req, res) => {
+  const row = dbx.get('SELECT s.* FROM students s WHERE s.id = ?', [req.params.id]);
+  if (!row) return res.status(404).json({ message: '学生不存在' });
+  const scope = rosterScope(req.user);
+  if (scope) {
+    const inScope = dbx.get(
+      `SELECT 1 FROM students s WHERE s.id = ? AND ${scope.sql}`,
+      [req.params.id, ...scope.params],
+    );
+    if (!inScope) return res.status(403).json({ message: '仅可查看其所带班级的学生' });
+  }
+  const dorm = String(row.dorm ?? '').trim();
+  if (!dorm) return res.json([]);
+  const rows = dbx.all(
+    `SELECT s.id, s.name, s.className, s.phone FROM students s
+     WHERE TRIM(s.dorm) = ? AND s.id != ? AND s.status = '在读'${scope ? ` AND ${scope.sql}` : ''}
+     ORDER BY s.studentNo`,
+    [dorm, req.params.id, ...(scope ? scope.params : [])],
+  );
+  res.json(rows.map((r) => ({ ...r, phone: r.phone ?? null })));
+});
+
 router.get('/id/exists', (req, res) => {
   const no = String(req.query.studentNo ?? '');
   const row = dbx.get('SELECT id FROM students WHERE studentNo = ?', [no]);

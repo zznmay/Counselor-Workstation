@@ -7,6 +7,7 @@ import {
   CheckSquareOutlined,
   CommentOutlined,
   DashboardOutlined,
+  DatabaseOutlined,
   EditOutlined,
   FolderOpenOutlined,
   HeartOutlined,
@@ -59,6 +60,7 @@ const TITLES: Record<string, string> = {
   '/admin/users': '用户管理',
   '/admin/roles': '角色管理',
   '/admin/logs': '访问日志',
+  '/admin/data': '数据管理',
   '/forbidden': '无访问权限',
 };
 
@@ -277,6 +279,7 @@ export default function BasicLayout() {
           { key: '/admin/users', icon: <TeamOutlined />, label: '用户管理' },
           { key: '/admin/roles', icon: <SafetyCertificateOutlined />, label: '角色管理' },
           { key: '/admin/logs', icon: <AuditOutlined />, label: '访问日志' },
+          { key: '/admin/data', icon: <DatabaseOutlined />, label: '数据管理' },
         ],
       });
     }

@@ -16,11 +16,17 @@ interface TabItem {
   module?: string;
 }
 
-/** 底部导航：4 常驻 + 1 更多（硬约束 ≤5）。第 4 槽为待办提醒，审批中心在「更多」首位 */
+/**
+ * 底部导航：4 常驻 + 1 更多（硬约束 ≤5）。
+ * 排列顺序（2026-10-20 调整）：工作台 → 学生名册 → 心理健康 → 待办提醒 → 更多。
+ *   · 心理健康提升为一级入口（原在「更多」内，图标沿用 heart）；
+ *   · 预警管理下撤为「更多 → 业务办理」二级入口（路由 /warnings 与页面行为不变），
+ *     原 Tab 上的待处理预警角标随之移到「更多」页的入口宫格上。
+ */
 const TABS: TabItem[] = [
   { key: '/', label: '工作台', icon: 'grid4', module: 'dashboard' },
   { key: '/students', label: '学生名册', icon: 'users', module: 'students' },
-  { key: '/warnings', label: '预警管理', icon: 'triangle', badge: 'warnings', module: 'warnings' },
+  { key: '/mental', label: '心理健康', icon: 'heart', module: 'mentalHealth' },
   { key: '/todos', label: '待办提醒', icon: 'checksq', badge: 'todos', module: 'todos' },
   { key: '/more', label: '更多', icon: 'grid', badge: 'approvals' },
 ];
@@ -32,16 +38,6 @@ export default function TabBar() {
   const user = getStoredUser();
   const canDashboard = canAccessModule(user, 'dashboard');
   const tabs = TABS.filter((tab) => !tab.module || canAccessModule(user, tab.module));
-
-  // 班主任等仅持心理健康权限的角色：第 4 槽用「心理健康」补位，避免底部只剩「更多」（总数仍 ≤5）
-  if (
-    canAccessModule(user, 'mentalHealth')
-    && !canAccessModule(user, 'todos')
-    && !tabs.some((t) => t.key === '/mental')
-  ) {
-    const insertAt = Math.max(0, Math.min(3, tabs.length - 1));
-    tabs.splice(insertAt, 0, { key: '/mental', label: '心理健康', icon: 'heart', module: 'mentalHealth' });
-  }
 
   // 角标：与桌面端同源（切换页面时刷新；无工作台权限时不请求）
   useEffect(() => {

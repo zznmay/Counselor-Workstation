@@ -1,4 +1,4 @@
-/** 待办提醒：服务端接口（全员共享的协同待办） */
+/** 待办提醒：服务端接口（按创建人严格隔离：仅本人创建的数据可见、可编辑、可删除） */
 import { request } from './request';
 import type { PageResult, Todo, TodoInput, TodoQuery } from '@/types';
 

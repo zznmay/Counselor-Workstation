@@ -439,6 +439,29 @@
   .m-kv-v { flex: 1; min-width: 0; color: var(--m-text-1); overflow-wrap: anywhere; }
   .m-kv-v.nowrap { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
+  /* 同宿舍学生行：左姓名/班级（m-row-main），右脱敏电话 + 行内拨号（m-row-side） */
+  .m-roommate { display: flex; align-items: center; gap: 10px; padding: 9px 0; }
+  .m-roommate + .m-roommate { border-top: 1px solid var(--m-border); }
+
+  /* 表单复选行：m-cbx 隐藏原生框 + m-box 视觉框 + 行内文字，整行可点（≥44px 热区） */
+  .m-cbx-row { display: flex; align-items: center; gap: 10px; min-height: var(--touch-min); cursor: pointer; }
+  .m-cbx-row .m-box { flex: 0 0 auto; }
+
+  /* 谈话时间线（移动端）：左侧细线 + 节点圆点，卡片纵向排列 */
+  .m-tl { position: relative; margin: 12px 0 4px 6px; padding-left: 18px; }
+  .m-tl::before {
+    content: ''; position: absolute; left: 4px; top: 8px; bottom: 8px; width: 2px;
+    border-radius: 1px; background: var(--m-border);
+  }
+  .m-tl-item {
+    position: relative; background: var(--m-surface); border: 1px solid var(--m-border);
+    border-radius: var(--r-md); padding: 10px 12px; margin-bottom: 10px;
+  }
+  .m-tl-item::before {
+    content: ''; position: absolute; left: -18px; top: 16px; width: 8px; height: 8px;
+    border-radius: 50%; background: var(--app-primary-soft); box-shadow: 0 0 0 2px var(--m-surface), 0 0 0 3px var(--m-border);
+  }
+
   /* 脱敏字段：点击查看后整行淡黄底 + 行底提示 */
   .m-mask-row { background: var(--warn-yellow-bg); border-radius: var(--r-sm); padding: 4px 8px; margin: 0 -8px; }
   .m-mask-btn {

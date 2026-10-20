@@ -1,4 +1,4 @@
-/** 首页工作台聚合统计（学生数为名册口径：管理员/辅导员全校，其他用户所带班级；谈话/预警/审批按带班口径） */
+/** 首页工作台聚合统计（学生数为名册口径：管理员/辅导员全校，其他用户所带班级；谈话/预警/审批按带班口径；待办按创建人隔离） */
 const express = require('express');
 const dayjs = require('dayjs');
 
@@ -34,7 +34,8 @@ router.get('/', (req, res) => {
     [...wScope.params],
   );
 
-  const openTodos = dbx.all("SELECT * FROM todos WHERE status = '未完成'");
+  // 待办按创建人严格隔离：只统计当前用户自己创建的待办（与 todos 列表同口径）
+  const openTodos = dbx.all("SELECT * FROM todos WHERE status = '未完成' AND createdBy = ?", [req.user.id]);
   const todayTodosAll = openTodos
     .filter((t) => t.dueDate <= todayStr)
     .sort((a, b) => `${a.dueDate} ${a.dueTime ?? '23:59'}`.localeCompare(`${b.dueDate} ${b.dueTime ?? '23:59'}`));

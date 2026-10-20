@@ -1,6 +1,7 @@
 import type {
   ApprovalStatus,
   ApprovalType,
+  BundleKind,
   Gender,
   NoticeStatus,
   NoticeType,
@@ -149,3 +150,33 @@ export const APPROVAL_STATUS_COLOR: Record<ApprovalStatus, string> = {
 export function toOptions(values: readonly string[]): { value: string; label: string }[] {
   return values.map((v) => ({ value: v, label: v }));
 }
+
+/* ==================== 数据管理（备份 / 恢复 / 迁移） ==================== */
+
+/** 数据包类型字典：与服务端 lib/datamgmt.js 的 BUNDLE_KINDS 同序同名 */
+export const BUNDLE_KINDS: BundleKind[] = ['手动备份', '自动备份', '恢复前快照', '迁移包', '上传包'];
+
+/** 可由管理员手工创建的类型（其余由系统内部产生） */
+export const BUNDLE_CREATE_KINDS: BundleKind[] = ['手动备份', '迁移包'];
+
+/** 自动备份间隔字典（小时） */
+export const AUTO_BACKUP_INTERVALS = [1, 2, 4, 6, 12, 24];
+
+/** 自动备份保留份数区间（环形保留） */
+export const AUTO_BACKUP_KEEP_MIN = 3;
+export const AUTO_BACKUP_KEEP_MAX = 30;
+
+/** 恢复确认短语：必须原样输入才允许落库，防误操作 */
+export const RESTORE_CONFIRM_PHRASE = '恢复';
+
+/** 上传数据包体积上限（字节）：受服务端 express.json 20mb 限制 */
+export const BUNDLE_UPLOAD_MAX_BYTES = 15 * 1024 * 1024;
+
+/** 数据包类型 → 列表标签色（与既有的状态色体系一致） */
+export const BUNDLE_KIND_COLOR: Record<BundleKind, string> = {
+  手动备份: 'blue',
+  自动备份: 'cyan',
+  恢复前快照: 'orange',
+  迁移包: 'purple',
+  上传包: 'green',
+};

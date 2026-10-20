@@ -10,10 +10,14 @@ import type { ClassOption, ParsedUserRow, RoleOption, UserImportFailure } from '
  * 字典类校验由调用侧注入，缺省时跳过该项预检、交由服务端兜底。
  */
 
-export const USER_HEADERS = ['用户名', '姓名', '角色', '初始密码', '所辖班级'] as const;
+export const USER_HEADERS = ['用户名', '姓名', '角色', '所辖班级'] as const;
 
-/** 与服务端 DEFAULT_IMPORT_PASSWORD 一致 */
-export const DEFAULT_IMPORT_PASSWORD = 'Hzky@123456';
+/** 批量导入初始密码规则：统一「Hzpt@」拼接用户名（首次登录强制修改），模板不再提供密码列 */
+export const IMPORT_PASSWORD_PREFIX = 'Hzpt@';
+/** 导入账号的初始密码：如 zhangsan → Hzpt@zhangsan（与服务端规则一致） */
+export function importPasswordOf(username: string): string {
+  return `${IMPORT_PASSWORD_PREFIX}${username}`;
+}
 const USERNAME_RE = /^[a-zA-Z0-9_]{3,20}$/;
 
 function fieldGuide(roleNames: string[]): [string, string, string][] {
@@ -23,7 +27,6 @@ function fieldGuide(roleNames: string[]): [string, string, string][] {
     ['角色', '必填', roleNames.length > 0
       ? `填写角色名称或标识，可选：${roleNames.join('、')}`
       : '系统中暂无可用角色，请先在「角色管理」中创建'],
-    ['初始密码', '选填', `不填则默认为 ${DEFAULT_IMPORT_PASSWORD}；填写时至少 8 位且包含字母和数字，首次登录须修改`],
     ['所辖班级', '选填', '仅非管理员角色可分配；多个班级用「、」分隔；同名班级写成「2024级·计应2401」'],
   ];
 }
@@ -34,17 +37,17 @@ export function buildUserTemplateWorkbook(roleNames: string[]): XLSX.WorkBook {
   const exampleRole = roleNames[0] ?? '辅导员';
   const dataWs = XLSX.utils.aoa_to_sheet([
     [...USER_HEADERS],
-    ['zhangsan', '张三', exampleRole, '', ''],
-    ['lisi', '李四', exampleRole, DEFAULT_IMPORT_PASSWORD, '示例行：班级可留空；正式导入前请删除本表所有示例行'],
+    ['zhangsan', '张三', exampleRole, ''],
+    ['lisi', '李四', exampleRole, '示例行：班级可留空；正式导入前请删除本表所有示例行'],
   ]);
-  dataWs['!cols'] = [{ wch: 18 }, { wch: 12 }, { wch: 16 }, { wch: 16 }, { wch: 36 }];
+  dataWs['!cols'] = [{ wch: 18 }, { wch: 12 }, { wch: 16 }, { wch: 36 }];
   XLSX.utils.book_append_sheet(wb, dataWs, '用户名单');
 
   const guideWs = XLSX.utils.aoa_to_sheet([
     ['列名', '是否必填', '填写说明'],
     ...fieldGuide(roleNames),
     ['说明', '——', '请勿修改第一行的列标题，也不要增删列；仅「用户名单」工作表会被导入'],
-    ['说明', '——', `账号将按「用户名」查重：已存在的用户名整行跳过；导入采用追加方式，不影响已有账号。初始密码统一为 ${DEFAULT_IMPORT_PASSWORD}（未填写时）`],
+    ['说明', '——', `账号将按「用户名」查重：已存在的用户名整行跳过；导入采用追加方式，不影响已有账号。初始密码由系统自动生成为「${IMPORT_PASSWORD_PREFIX}用户名」（如 zhangsan → ${importPasswordOf('zhangsan')}），首次登录须修改`],
   ]);
   guideWs['!cols'] = [{ wch: 12 }, { wch: 12 }, { wch: 80 }];
   XLSX.utils.book_append_sheet(wb, guideWs, '填写说明');
@@ -56,7 +59,7 @@ export function downloadUserTemplate(roleNames: string[]): void {
   XLSX.writeFile(buildUserTemplateWorkbook(roleNames), '用户账号导入模板.xlsx');
 }
 
-/** 解析用户 Excel：定位「用户名单」工作表，逐行取 用户名/姓名/角色/初始密码/所辖班级 */
+/** 解析用户 Excel：定位「用户名单」工作表，逐行取 用户名/姓名/角色/所辖班级（多余列忽略，兼容旧版模板） */
 export async function parseUserExcel(file: File): Promise<ParsedUserRow[]> {
   const data = new Uint8Array(await file.arrayBuffer());
   const wb = XLSX.read(data, { type: 'array' });
@@ -80,10 +83,9 @@ export async function parseUserExcel(file: File): Promise<ParsedUserRow[]> {
     const username = get(row, '用户名');
     const displayName = get(row, '姓名');
     const role = get(row, '角色');
-    const password = get(row, '初始密码');
     const classNames = get(row, '所辖班级');
-    if (!username && !displayName && !role && !password && !classNames) continue;
-    rows.push({ row: i + 1, data: { username, displayName, role, password, classNames } });
+    if (!username && !displayName && !role && !classNames) continue;
+    rows.push({ row: i + 1, data: { username, displayName, role, classNames } });
   }
   return rows;
 }
@@ -140,7 +142,6 @@ export function validateUserRows(
       username: (raw.username ?? '').trim(),
       displayName: (raw.displayName ?? '').trim(),
       role: (raw.role ?? '').trim(),
-      password: (raw.password ?? '').trim(),
       classNames: (raw.classNames ?? '').trim(),
     };
     const reasons: string[] = [];
@@ -157,10 +158,6 @@ export function validateUserRows(
     if (!data.role) reasons.push('角色为必填项');
     else if (roles && roles.length > 0 && !roles.some((r) => r.key === data.role || r.name === data.role)) {
       reasons.push(`角色「${data.role}」不存在`);
-    }
-
-    if (data.password && (data.password.length < 8 || !/[A-Za-z]/.test(data.password) || !/\d/.test(data.password))) {
-      reasons.push('初始密码至少 8 位且包含字母和数字');
     }
 
     if (data.classNames && classes && classes.length > 0) {
@@ -187,11 +184,11 @@ export function validateUserRows(
 export function exportUserImportFailures(failures: UserImportFailure[]): void {
   const aoa: unknown[][] = [[...USER_HEADERS, '失败原因']];
   failures.forEach(({ data, username, displayName, reason }) => {
-    const d = data ?? { username, displayName, role: '', password: '', classNames: '' };
-    aoa.push([d.username, d.displayName, d.role, d.password ?? '', d.classNames ?? '', reason]);
+    const d = data ?? { username, displayName, role: '', classNames: '' };
+    aoa.push([d.username, d.displayName, d.role, d.classNames ?? '', reason]);
   });
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols'] = [{ wch: 18 }, { wch: 12 }, { wch: 16 }, { wch: 16 }, { wch: 36 }, { wch: 50 }];
+  ws['!cols'] = [{ wch: 18 }, { wch: 12 }, { wch: 16 }, { wch: 36 }, { wch: 50 }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, '失败明细');
   XLSX.writeFile(wb, `用户导入失败明细-${dayjs().format('YYYYMMDD-HHmm')}.xlsx`);

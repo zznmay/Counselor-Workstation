@@ -57,6 +57,18 @@ export function canStartTalkRecord(user: AuthUser | null): boolean {
 }
 
 /**
+ * 学生名册「批量导出」按钮显隐口径（与 canStartTalkRecord 同源）：
+ * - 系统管理员：恒可见（管理员本就全员可见名册，且批量删除已依赖同样的选择机制）；
+ * - 其他用户：角色列表（多角色并集）含 counselor 才可见——单一班主任、心理健康主负责等
+ *   其他角色一律隐藏；叠加辅导员角色后即按辅导员口径展示。
+ * 导出为纯前端生成文件，无独立后端接口，页面挂载时二次校验该口径并给出明确提示。
+ */
+export function canExportStudents(user: AuthUser | null): boolean {
+  if (isSystemAdmin(user)) return true;
+  return roleKeysOf(user).includes('counselor');
+}
+
+/**
  * 前端模块权限判定：与服务端 requirePermission 同口径——
  * 系统管理员全量；其他用户看服务端下发的 permissions 并集是否包含目标模块。
  * 旧会话缓存没有 permissions 字段时按放行处理，待 /auth/me 刷新后收紧，

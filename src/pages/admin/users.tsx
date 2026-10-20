@@ -37,7 +37,7 @@ import type {
   UserImportResult,
 } from '@/types';
 import {
-  DEFAULT_IMPORT_PASSWORD,
+  IMPORT_PASSWORD_PREFIX,
   downloadUserTemplate,
   exportUserImportFailures,
   parseUserExcel,
@@ -521,7 +521,7 @@ function AdminUsersDesktop() {
     <div className="page">
       <PageHeader
         title="用户管理"
-        subtitle={`开设教师账号、分配角色与班级、删除账号；支持 Excel 批量导入（默认初始密码 ${DEFAULT_IMPORT_PASSWORD}，首次登录需修改）`}
+        subtitle="开设教师账号、分配角色与班级、删除账号；支持 Excel 批量导入（初始密码自动生成为「Hzpt@用户名」，首次登录需修改）"
         extra={
           <Space wrap>
             <Button icon={<UploadOutlined />} onClick={openImport}>
@@ -748,9 +748,9 @@ function AdminUsersDesktop() {
             <ul className="import-rules">
               <li>文件格式：.xlsx / .xls；读取「用户名单」工作表，首行列标题不可修改或增删</li>
               <li>必填字段：用户名（3-20 位字母/数字/下划线，全局唯一）、姓名（1-20 字）、角色（角色名称或标识）</li>
+              <li>选填字段：所辖班级（多个用「、」分隔；同名班级写成「2024级·计应2401」）</li>
               <li>
-                选填字段：初始密码（不填默认 {DEFAULT_IMPORT_PASSWORD}，填写时需 ≥8 位且含字母和数字）、
-                所辖班级（多个用「、」分隔；同名班级写成「2024级·计应2401」）
+                初始密码由系统自动生成，规则为「{IMPORT_PASSWORD_PREFIX}用户名」（如 zhangsan → {IMPORT_PASSWORD_PREFIX}zhangsan），无需在模板中填写，首次登录需修改
               </li>
               <li>校验规则：用户名与系统内或本表内重复、角色不存在、班级未匹配字典的行将被拒绝，不影响其他行写入</li>
               <li>导入方式：追加写入、整批事务提交；管理员角色忽略「所辖班级」列</li>
@@ -786,9 +786,7 @@ function AdminUsersDesktop() {
                 type={allFailures.length > 0 ? 'warning' : 'success'}
                 message={
                   importDone
-                    ? `成功导入 ${importResult?.successCount ?? 0} 个账号，初始密码为 ${
-                      DEFAULT_IMPORT_PASSWORD
-                    }（模板内已填写的除外），首次登录需修改。`
+                    ? `成功导入 ${importResult?.successCount ?? 0} 个账号，初始密码已按「${IMPORT_PASSWORD_PREFIX}用户名」自动生成（如 zhangsan → ${IMPORT_PASSWORD_PREFIX}zhangsan），首次登录需修改。`
                     : `文件「${parsed.fileName}」共解析 ${parsed.totalRows} 行：可导入 ${parsed.valid.length} 条，${parsed.failures.length} 条存在问题。`
                 }
                 description={

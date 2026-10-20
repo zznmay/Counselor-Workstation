@@ -161,6 +161,15 @@ export interface StudentOption {
   classId?: number | null;
 }
 
+/** 同宿舍学生（学生详情页「同宿舍学生」模块；服务端按可见范围 + 在读状态过滤，不含本人） */
+export interface Roommate {
+  id: Id;
+  name: string;
+  className: string;
+  /** 联系电话；空 / null = 未登记（前端展示「未登记电话」且不渲染拨号按钮） */
+  phone?: string | null;
+}
+
 /* ==================== 谈心谈话 ==================== */
 
 export type TalkType = '学业指导' | '心理疏导' | '生活关怀' | '就业指导' | '违纪教育' | '资助帮扶';
@@ -308,7 +317,6 @@ export interface ParsedUserRow {
     username: string;
     displayName: string;
     role: string;
-    password?: string;
     /** 所辖班级文本：多班用「、」分隔；同名班级写成「2024级·计应2401」 */
     classNames?: string;
   };
@@ -661,6 +669,8 @@ export interface Todo {
   relatedStudent?: string;
   note?: string;
   createdAt: string;
+  /** 创建人用户 ID（服务端按此严格隔离：仅本人可见/可编辑/可删除；历史共享数据归属管理员） */
+  createdBy?: number | null;
 }
 
 export interface TodoQuery extends PageQuery {
@@ -671,8 +681,15 @@ export interface TodoQuery extends PageQuery {
 
 export type TodoInput = Pick<
   Todo,
-  'title' | 'type' | 'priority' | 'dueDate' | 'relatedStudent' | 'note'
-> & { dueTime?: string };
+  'title' | 'type' | 'priority' | 'dueDate'
+> & {
+  /** 截止时间 HH:mm；null = 清空（JSON 会丢弃 undefined，清空必须显式传 null） */
+  dueTime?: string | null;
+  /** 关联学生姓名；null = 清空 */
+  relatedStudent?: string | null;
+  /** 备注；null = 清空 */
+  note?: string | null;
+};
 
 /* ==================== 审批中心 ==================== */
 
@@ -772,4 +789,99 @@ export interface DashboardStats {
   todayTodos: Todo[];
   /** 待处理审批（最多 6 条） */
   pendingApprovals: Approval[];
+}
+
+/* ==================== 数据管理（备份 / 恢复 / 迁移） ==================== */
+
+/** 数据包类型（字典项，与服务端 lib/datamgmt.js 的 BUNDLE_KINDS 一致） */
+export type BundleKind = '手动备份' | '自动备份' | '恢复前快照' | '迁移包' | '上传包';
+
+/** 数据包元信息：包体落盘于服务端 data/backups，列表只回索引与校验信息 */
+export interface DataBundle {
+  id: number;
+  kind: BundleKind;
+  label: string;
+  note?: string | null;
+  fileName: string;
+  sizeBytes: number;
+  sha256: string;
+  schemaVersion: number;
+  /** 各数据表条数快照 { students: 120, ... } */
+  counts: Record<string, number>;
+  createdBy?: string | null;
+  createdAt: string;
+}
+
+export interface BundleInput {
+  /** 数据包标签（必填） */
+  label: string;
+  /** 备注（选填） */
+  note?: string | null;
+  /** 类型：手动备份（默认）/ 迁移包；其余类型由系统内部产生 */
+  kind?: BundleKind;
+}
+
+export interface BundleQuery extends PageQuery {
+  kind?: BundleKind;
+  startDate?: string;
+  endDate?: string;
+  sortBy?: 'createdAt' | 'sizeBytes' | 'id';
+  sortOrder?: 'asc' | 'desc';
+}
+
+/** 自动备份策略 */
+export interface AutoBackupConfig {
+  enabled: boolean;
+  /** 间隔小时数（字典项：1 / 2 / 4 / 6 / 12 / 24） */
+  intervalHours: number;
+  /** 环形保留份数 3–30 */
+  keep: number;
+  lastRunAt?: string | null;
+  /** 上次内容签名（签名未变则跳过写包） */
+  lastSignature?: string | null;
+}
+
+/** 数据管理操作日志 */
+export interface DataOplogItem {
+  id: number;
+  ts: string;
+  actor?: string | null;
+  action: string;
+  summary?: string | null;
+}
+
+/** 数据包校验明细（恢复预检） */
+export interface BundleCheck {
+  item: string;
+  ok: boolean;
+  detail: string;
+}
+
+/** 恢复预检结果：不落盘，仅返回校验明细与条数差异 */
+export interface RestorePreview {
+  ok: boolean;
+  checks: BundleCheck[];
+  diff: { table: string; current: number; incoming: number; delta: number }[];
+  meta: {
+    kind?: string | null;
+    label?: string | null;
+    exportedAt?: string | null;
+    source?: string | null;
+    schemaVersion?: number | null;
+  };
+}
+
+/** 数据总览 */
+export interface DataOverview {
+  generatedAt: string;
+  schemaVersion: number;
+  appVersion: string;
+  tables: string[];
+  counts: Record<string, number>;
+  db: { file: string; sizeBytes: number; walBytes: number };
+  uploads: { files: number; bytes: number };
+  bundles: { total: number; bytes: number; byKind: { kind: string; n: number; bytes: number }[] };
+  latestBundle: { id: number; label: string; kind: string; createdAt: string } | null;
+  autoBackup: AutoBackupConfig;
+  oplog: DataOplogItem[];
 }

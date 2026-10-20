@@ -41,6 +41,17 @@ api.use('/templates', require('./routes/templates'));
 api.use('/scheduler', require('./routes/scheduler'));
 api.use('/dashboard', require('./routes/dashboard'));
 api.use('/logs', require('./routes/logs'));
+/* 数据管理（备份 / 恢复 / 迁移）：仅管理员，业务逻辑在 lib/datamgmt.js */
+api.use('/data', require('./routes/data'));
+
+// ---- 数据管理：按持久化的策略启动定时自动备份（链式 setTimeout + unref，不阻塞退出）----
+try {
+  const dm = require('./lib/datamgmt');
+  const delayMs = dm.scheduleAuto();
+  if (delayMs) console.error(`[datamgmt] 自动备份已启用：每 ${Math.round(delayMs / 3600000)} 小时执行一次`);
+} catch (e) {
+  console.error('[datamgmt] 自动备份调度启动失败:', e && e.message);
+}
 
 // ---- 健康检查（免鉴权）：排查「改了代码线上没生效」用，只回构建指纹，不含业务数据 ----
 api.get('/health', (req, res) => {

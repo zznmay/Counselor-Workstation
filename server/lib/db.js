@@ -225,7 +225,8 @@ const SCHEMA_STATEMENTS = [
     status TEXT DEFAULT '未完成',
     relatedStudent TEXT,
     note TEXT,
-    createdAt TEXT
+    createdAt TEXT,
+    createdBy INTEGER
   )`,
   `CREATE TABLE IF NOT EXISTS templateCategories (
     id TEXT PRIMARY KEY,
@@ -266,6 +267,38 @@ const SCHEMA_STATEMENTS = [
     fails INTEGER DEFAULT 0,
     lockedUntil TEXT
   )`,
+  /* 数据管理：数据包（备份 / 恢复前快照 / 迁移包 / 上传包）的元信息。
+     实际包体落盘于 data/backups/<fileName>，本表只存索引与校验信息，
+     便于列表查询、分页排序与下载，不重复存整包。 */
+  `CREATE TABLE IF NOT EXISTS dataBundles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL,
+    label TEXT NOT NULL,
+    note TEXT,
+    fileName TEXT NOT NULL UNIQUE,
+    sizeBytes INTEGER NOT NULL DEFAULT 0,
+    sha256 TEXT NOT NULL,
+    schemaVersion INTEGER NOT NULL DEFAULT 1,
+    counts TEXT NOT NULL DEFAULT '{}',
+    createdBy TEXT,
+    createdAt TEXT NOT NULL
+  )`,
+  /* 数据管理：键值配置（自动备份策略等业务配置）。value 存 JSON 字符串，
+     仅管理员可写；不参与数据包导出，避免恢复时被旧配置覆盖。 */
+  `CREATE TABLE IF NOT EXISTS dataSettings (
+    key TEXT PRIMARY KEY,
+    value TEXT,
+    updatedAt TEXT,
+    updatedBy TEXT
+  )`,
+  /* 数据管理：操作日志（备份/恢复/上传/删除/配置变更），环形保留最近 500 条 */
+  `CREATE TABLE IF NOT EXISTS dataOplog (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT NOT NULL,
+    actor TEXT,
+    action TEXT NOT NULL,
+    summary TEXT
+  )`,
 ];
 for (const sql of SCHEMA_STATEMENTS) {
   db.prepare(sql).run();
@@ -301,6 +334,23 @@ for (const [col, ddl] of [
 const tplCols = db.prepare('PRAGMA table_info(mentalInterviewTemplates)').all().map((c) => c.name);
 if (!tplCols.includes('levels')) {
   db.prepare("ALTER TABLE mentalInterviewTemplates ADD COLUMN levels TEXT NOT NULL DEFAULT '[]'").run();
+}
+
+/**
+ * 老库升级：todos 补加创建人列（新库建表语句已含，幂等跳过）。
+ * 待办自此按创建人严格隔离：列表/详情/编辑/删除均只允许本人（routes/todos.js）。
+ * 历史「全员共享」数据没有创建人，统一归属系统管理员（username='admin'，取不到则取最早用户），
+ * 避免升级后历史待办对所有账号同时不可见；管理员可在界面复核后自行删除或重建。
+ */
+const todoCols = db.prepare('PRAGMA table_info(todos)').all().map((c) => c.name);
+if (!todoCols.includes('createdBy')) {
+  db.prepare('ALTER TABLE todos ADD COLUMN createdBy INTEGER').run();
+  const owner = db.prepare("SELECT id FROM users WHERE username = 'admin' ORDER BY id LIMIT 1").get()
+    ?? db.prepare('SELECT id FROM users ORDER BY id LIMIT 1').get();
+  if (owner) {
+    const moved = db.prepare('UPDATE todos SET createdBy = ? WHERE createdBy IS NULL').run(owner.id);
+    console.log(`[db] 历史共享待办已归属管理员（user ${owner.id}）：${moved.changes} 条。`);
+  }
 }
 
 /**
@@ -449,10 +499,11 @@ function seed() {
   });
 
   const insTodo = db.prepare(`INSERT INTO todos
-    (id, title, type, priority, dueDate, dueTime, status, relatedStudent, note, createdAt)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    (id, title, type, priority, dueDate, dueTime, status, relatedStudent, note, createdAt, createdBy)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   SEED.todos.forEach((t) => {
-    insTodo.run(t.id, t.title, t.type, t.priority, t.dueDate, t.dueTime ?? null, t.status, t.relatedStudent ?? null, t.note ?? null, t.createdAt);
+    // 待办按创建人隔离：示例数据归属首位示例辅导员（与 conversations/warnings 同口径）
+    insTodo.run(t.id, t.title, t.type, t.priority, t.dueDate, t.dueTime ?? null, t.status, t.relatedStudent ?? null, t.note ?? null, t.createdAt, counselorUserIds[0]);
   });
 
   const insApproval = db.prepare(`INSERT INTO approvals

@@ -4,6 +4,7 @@ import type {
   BatchDeleteResult,
   PageResult,
   ParsedStudentRow,
+  Roommate,
   Student,
   StudentBrief,
   StudentImportResult,
@@ -66,6 +67,14 @@ export async function batchDeleteStudents(ids: string[]): Promise<BatchDeleteRes
 /** 表单下拉用：在读学生精简列表（可见范围内） */
 export async function getStudentOptions(): Promise<StudentOption[]> {
   return request<StudentOption[]>('/students/options');
+}
+
+/**
+ * 同宿舍学生（详情页模块）：同一宿舍的在读学生，不含本人。
+ * 可见范围与服务端名册口径一致（收口用户仅所带班级）；学生未登记宿舍时返回空数组。
+ */
+export async function getRoommates(id: string): Promise<Roommate[]> {
+  return request<Roommate[]>(`/students/${id}/roommates`);
 }
 
 /** 导入查重用：可见范围内全部学号（服务端导入时还会做全局查重兜底） */

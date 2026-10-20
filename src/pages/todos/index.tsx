@@ -97,7 +97,10 @@ function TodosDesktop() {
       const payload: TodoInput = {
         ...values,
         dueDate: values.dueDate.format('YYYY-MM-DD'),
-        dueTime: values.dueTime?.format('HH:mm'),
+        // 选填字段显式传 null：服务端据此清空（undefined 会被 JSON 丢弃而保留原值）
+        dueTime: values.dueTime?.format('HH:mm') ?? null,
+        relatedStudent: values.relatedStudent ?? null,
+        note: values.note ?? null,
       };
       if (editing) {
         await updateTodo(editing.id, payload);
@@ -224,7 +227,7 @@ function TodosDesktop() {
     <div className="page">
       <PageHeader
         title="待办提醒"
-        subtitle="今日待办、逾期待办与工作安排，支持完成打卡与优先级管理"
+        subtitle="今日待办、逾期待办与工作安排，支持完成打卡与优先级管理；仅显示本人创建的待办"
       />
 
       <div className="toolbar">

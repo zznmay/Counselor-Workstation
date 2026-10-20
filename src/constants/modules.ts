@@ -59,5 +59,6 @@ export function moduleForPath(pathname: string): string | null {
   if (pathname.startsWith('/admin/users')) return 'admin.users';
   if (pathname.startsWith('/admin/roles')) return 'admin.roles';
   if (pathname.startsWith('/admin/logs')) return 'admin.logs';
+  if (pathname.startsWith('/admin/data')) return 'admin.data';
   return null;
 }

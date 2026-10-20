@@ -2,6 +2,8 @@ import BasicLayout from '@/layouts/BasicLayout';
 import AdminLogs from '@/pages/admin/logs';
 import AdminRoles from '@/pages/admin/roles';
 import AdminUsers from '@/pages/admin/users';
+/* 数据管理（备份 / 恢复 / 迁移）：系统管理菜单第 4 项，与用户/角色/日志同为管理员专属 */
+import AdminData from '@/pages/admin/data';
 import Classes from '@/pages/classes';
 import Grades from '@/pages/classes/grades';
 import Conversations from '@/pages/conversations';
@@ -77,6 +79,7 @@ export const router = createBrowserRouter([
       { path: 'admin/users', element: <RequireAdmin><AdminUsers /></RequireAdmin> },
       { path: 'admin/roles', element: <RequireAdmin><AdminRoles /></RequireAdmin> },
       { path: 'admin/logs', element: <RequireAdmin><AdminLogs /></RequireAdmin> },
+      { path: 'admin/data', element: <RequireAdmin><AdminData /></RequireAdmin> },
       { path: 'forbidden', element: <Forbidden /> },
       { path: '*', element: <Navigate to="/" replace /> },
     ],

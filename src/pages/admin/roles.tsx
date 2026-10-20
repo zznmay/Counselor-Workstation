@@ -21,6 +21,7 @@ import PageHeader from '@/components/PageHeader';
 import { APP_MODULES, MODULE_GROUPS } from '@/constants/modules';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import type { Role } from '@/types';
+import AdminRolesMobile from './rolesMobile';
 
 interface RoleFormValues {
   name: string;
@@ -29,8 +30,8 @@ interface RoleFormValues {
   ownerModules: string[];
 }
 
-/** 系统管理：角色维护与模块权限配置（仅管理员） */
-export default function AdminRoles() {
+/** 系统管理：角色维护与模块权限配置（桌面端，仅管理员） */
+function AdminRolesDesktop() {
   const isMobile = useIsMobile();
   const { message } = App.useApp();
   const [roles, setRoles] = useState<Role[]>([]);
@@ -367,4 +368,13 @@ export default function AdminRoles() {
       </Typography.Text>
     </div>
   );
+}
+
+/**
+ * 视口分发：≤768px 走移动端独立渲染层（角色卡片化 + 全屏面板表单），
+ * 修复桌面表格在手机上「角色标识被裁切、操作列占满屏幕」的问题；桌面端零改动。
+ */
+export default function AdminRoles() {
+  const isMobile = useIsMobile();
+  return isMobile ? <AdminRolesMobile /> : <AdminRolesDesktop />;
 }

@@ -55,6 +55,7 @@ import type {
   TalkType,
   TalkedStudentOption,
 } from '@/types';
+import ConversationsMobile from './mobile';
 
 const FOLLOW_OPTIONS = [
   { value: '是', label: '需要跟进' },
@@ -65,10 +66,10 @@ const FOLLOW_OPTIONS = [
 const toBool = (v?: string): boolean | undefined => (v === undefined ? undefined : v === '是');
 
 /**
- * 谈心谈话记录：列表视图（筛选搜索 / 增删改查） + 时间线视图（按学生维度、从最新到最早回溯）。
+ * 谈心谈话记录（桌面端）：列表视图（筛选搜索 / 增删改查） + 时间线视图（按学生维度、从最新到最早回溯）。
  * 两个视图共用同一套详情抽屉与编辑弹窗，数据同源于谈话记录表。
  */
-export default function Conversations() {
+function ConversationsDesktop() {
   const isMobile = useIsMobile();
   const { message } = App.useApp();
   const [form] = Form.useForm<ConversationFormValues & { studentId: string }>();
@@ -521,24 +522,33 @@ export default function Conversations() {
           layout="vertical"
           initialValues={{ way: '面对面', type: '学业指导', needFollowUp: false }}
         >
-          <Form.Item
-            name="studentId"
-            label="学生"
-            rules={[{ required: true, message: '请选择学生' }]}
-          >
-            <Select
-              showSearch
-              placeholder="输入姓名或学号搜索"
-              optionFilterProp="label"
-              options={studentOptions.map((s) => ({
-                value: s.id,
-                label: `${s.name}（${s.className} · ${s.studentNo}）`,
-              }))}
-            />
-          </Form.Item>
-          <ConversationFormFields />
-        </Form>
-      </Modal>
+        <Form.Item
+          name="studentId"
+          label="学生"
+          rules={[{ required: true, message: '请选择学生' }]}
+        >
+          <Select
+            showSearch
+            placeholder="输入姓名或学号搜索"
+            optionFilterProp="label"
+            options={studentOptions.map((s) => ({
+              value: s.id,
+              label: `${s.name}（${s.className} · ${s.studentNo}）`,
+            }))}
+          />
+        </Form.Item>
+        <ConversationFormFields />
+      </Form>
+    </Modal>
     </div>
   );
+}
+
+/**
+ * 视口分发：≤768px 走移动端独立渲染层（分段双视图 + 卡片化列表 + 底部面板表单），
+ * 修复桌面表格在手机上「固定操作列占满屏幕、看不到是谁的记录」的问题；桌面端零改动。
+ */
+export default function Conversations() {
+  const isMobile = useIsMobile();
+  return isMobile ? <ConversationsMobile /> : <ConversationsDesktop />;
 }

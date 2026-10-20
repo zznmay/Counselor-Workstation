@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 
-import { getStudent } from '@/api/student';
+import { getRoommates, getStudent } from '@/api/student';
 import MaskedValue, { maskValue } from '@/components/mobile/MaskedValue';
 import { MIcon } from '@/components/mobile/icons';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { canManageStudentFront, getStoredUser, subscribeSession } from '@/lib/auth';
-import type { Student, StudentStatus } from '@/types';
+import type { Roommate, Student, StudentStatus } from '@/types';
 
 /** 学籍状态 → 语义标签（颜色 + 文字，不引入裸 hex） */
 const STATUS_TAG: Record<StudentStatus, string> = {
@@ -61,6 +61,9 @@ export default function StudentDetailMobile() {
   const [student, setStudent] = useState<Student | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
+  /** 同宿舍学生：null=加载中/未加载；[]=已加载无数据；拉取失败时 roommatesFailed=true */
+  const [roommates, setRoommates] = useState<Roommate[] | null>(null);
+  const [roommatesFailed, setRoommatesFailed] = useState(false);
   /** 角色/权限变更后重新校验可见范围（服务端按当前角色收口，越权详情会返回 403） */
   const [sessionTick, setSessionTick] = useState(0);
   useEffect(() => subscribeSession(() => setSessionTick((t) => t + 1)), []);
@@ -78,6 +81,20 @@ export default function StudentDetailMobile() {
       alive = false;
     };
   }, [id, isMobile, sessionTick]);
+
+  /* 同宿舍学生：随学生信息加载（角色变更后随 sessionTick 重取，保持与服务端可见范围一致） */
+  useEffect(() => {
+    if (!isMobile || !student) return undefined;
+    let alive = true;
+    setRoommates(null);
+    setRoommatesFailed(false);
+    getRoommates(student.id)
+      .then((list) => alive && setRoommates(list))
+      .catch(() => alive && setRoommatesFailed(true));
+    return () => {
+      alive = false;
+    };
+  }, [isMobile, student, sessionTick]);
 
   /* 桌面端不提供全屏详情页（沿用列表弹窗），避免出现无样式的移动端组件 */
   if (!isMobile) return <Navigate to="/students" replace />;
@@ -161,6 +178,55 @@ export default function StudentDetailMobile() {
         <KV k="辅导员" v={student.counselor} nowrap />
         <KV k="班内职务" v={student.position} nowrap />
         <KV k="入学时间" v={student.enrollDate} nowrap />
+      </div>
+
+      {/* 同宿舍学生：姓名 + 班级 + 脱敏电话 + 行内拨号；区分「未登记宿舍 / 无室友 / 未登记电话」 */}
+      <div className="m-card">
+        <div className="m-sec-head">
+          <span className="m-sec-title">
+            <MIcon name="users" size={16} />
+            同宿舍学生
+          </span>
+          {roommates && roommates.length > 0 && <span className="m-t4">共 {roommates.length} 人</span>}
+        </div>
+        {roommatesFailed ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 0' }}>
+            <MIcon name="alertCircle" size={16} style={{ color: 'var(--danger-fg)' }} />
+            <span className="m-t4">同宿舍学生信息加载失败，稍后重试</span>
+          </div>
+        ) : !student.dorm ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 0' }}>
+            <MIcon name="users" size={16} style={{ color: 'var(--m-text-2)' }} />
+            <span className="m-t4">该学生未登记宿舍，暂无同宿舍学生</span>
+          </div>
+        ) : roommates === null ? (
+          <div className="m-loadmore" style={{ padding: '14px 0' }}>
+            <MIcon name="spinner" size={16} className="m-spin" />
+            加载中…
+          </div>
+        ) : roommates.length === 0 ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 0' }}>
+            <MIcon name="users" size={16} style={{ color: 'var(--m-text-2)' }} />
+            <span className="m-t4">暂无同宿舍的其他学生</span>
+          </div>
+        ) : (
+          roommates.map((r) => (
+            <div className="m-roommate" key={r.id}>
+              <div className="m-row-main">
+                <div className="m-t2">{r.name}</div>
+                <div className="m-t4" style={{ marginTop: 2 }}>{r.className}</div>
+              </div>
+              {r.phone ? (
+                <span className="m-row-side" style={{ gap: 8 }}>
+                  <MaskedValue value={r.phone} label={`${r.name}电话`} />
+                  <TelLink phone={r.phone} label={r.name} />
+                </span>
+              ) : (
+                <span className="m-t4">未登记电话</span>
+              )}
+            </div>
+          ))
+        )}
       </div>
 
       {/* 联系方式：默认脱敏，点击「查看」显明文，离开本页自动回隐 */}

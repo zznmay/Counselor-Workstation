@@ -1,5 +1,4 @@
-import { CommentOutlined, DeleteOutlined, DownloadOutlined, InboxOutlined, PlusOutlined, RedoOutlined, SearchOutlined, UploadOutlined } from '@ant-design/icons';
-import {
+import { CommentOutlined, DeleteOutlined, DownloadOutlined, InboxOutlined, PhoneOutlined, PlusOutlined, RedoOutlined, SearchOutlined, UploadOutlined } from '@ant-design/icons';import {
   Alert,
   App,
   Button,
@@ -29,6 +28,7 @@ import {
   createStudent,
   deleteStudent,
   getExistingStudentNos,
+  getRoommates,
   getStudentBriefs,
   getStudents,
   importStudents,
@@ -41,7 +41,7 @@ import ConversationFormFields, {
 } from '@/components/ConversationFormFields';
 import type { ConversationFormValues } from '@/components/ConversationFormFields';
 import PageHeader from '@/components/PageHeader';
-import { canManageStudentFront, canViewAllStudents, getStoredUser, isSystemAdmin, subscribeSession } from '@/lib/auth';
+import { canExportStudents, canManageStudentFront, canViewAllStudents, getStoredUser, isSystemAdmin, subscribeSession } from '@/lib/auth';
 import {
   GENDERS,
   MAJORS,
@@ -58,11 +58,20 @@ import {
   parseStudentExcel,
   validateStudentRows,
 } from '@/utils/studentImport';
+import {
+  buildExportFileName,
+  fetchAllStudentsForExport,
+  rememberExportFieldKeys,
+  writeStudentWorkbook,
+  type ExportFieldDef,
+} from '@/utils/studentExport';
+import ExportDialog from './ExportDialog';
 import type {
   ClassOption,
   Gender,
   GradeOption,
   ParsedStudentRow,
+  Roommate,
   Student,
   StudentBrief,
   StudentImportFailure,
@@ -97,6 +106,8 @@ interface StudentFormValues {
 }
 
 /** 学生名册：列表 / 筛选搜索 / 新增 / 编辑 / 删除 / 详情（查看全员放开；维护限带班辅导员或管理员） */
+const EXPORT_PROGRESS_THRESHOLD = 300;
+
 function StudentsDesktop() {
   const isMobile = useIsMobile();
   const { message } = App.useApp();
@@ -114,6 +125,9 @@ function StudentsDesktop() {
   const [modalOpen, setModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [detail, setDetail] = useState<Student | null>(null);
+  /** 同宿舍学生：null=加载中/未加载；[]=已加载无数据；拉取失败时 roommatesFailed=true */
+  const [roommates, setRoommates] = useState<Roommate[] | null>(null);
+  const [roommatesFailed, setRoommatesFailed] = useState(false);
 
   /**
    * 角色/权限/带班范围变更后同步角色快照并回到第 1 页重新拉取：
@@ -128,6 +142,24 @@ function StudentsDesktop() {
     setModalOpen(false);
     patchQuery({ page: 1 });
   }), [patchQuery]);
+
+  /* 同宿舍学生：详情抽屉打开时按学生 ID 拉取（关闭时清空，避免下次打开闪现旧数据） */
+  useEffect(() => {
+    if (!detail) {
+      setRoommates(null);
+      setRoommatesFailed(false);
+      return undefined;
+    }
+    let alive = true;
+    setRoommates(null);
+    setRoommatesFailed(false);
+    getRoommates(detail.id)
+      .then((list) => alive && setRoommates(list))
+      .catch(() => alive && setRoommatesFailed(true));
+    return () => {
+      alive = false;
+    };
+  }, [detail]);
 
   /* ---------- 年级/班级字典（由「班级管理」模块维护，动态获取） ---------- */
   const [gradeOptions, setGradeOptions] = useState<GradeOption[]>([]);
@@ -154,6 +186,11 @@ function StudentsDesktop() {
 
   /* ---------- 批量选择 / 批量删除（仅管理员） ---------- */
   const isAdmin = isSystemAdmin(authUser);
+  /**
+   * 批量导出入口：仅辅导员角色可用（admin 恒可见；其他角色如班主任、心理主负责不显示，
+   * 越权调用在 handleExportConfirm 里二次拦截并提示，与 canStartTalkRecord 同口径）。
+   */
+  const canExport = canExportStudents(authUser);
   /**
    * 新增/导入入口：管理员或至少带一个班（与后端 canManageStudent 同口径）。
    * 角色只给了「学生名册」模块但未分配班级时，隐藏写入口，避免点了才被 403。
@@ -448,6 +485,60 @@ function StudentsDesktop() {
     patchQuery({ keyword: undefined, grade: undefined, classId: undefined, major: undefined, status: undefined });
   };
 
+  /* ---------- 批量导出（仅辅导员角色；纯前端生成 xlsx） ---------- */
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
+  /**
+   * 确认导出：范围 = 勾选学生（跨页）为空时取当前筛选结果全部。
+   * 辅导员没有全量 briefs 接口，全量走列表接口分页循环（pageSize=100），
+   * 可见范围仍由服务端 rosterScope 收口，前端不重复实现权限过滤。
+   */
+  const handleExportConfirm = async (fields: ExportFieldDef[]) => {
+    if (!canExport) {
+      message.error('批量导出仅对辅导员角色开放，当前账号无权使用');
+      return;
+    }
+    setExporting(true);
+    try {
+      let rows: Student[];
+      if (selectedKeys.length > 0) {
+        const picked = new Set(selectedKeys);
+        // 勾选可能跨页/跨筛选：从已加载的各页缓存里取完整记录，缺失的再按当前筛选翻页补齐
+        const cached = data.list.filter((s) => picked.has(s.id));
+        if (cached.length === picked.size) {
+          rows = cached;
+        } else {
+          const all = await fetchAllStudentsForExport(query);
+          rows = all.filter((s) => picked.has(s.id));
+        }
+        // 二次防御：勾选缓存缺失（筛选已变）时按现有可取数据导出，绝不静默丢列丢行
+        if (rows.length === 0) {
+          message.warning('已勾选的学生不在当前可见范围内，请重新勾选后再导出');
+          return;
+        }
+      } else {
+        if (data.total === 0) {
+          message.warning('当前筛选条件下没有学生，无法导出');
+          return;
+        }
+        rows = await fetchAllStudentsForExport(query, (done, total) => {
+          if (total > EXPORT_PROGRESS_THRESHOLD) message.loading({ content: `正在导出 ${done}/${total} 名学生…`, key: 'export-progress', duration: 0 });
+        });
+      }
+      const fileName = buildExportFileName(authUser?.displayName);
+      writeStudentWorkbook(fields, rows, fileName);
+      rememberExportFieldKeys(fields.map((f) => f.key));
+      message.success(`已导出 ${rows.length} 名学生（${fileName}）`);
+      setExportOpen(false);
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '导出失败，请重试');
+    } finally {
+      message.destroy('export-progress');
+      setExporting(false);
+    }
+  };
+
   const columns: ColumnsType<Student> = [
     { title: '学号', dataIndex: 'studentNo', width: 110 },
     {
@@ -568,6 +659,11 @@ function StudentsDesktop() {
           重置
         </Button>
         <div className="toolbar-spacer" />
+        {canExport && (
+          <Button icon={<DownloadOutlined />} disabled={data.total === 0 && selectedKeys.length === 0} onClick={() => setExportOpen(true)}>
+            批量导出{selectedKeys.length > 0 ? `（${selectedKeys.length}）` : ''}
+          </Button>
+        )}
         {isAdmin && (
           <Button
             danger
@@ -590,13 +686,15 @@ function StudentsDesktop() {
         )}
       </div>
 
-      {/* 批量选择状态条：仅管理员可见，展示已选数量并提供跨页全选 */}
-      {isAdmin && (
+      {/* 批量选择状态条：管理员（删除用）或辅导员（导出用）可见；辅导员用复选框圈定导出范围 */}
+      {(isAdmin || canExport) && (
         <div className="batch-bar">
           <span>
             已选 <b>{selectedKeys.length}</b> 名学生
           </span>
-          <span className="batch-bar-hint">勾选可批量删除，支持跨页选择</span>
+          <span className="batch-bar-hint">
+            {isAdmin ? '勾选可批量删除' : '勾选可限定导出范围，不勾选则导出当前筛选结果'}，支持跨页选择
+          </span>
           <div className="batch-bar-spacer" />
           <Button size="small" type="link" loading={selectingAll} onClick={handleSelectAllFiltered}>
             全选当前筛选结果（共 {data.total} 名）
@@ -614,7 +712,7 @@ function StudentsDesktop() {
         loading={loading}
         scroll={{ x: 1280 }}
         rowSelection={
-          isAdmin
+          isAdmin || canExport
             ? {
                 selectedRowKeys: selectedKeys,
                 preserveSelectedRowKeys: true,
@@ -684,6 +782,49 @@ function StudentsDesktop() {
             <Descriptions.Item label="母亲姓名">{detail.motherName ?? '—'}</Descriptions.Item>
             <Descriptions.Item label="母亲电话">{detail.motherPhone ?? '—'}</Descriptions.Item>
           </Descriptions>
+
+          {/* 同宿舍学生：姓名 / 班级 / 联系电话 + 一键外拨；区分「未登记宿舍 / 无室友 / 未登记电话」 */}
+          <div style={{ fontWeight: 600, margin: '20px 0 12px', color: 'var(--app-ink)' }}>
+            同宿舍学生{roommates && roommates.length > 0 ? `（${roommates.length} 人）` : ''}
+          </div>
+          {roommatesFailed ? (
+            <Typography.Text type="secondary">同宿舍学生信息加载失败，稍后重试</Typography.Text>
+          ) : !detail.dorm ? (
+            <Typography.Text type="secondary">该学生未登记宿舍，暂无同宿舍学生</Typography.Text>
+          ) : roommates === null ? (
+            <Typography.Text type="secondary">加载中…</Typography.Text>
+          ) : roommates.length === 0 ? (
+            <Typography.Text type="secondary">暂无同宿舍的其他学生</Typography.Text>
+          ) : (
+            <Table<Roommate>
+              size="small"
+              rowKey="id"
+              pagination={false}
+              dataSource={roommates}
+              columns={[
+                { title: '姓名', dataIndex: 'name', width: 90 },
+                { title: '班级', dataIndex: 'className', width: 130 },
+                {
+                  title: '联系电话',
+                  dataIndex: 'phone',
+                  render: (v: Roommate['phone']) => v || '未登记',
+                },
+                {
+                  title: '操作',
+                  key: 'op',
+                  width: 84,
+                  render: (_, r) =>
+                    r.phone ? (
+                      <a href={`tel:${r.phone}`} aria-label={`拨打${r.name}电话 ${r.phone}`}>
+                        <PhoneOutlined /> 拨打
+                      </a>
+                    ) : (
+                      <Typography.Text type="secondary">—</Typography.Text>
+                    ),
+                },
+              ]}
+            />
+          )}
           </>
         )}
       </Drawer>
@@ -1056,6 +1197,16 @@ function StudentsDesktop() {
           <ConversationFormFields />
         </Form>
       </Modal>
+
+      {/* 批量导出字段选择弹窗（仅网页端入口；移动端不提供导出） */}
+      <ExportDialog
+        open={exportOpen}
+        exporting={exporting}
+        filterTotal={data.total}
+        selectedCount={selectedKeys.length}
+        onConfirm={handleExportConfirm}
+        onCancel={() => setExportOpen(false)}
+      />
     </div>
   );
 }

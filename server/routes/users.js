@@ -14,8 +14,8 @@ const { logAccess, nowStr } = require('../lib/audit');
 const router = express.Router();
 router.use(auth.authMiddleware);
 
-/** 导入未填写初始密码时的默认值（首次登录强制修改） */
-const DEFAULT_IMPORT_PASSWORD = 'Hzky@123456';
+/** 批量导入初始密码规则：统一为「Hzpt@」拼接用户名，模板不再提供密码列，首次登录强制修改 */
+const IMPORT_PASSWORD_PREFIX = 'Hzpt@';
 const USERNAME_RE = /^[a-zA-Z0-9_]{3,20}$/;
 
 /* ---------- 角色集合（userRoles 多对多） ---------- */
@@ -343,7 +343,6 @@ router.post('/import', (req, res) => {
     const username = String(data?.username ?? '').trim();
     const displayName = String(data?.displayName ?? '').trim();
     const roleRaw = String(data?.role ?? '').trim();
-    const passwordRaw = String(data?.password ?? '');
     const classRaw = String(data?.classNames ?? data?.className ?? '').trim();
 
     if (!username) reasons.push('用户名为必填项');
@@ -358,10 +357,6 @@ router.post('/import', (req, res) => {
     const roleRow = roleByKey.get(roleRaw) ?? roleByName.get(roleRaw);
     if (!roleRaw) reasons.push('角色为必填项');
     else if (!roleRow) reasons.push(`角色「${roleRaw}」不存在，请先在「角色管理」中创建`);
-
-    if (passwordRaw && (passwordRaw.length < 8 || !/[A-Za-z]/.test(passwordRaw) || !/\d/.test(passwordRaw))) {
-      reasons.push('初始密码至少 8 位且包含字母和数字');
-    }
 
     let classIds = [];
     if (classRaw && roleRow && roleRow.key !== 'admin') {
@@ -380,7 +375,7 @@ router.post('/import', (req, res) => {
       username,
       displayName,
       roleKey: roleRow.key,
-      password: passwordRaw || DEFAULT_IMPORT_PASSWORD,
+      password: `${IMPORT_PASSWORD_PREFIX}${username}`,
       classIds,
     });
   }
