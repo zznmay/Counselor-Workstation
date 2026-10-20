@@ -532,6 +532,13 @@ function seed() {
     insApproval.run(a.id, a.type, a.studentId, a.summary, a.detail ?? null, a.submittedAt, a.status, a.comment ?? null, a.approvedAt ?? null);
   });
 
+  insertBuiltinTemplates();
+
+  console.log('[db] 已完成首次初始化：管理员 admin 与示例数据已写入。');
+}
+
+/** 写入内置模板类别与内置模板（demo 首次初始化与生产模式引导共用同一份种子） */
+function insertBuiltinTemplates() {
   const insCat = db.prepare('INSERT INTO templateCategories (id, name) VALUES (?, ?)');
   SEED.templateCategories.forEach((c) => insCat.run(c.id, c.name));
 
@@ -542,11 +549,44 @@ function seed() {
     insFile.run(f.id, f.name, f.categoryId, f.format, f.size, f.description ?? null, f.uploader, f.updatedAt, f.assetUrl ?? null);
   });
 
-  console.log('[db] 已完成首次初始化：管理员 admin 与示例数据已写入。');
+  markBuiltinTemplateLibrarySeeded();
+}
+
+/** 内置模板库播种标记的键（存 dataSettings，标记「本库已播种过内置模板」） */
+const BUILTIN_TEMPLATE_MARKER = 'builtinTemplateLibrarySeeded';
+
+/** 是否已播种过内置模板库（播种后管理员自行清空，不应被自动复活） */
+function isBuiltinTemplateLibrarySeeded() {
+  return !!db.prepare('SELECT 1 FROM dataSettings WHERE key = ?').get(BUILTIN_TEMPLATE_MARKER);
+}
+
+/** 记录「内置模板库已播种」标记（幂等） */
+function markBuiltinTemplateLibrarySeeded() {
+  db.prepare(
+    `INSERT INTO dataSettings (key, value, updatedAt, updatedBy)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updatedAt = excluded.updatedAt`,
+  ).run(BUILTIN_TEMPLATE_MARKER, '1', new Date().toISOString().slice(0, 16).replace('T', ' '), '系统');
+}
+
+/**
+ * 内置模板库引导（幂等）：生产（empty）模式建库时不写任何示例数据，模板汇总库因此为空。
+ * 触发条件：模板类别为空 且 本库尚未播种过内置模板 —— 满足即播种并写入标记。
+ *
+ * 之所以用「标记」而不是「用户数 ≤ 1」判断是否处于初始化阶段：学校一旦创建了
+ * 自己的账号就说明已进入正式使用，此时若模板库仍为空仍需补齐内置模板；
+ * 而管理员主动清空模板库后（标记已存在），重启也不会把模板写回来。
+ */
+function ensureBuiltinTemplateLibrary() {
+  if (db.prepare('SELECT COUNT(*) AS c FROM templateCategories').get().c > 0) return;
+  if (isBuiltinTemplateLibrarySeeded()) return;
+  insertBuiltinTemplates();
+  console.log('[db] 模板汇总库为空，已播种内置模板类别与模板（生产模式引导）。');
 }
 
 ensureBuiltinRoles();
 seed();
+ensureBuiltinTemplateLibrary();
 ensureStudentClassBackfill();
 ensureUserRoleBackfill();
 ensureMentalLevelBaselineLogs();

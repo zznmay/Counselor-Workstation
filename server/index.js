@@ -79,9 +79,29 @@ if (fs.existsSync(config.DIST_DIR)) {
   const sendEntry = (res) => res.sendFile(
     entryFile && fs.existsSync(entryFile) ? entryFile : path.join(config.DIST_DIR, 'index.html'),
   );
+  /**
+   * 判断请求路径是否命中 dist 内真实存在的静态 HTML（实用工具页 /tools/*.html 等）。
+   * 先按 dist 根解析绝对路径，再校验结果仍位于 dist 之内（防目录穿越）且是普通文件。
+   */
+  const isRealDistHtml = (reqPath) => {
+    if (!reqPath || reqPath === '/' || !reqPath.endsWith('.html')) return false;
+    const distRoot = path.resolve(config.DIST_DIR);
+    const target = path.resolve(distRoot, `.${reqPath}`);
+    if (target !== distRoot && !target.startsWith(distRoot + path.sep)) return false;
+    try {
+      return fs.statSync(target).isFile();
+    } catch {
+      return false;
+    }
+  };
   app.use((req, res, next) => {
     // 根路径与 *.html 走自愈入口（必须在 express.static 之前，否则 / 会被 dist/index.html 抢先命中）
-    if (req.method === 'GET' && (req.path === '/' || req.path.endsWith('.html'))) return sendEntry(res);
+    // 例外：dist 中真实存在的静态 HTML（实用工具 /tools/*.html 等）直接放行，
+    // 否则 iframe 内嵌工具页会被改写成工作台 SPA 入口，表现为「实用工具内容缺失」。
+    if (req.method === 'GET' && (req.path === '/' || req.path.endsWith('.html'))) {
+      if (isRealDistHtml(req.path)) return next();
+      return sendEntry(res);
+    }
     return next();
   });
   app.use(express.static(config.DIST_DIR));
