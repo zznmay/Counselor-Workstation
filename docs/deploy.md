@@ -41,6 +41,34 @@ npm start
 | admin | Admin@2026 | 管理员（可见全部数据、用户管理、访问日志） |
 | zhenann / hanwen / ... | Hzky@123456 | 辅导员（按学生归属隔离） |
 
+## 二之二、生产部署：不写入任何演示数据
+
+上表的 8 个示例辅导员账号与 24 名示例学生（及其谈话/预警/通知/待办/审批/模板/心理健康标记）均为**演示数据**，生产环境不应带入。设置 `WORKBENCH_SEED=empty` 即可在首次建库时跳过全部示例数据：
+
+```bash
+# 云平台 / 容器：启动命令直接切换到生产脚本
+npm run start:cloud:prod      # = vite build && WORKBENCH_SEED=empty node --experimental-sqlite server/start-cloud.js
+
+# 内网服务器：自行注入环境变量
+WORKBENCH_SEED=empty PORT=8443 node --experimental-sqlite server/index.js
+```
+
+`empty` 模式下的库初始化结果：
+
+| 内容 | 结果 |
+|------|------|
+| `users` | 仅 `admin`（初始密码 `Admin@2026`，首次登录强制改密） |
+| 内置角色 | admin / counselor / headTeacher 三个角色正常创建（系统运行必需，非演示数据） |
+| 心理访谈记录单默认模板 | 正常创建（业务必需，非演示数据） |
+| 学生、谈话、预警、通知、待办、审批、模板分类与文件、心理健康关注标记 | **全部为空** |
+
+其余账号与业务数据由管理员登录后台按真实情况逐项录入。
+
+**注意两点：**
+
+1. 该开关**只在库为空（首次建库）时生效**。若目标目录已存在 `app.db`，无论该变量取何值都不会改动既有数据 —— 这是刻意的保护，避免误设变量清空生产数据。彻底重来请改用 `RESET_DB=1`（会删除整个数据目录，务必先备份）。
+2. 默认值为 `demo`，不设置该变量的既有部署行为完全不变，本地开发与演示不受影响。
+
 ## 三、常驻运行（开机自启 + 崩溃自启）
 
 - **Windows**：安装 [NSSM](https://nssm.cc)，`nssm install Workbench "C:\Program Files\nodejs\node.exe" "D:\workbench\server\index.js"`，设置启动目录后启动服务；
@@ -58,7 +86,7 @@ npm start
 
 1. 用 `admin` 登录（首次强制改密）→ 系统管理 → 用户管理：为每位老师开设账号（单个创建时手动设置初始密码；Excel 批量导入的账号初始密码由系统自动生成为「Hzpt@用户名」，首次登录强制修改）；
 2. 学生归属：新增/编辑学生时可指定主责辅导员与共管老师；辅导员登录后只能看到自己名下/共管的学生及其谈话、预警、审批记录，管理员可见全部；
-3. **清空示例数据**（正式启用前可选）：停止服务后删除 `server/data/app.db` 前先确认已备份，或用 SQLite 工具执行 `DELETE FROM students;` 等语句按表清理业务数据（保留 users 表）。
+3. **清空示例数据**（正式启用前）：推荐在**首次启动前**设置 `WORKBENCH_SEED=empty` 从源头不写入示例数据（见「二之二」）。若已用 demo 模式建过库，停止服务并确认已备份 `server/data/app.db` 后，再用 SQLite 工具按表清理业务数据（保留 `users` 表，仅保留 admin 账号，其余示例账号一并删除）。
 
 ## 六、备份与恢复
 

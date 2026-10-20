@@ -434,7 +434,19 @@ function ensureStudentClassBackfill() {
   console.log(`[db] 学生班级归属回填完成：处理 ${created} 组（年级, 班级）组合。`);
 }
 
-/** 首次初始化：管理员 + 示例辅导员账号 + 示例业务数据 */
+/**
+ * 种子数据模式（环境变量 WORKBENCH_SEED）：
+ *   demo  （默认）首次启动写入完整示例数据：8 个示例辅导员账号 + 24 名示例学生及其谈话/预警/
+ *         通知/待办/审批/模板/心理健康关注标记，供本地开发与演示使用。
+ *   empty （生产）仅创建管理员 admin 一个账号，不写入任何示例账号与示例业务数据；
+ *         其余账号、学生与业务数据一律由管理员在后台按真实情况录入。
+ * 取值缺省或非 empty 时一律按 demo 处理，保证既有开发与部署行为完全不变。
+ */
+function seedMode() {
+  return String(process.env.WORKBENCH_SEED ?? 'demo').trim().toLowerCase() === 'empty' ? 'empty' : 'demo';
+}
+
+/** 首次初始化：管理员 +（demo 模式）示例辅导员账号 +（demo 模式）示例业务数据 */
 function seed() {
   const userCount = db.prepare('SELECT COUNT(*) AS c FROM users').get().c;
   if (userCount > 0) return;
@@ -443,8 +455,15 @@ function seed() {
   const insUser = db.prepare(
     'INSERT INTO users (username, displayName, role, passwordHash, mustChangePassword, createdAt) VALUES (?, ?, ?, ?, ?, ?)',
   );
-  const sampleHash = bcrypt.hashSync('Hzky@123456', 10);
   insUser.run('admin', '系统管理员', 'admin', bcrypt.hashSync('Admin@2026', 10), 1, now());
+
+  // 生产模式：到此为止 —— 不创建示例辅导员账号，不写入任何示例业务数据
+  if (seedMode() === 'empty') {
+    console.log('[db] WORKBENCH_SEED=empty：仅初始化管理员 admin，未写入任何示例账号与示例业务数据。');
+    return;
+  }
+
+  const sampleHash = bcrypt.hashSync('Hzky@123456', 10);
 
   const counselorUserIds = [];
   for (const [username, displayName] of SEED.counselors) {
