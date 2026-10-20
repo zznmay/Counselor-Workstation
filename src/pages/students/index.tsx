@@ -21,7 +21,7 @@ import { CommentOutlined, DeleteOutlined, DownloadOutlined, InboxOutlined, Phone
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs, { type Dayjs } from 'dayjs';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import {
   batchDeleteStudents,
@@ -30,6 +30,7 @@ import {
   getExistingStudentNos,
   getRoommates,
   getStudentBriefs,
+  getStudentMajors,
   getStudents,
   importStudents,
   updateStudent,
@@ -130,6 +131,24 @@ function StudentsDesktop() {
   const [roommatesFailed, setRoommatesFailed] = useState(false);
 
   /**
+   * 专业筛选项：取自名册数据本身（服务端 /students/majors 去重，与列表同口径）。
+   * 专业在导入/编辑时是自由文本，用静态常量当选项会与名册脱节：
+   * 常量里的专业可能一个学生都没有，名册里新出现的专业又选不到。
+   * 增删改/导入/角色范围变化后需重新拉取，避免选项停留在旧快照（缓存未同步）。
+   */
+  const [majorOptions, setMajorOptions] = useState<string[]>([]);
+  const loadMajors = useCallback(() => {
+    getStudentMajors()
+      .then(setMajorOptions)
+      // 接口异常时回退到预设专业清单，保证筛选框仍可用（正常情况下不会走到这里）
+      .catch(() => setMajorOptions([...MAJORS]));
+  }, []);
+
+  useEffect(() => {
+    loadMajors();
+  }, [loadMajors]);
+
+  /**
    * 角色/权限/带班范围变更后同步角色快照并回到第 1 页重新拉取：
    * 可见范围由服务端按当前角色实时计算（仅班主任时只剩所带班级），
    * 若停留在旧页码可能落在收窄后的范围之外，故统一重置分页；
@@ -141,7 +160,9 @@ function StudentsDesktop() {
     setEditing(null);
     setModalOpen(false);
     patchQuery({ page: 1 });
-  }), [patchQuery]);
+    // 角色/带班范围变化 → 可见名册变了，专业选项需同步重算
+    loadMajors();
+  }), [patchQuery, loadMajors]);
 
   /* 同宿舍学生：详情抽屉打开时按学生 ID 拉取（关闭时清空，避免下次打开闪现旧数据） */
   useEffect(() => {
@@ -183,6 +204,18 @@ function StudentsDesktop() {
     () => gradeOptions.map((g) => ({ value: g.name, label: g.name })),
     [gradeOptions],
   );
+
+  /**
+   * 表单专业选项 = 预设字典 ∪ 名册实际专业 ∪ 当前编辑对象原值。
+   * 名册里可能存在历史数据或导入写入的自定义专业，只给预设清单会让这类学生
+   * 在编辑时专业显示为空、保存时被必填校验拦住。
+   */
+  const formMajorOptions = useMemo(() => {
+    const set = new Set<string>(MAJORS);
+    majorOptions.forEach((m) => set.add(m));
+    if (editing?.major) set.add(editing.major);
+    return [...set];
+  }, [majorOptions, editing]);
 
   /* ---------- 批量选择 / 批量删除（仅管理员） ---------- */
   const isAdmin = isSystemAdmin(authUser);
@@ -322,7 +355,11 @@ function StudentsDesktop() {
 
   const closeImport = () => {
     setImportOpen(false);
-    if (importResult && importResult.successCount > 0) refresh();
+    if (importResult && importResult.successCount > 0) {
+      refresh();
+      // 导入常带来名册中原本没有的专业，筛选项必须同步更新
+      loadMajors();
+    }
   };
 
   const resetImport = () => {
@@ -420,6 +457,8 @@ function StudentsDesktop() {
       }
       setModalOpen(false);
       refresh();
+      // 新增/编辑可能引入新专业或让某专业清零，同步刷新筛选项
+      loadMajors();
     } finally {
       setSubmitting(false);
     }
@@ -429,6 +468,7 @@ function StudentsDesktop() {
     await deleteStudent(id);
     message.success('删除成功');
     refresh();
+    loadMajors();
   };
 
   /** 全选当前筛选结果（跨页；与列表同一套筛选口径，服务端解析） */
@@ -463,6 +503,8 @@ function StudentsDesktop() {
       message.success(`已删除 ${result.deletedCount} 名学生，操作已写入日志`);
       setBatchOpen(false);
       setSelectedKeys([]);
+      // 批量删除可能让某些专业清零，同步刷新筛选项
+      loadMajors();
       // 当前页被删空时回退一页，避免停留在空页
       const remaining = data.list.filter((s) => !selectedSet.has(s.id)).length;
       if (remaining === 0 && data.page > 1) {
@@ -643,9 +685,11 @@ function StudentsDesktop() {
           placeholder="专业"
           allowClear
           style={{ minWidth: 150 }}
-          options={toOptions(MAJORS)}
+          options={toOptions(majorOptions)}
           value={query.major}
           onChange={(major) => patchQuery({ major })}
+          disabled={majorOptions.length === 0}
+          notFoundContent="名册中暂无可筛选的专业"
         />
         <Select
           placeholder="学籍状态"
@@ -892,7 +936,7 @@ function StudentsDesktop() {
             </Col>
             <Col xs={24} sm={12}>
               <Form.Item name="major" label="专业" rules={[{ required: true, message: '请选择专业' }]}>
-                <Select options={toOptions(MAJORS)} />
+                <Select options={toOptions(formMajorOptions)} showSearch optionFilterProp="label" />
               </Form.Item>
             </Col>
             <Col xs={24} sm={12}>

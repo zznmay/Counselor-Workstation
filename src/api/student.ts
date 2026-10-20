@@ -21,6 +21,15 @@ export async function getStudents(query: StudentQuery): Promise<PageResult<Stude
   return request<PageResult<Student>>(`/students?${params.toString()}`);
 }
 
+/**
+ * 筛选下拉：名册中实际存在的专业（服务端按当前账号可见范围去重，与列表同口径）。
+ * 专业为自由文本，选项必须取自名册数据本身，不能用前端静态清单，
+ * 否则会出现「选项筛不出学生」或「名册里的专业选不到」。
+ */
+export async function getStudentMajors(): Promise<string[]> {
+  return request<string[]>('/students/majors');
+}
+
 /** 当前筛选条件下的全部学生精简信息（「全选筛选结果」用，不分页；仅管理员） */
 export async function getStudentBriefs(query: StudentQuery): Promise<StudentBrief[]> {
   const params = new URLSearchParams();

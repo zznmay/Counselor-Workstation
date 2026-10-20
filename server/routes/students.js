@@ -78,7 +78,9 @@ function buildStudentFilter(query) {
     params.push(`%${kw}%`, `%${kw}%`, `%${kw}%`, `%${kw}%`, `%${kw}%`);
   }
   if (grade) { conds.push('s.grade = ?'); params.push(String(grade)); }
-  if (major) { conds.push('s.major = ?'); params.push(String(major)); }
+  // 专业按去空白后比对：选项值来自 /students/majors 的 TRIM 结果，
+  // 若库内存在「电子商务 」这类带空白的脏值，直接等值比会筛不出任何记录。
+  if (major) { conds.push('TRIM(s.major) = ?'); params.push(String(major).trim()); }
   if (status) { conds.push('s.status = ?'); params.push(String(status)); }
   const classId = Number(query.classId);
   if (Number.isInteger(classId) && classId > 0) { conds.push('s.classId = ?'); params.push(classId); }
@@ -138,6 +140,25 @@ router.get('/nos', (req, res) => {
 
 /* —— 以下为名册数据接口：需「学生名册」模块权限（/options、/nos 为跨模块参考数据，不受限） —— */
 router.use(requirePermission('students'));
+
+/**
+ * 筛选下拉：名册中「实际存在」的专业（去重、去首尾空白、忽略空值）。
+ * 专业是自由文本（导入/编辑均可写入任意名称），故不能用前端静态清单当选项，
+ * 否则会出现「下拉里有名册中查不到的专业」或「名册里的专业下拉里没有」。
+ * 与列表同口径：同样走 rosterScope 收口，保证下拉里每个专业在当前账号可见范围内都筛得出学生。
+ * 排序：人数多的在前，人数相同按名称，便于高频专业置顶。
+ */
+router.get('/majors', (req, res) => {
+  const scope = rosterScope(req.user);
+  const rows = dbx.all(
+    `SELECT TRIM(s.major) AS major, COUNT(*) AS c FROM students s
+     WHERE s.major IS NOT NULL AND TRIM(s.major) <> ''${scope ? ` AND ${scope.sql}` : ''}
+     GROUP BY TRIM(s.major)
+     ORDER BY c DESC, major`,
+    scope ? scope.params : [],
+  );
+  res.json(rows.map((r) => r.major));
+});
 
 /**
  * 批量选择用：当前筛选条件下的全部学生精简信息（不分页，仅管理员）。

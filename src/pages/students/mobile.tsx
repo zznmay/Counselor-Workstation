@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { getStudents } from '@/api/student';
+import { getStudentMajors, getStudents } from '@/api/student';
 import { getWarnings } from '@/api/warning';
 import { getGradeOptions } from '@/api/classes';
 import FilterSheet from '@/components/mobile/FilterSheet';
@@ -57,6 +57,22 @@ export default function StudentsMobile() {
       .catch(() => undefined);
   }, []);
 
+  /**
+   * 专业筛选项：取自名册数据本身（服务端去重、与列表同口径）。
+   * 专业是自由文本，静态清单会与名册脱节（清单里的筛不出人、名册里的选不到）；
+   * 角色/带班范围变化后需重新拉取。
+   */
+  const [majors, setMajors] = useState<string[]>([]);
+  const loadMajors = useCallback(() => {
+    getStudentMajors()
+      .then(setMajors)
+      // 接口异常时回退到预设清单，保证筛选仍可用
+      .catch(() => setMajors([...MAJORS]));
+  }, []);
+  useEffect(() => {
+    loadMajors();
+  }, [loadMajors]);
+
   const loadWarnMap = useCallback(async () => {
     const [pending, handling] = await Promise.all([
       getWarnings({ page: 1, pageSize: 100, status: '待处理' }),
@@ -99,7 +115,9 @@ export default function StudentsMobile() {
   useEffect(() => subscribeSession((user) => {
     setAuthUser(user);
     void fetchPage(1, { keyword, filters });
-  }), [fetchPage, keyword, filters]);
+    // 可见名册随角色变化，专业筛选项同步重算
+    loadMajors();
+  }), [fetchPage, keyword, filters, loadMajors]);
 
   /* 关键词防抖 300ms；筛选变化立即回到第 1 页 */
   const firstRun = useRef(true);
@@ -282,7 +300,7 @@ export default function StudentsMobile() {
           <label>专业</label>
           <div className="m-seg" style={{ flexWrap: 'wrap' }}>
             <button type="button" className={`m-seg-btn${!draft.major ? ' on' : ''}`} onClick={() => setDraft((d) => ({ ...d, major: undefined }))}>全部</button>
-            {MAJORS.map((m) => (
+            {majors.map((m) => (
               <button key={m} type="button" className={`m-seg-btn${draft.major === m ? ' on' : ''}`} onClick={() => setDraft((d) => ({ ...d, major: m }))}>
                 {m}
               </button>

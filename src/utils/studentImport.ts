@@ -1,13 +1,25 @@
 import dayjs from 'dayjs';
 import * as XLSX from 'xlsx';
 
-import { GENDERS, MAJORS, STUDENT_STATUSES } from '@/constants';
+import { GENDERS, STUDENT_STATUSES } from '@/constants';
 import type { ParsedStudentRow, Student, StudentImportFailure } from '@/types';
+
+import {
+  cleanImportText,
+  describeDateError,
+  describePhoneError,
+  formatPhoneNumber,
+  normalizeDateInput,
+  normalizePhoneInput,
+  SUPPORTED_DATE_FORMATS,
+} from './importNormalize';
 
 /**
  * 学生名单 Excel 批量导入工具：
  * 模板生成（含填写说明与示例行）→ 文件解析 → 逐行校验 → 失败明细导出。
  * 校验规则与 api.importStudents 共用，浏览器端预览与导入端二次校验保持一致。
+ *
+ * 单元格清洗与日期/电话规范化统一由 importNormalize.ts 提供（解析与校验共用同一套逻辑）。
  */
 
 /** 模板列，顺序与 Student 字段对应 */
@@ -39,22 +51,22 @@ const FIELD_GUIDE: [string, string, string][] = [
   ['姓名', '必填', '学生真实姓名'],
   ['性别', '必填', '只能填：男 或 女'],
   ['年级', '必填', '格式为「YYYY级」，如 2026级'],
-  ['专业', '必填', `只能填以下之一：${MAJORS.join('、')}`],
+  ['专业', '选填', '如 计算机应用技术；不做取值校验，可留空或填写任意专业名称'],
   ['班级', '必填', '如 计应2601'],
-  ['手机号', '必填', '11位手机号，以1开头，如 13800001111'],
+  ['手机号', '必填', '11位手机号（以1开头）或带区号的座机号；允许空格、连字符等分隔写法，如 183 1485 0022、183-1485-0022、0571-88886666'],
   ['宿舍', '选填', '如 学生公寓5-602'],
   ['政治面貌', '选填', '如 共青团员、中共预备党员、群众'],
   ['生源地', '选填', '如 浙江杭州'],
   ['学籍状态', '选填', '只能填：在读、休学、退学；留空默认为「在读」'],
   ['班内职务', '选填', '如 班长、学习委员'],
   ['备注', '选填', '家庭情况、重点关注事项等'],
-  ['入学时间', '必填', '日期格式 YYYY-MM-DD，如 2026-09-01（可直接使用 Excel 日期单元格）'],
+  ['入学时间', '必填', `多种写法均可，导入时统一转换为 YYYY-MM-DD：${SUPPORTED_DATE_FORMATS.join('；')}；也可直接使用 Excel 日期单元格`],
   ['班主任', '选填', '学生所在班级的班主任姓名'],
   ['辅导员', '选填', '留空默认为当前辅导员（王老师）'],
   ['父亲姓名', '选填', '父亲姓名'],
-  ['父亲电话', '选填', '11位手机号，以1开头'],
+  ['父亲电话', '选填', '11位手机号（以1开头）或带区号的座机号，允许空格/连字符分隔'],
   ['母亲姓名', '选填', '母亲姓名'],
-  ['母亲电话', '选填', '11位手机号，以1开头'],
+  ['母亲电话', '选填', '11位手机号（以1开头）或带区号的座机号，允许空格/连字符分隔'],
 ];
 
 const EXAMPLE_ROWS: (string | undefined)[][] = [
@@ -85,7 +97,7 @@ const EXAMPLE_ROWS: (string | undefined)[][] = [
     '李四喜',
     '女',
     '2026级',
-    '电子商务',
+    '',
     '电商2601',
     '13900002222',
     '',
@@ -177,9 +189,10 @@ export async function parseStudentExcel(file: File): Promise<ParsedStudentRow[]>
   const rows: ParsedStudentRow[] = [];
   for (let i = 1; i < aoa.length; i++) {
     const arr = aoa[i] as unknown[];
+    // 所有单元格走统一清洗：全角数字转半角、去零宽字符、空白折叠、去首尾空白
     const get = (colName: string) => {
       const k = indexOf(colName);
-      return k < 0 ? '' : String(arr[k] ?? '').trim();
+      return k < 0 ? '' : cleanImportText(arr[k]);
     };
     const studentNo = get('学号');
     const name = get('姓名');
@@ -202,7 +215,9 @@ export async function parseStudentExcel(file: File): Promise<ParsedStudentRow[]>
         status: (STUDENT_STATUSES as readonly string[]).includes(statusRaw) ? statusRaw : '在读',
         position: get('班内职务') || undefined,
         remark: get('备注') || undefined,
-        enrollDate: get('入学时间').replace(/\//g, '-'),
+        // 原样保留（仅清洗空白），日期与号码的规范化统一放到 validateStudentRows，
+        // 这样校验失败时仍能回显用户实际填写的原始值
+        enrollDate: get('入学时间'),
         headTeacher: get('班主任') || undefined,
         counselor: get('辅导员') || undefined,
         fatherName: get('父亲姓名') || undefined,
@@ -217,8 +232,15 @@ export async function parseStudentExcel(file: File): Promise<ParsedStudentRow[]>
 
 /**
  * 逐行校验学生数据：
- * 必填项、格式（性别/年级/专业/手机号/日期/学籍状态）、学号在系统与本表内的重复、
+ * 必填项、格式（性别/年级/手机号/日期/学籍状态）、学号在系统与本表内的重复、
  * 班级名与班级管理字典的匹配（classKeys 缺省时跳过该项，由服务端兜底）。
+ * 「专业」为自由文本列，不参与校验（列可缺省、可留空，也不限制取值范围）。
+ *
+ * 手机号/家长电话：先清洗空格（含全角空格、制表符）、连字符、括号等分隔字符，再按
+ * 手机号（1 开头 11 位）或座机号（0 开头 10-12 位）规则判定，通过后以纯数字形式入库。
+ * 入学时间：识别 YYYY-MM-DD、YYYY/MM/DD、YYYY.MM.DD、YYYYMMDD、YYYY年M月D日、
+ * 带时分秒的 ISO 日期时间等写法，统一规范化为 YYYY-MM-DD 后入库。
+ * 两者失败时均在提示中回显原始输入值（见 importNormalize.describe*Error）。
  *
  * @param classKeys 班级字典键集合（`${grade}|${className}`），调用侧由 GET /classes/options 构建
  */
@@ -233,12 +255,22 @@ export function validateStudentRows(
   const failures: StudentImportFailure[] = [];
 
   rows.forEach(({ row, data: rawData }) => {
-    // 先做规范化：学籍状态留空默认「在读」、辅导员留空默认当前辅导员；日期兼容 YYYY/MM/DD；再逐项校验
+    // 先做规范化：日期/电话走 importNormalize 统一清洗（空格、全角空格、连字符、多种日期写法），
+    // 学籍状态留空默认「在读」、辅导员留空默认当前辅导员；再逐项校验
+    const phone = normalizePhoneInput(rawData.phone);
+    const fatherPhone = normalizePhoneInput(rawData.fatherPhone);
+    const motherPhone = normalizePhoneInput(rawData.motherPhone);
+    const enrollDate = normalizeDateInput(rawData.enrollDate);
+
     const data = {
       ...rawData,
       status: (rawData.status || '在读') as Student['status'],
       counselor: rawData.counselor || '王老师',
-      enrollDate: (rawData.enrollDate ?? '').replace(/\//g, '-'),
+      // 规范化成功则入库标准化值；失败则原样保留，便于失败明细导出后对照修正
+      phone: phone.ok ? formatPhoneNumber(phone) : rawData.phone,
+      fatherPhone: fatherPhone.ok ? formatPhoneNumber(fatherPhone) : rawData.fatherPhone,
+      motherPhone: motherPhone.ok ? formatPhoneNumber(motherPhone) : rawData.motherPhone,
+      enrollDate: enrollDate.ok ? enrollDate.value : rawData.enrollDate,
     };
     const reasons: string[] = [];
     const { studentNo, name } = data;
@@ -260,34 +292,29 @@ export function validateStudentRows(
     if (!data.grade) reasons.push('年级为必填项');
     else if (!/^\d{4}级$/.test(data.grade)) reasons.push('年级格式应为「YYYY级」，如 2026级');
 
-    if (!data.major) reasons.push('专业为必填项');
-    else if (!(MAJORS as readonly string[]).includes(data.major)) reasons.push(`专业需为以下之一：${MAJORS.join('、')}`);
-
     if (!data.className) reasons.push('班级为必填项');
     else if (classKeys && !classKeys.has(`${data.grade}|${data.className}`)) {
       reasons.push(`班级名未匹配到班级字典（${data.grade} ${data.className}），请先在「班级管理」中创建该班级`);
     }
 
-    if (!data.phone) reasons.push('手机号为必填项');
-    else if (!/^1\d{10}$/.test(data.phone)) reasons.push('手机号应为11位且以1开头');
+    // 手机号：清洗分隔符后判定；错误提示回显原始输入
+    if (!phone.ok) reasons.push(describePhoneError(phone, '手机号'));
 
     if (data.status && !(STUDENT_STATUSES as readonly string[]).includes(data.status)) {
       reasons.push('学籍状态只能填：在读、休学、退学');
     }
 
-    if (data.fatherPhone && !/^1\d{10}$/.test(data.fatherPhone)) {
-      reasons.push('父亲电话应为11位且以1开头');
+    // 家长电话为选填：留空不校验，填了则同样清洗后判定
+    if (fatherPhone.raw !== '' && !fatherPhone.ok) {
+      reasons.push(describePhoneError(fatherPhone, '父亲电话'));
     }
 
-    if (data.motherPhone && !/^1\d{10}$/.test(data.motherPhone)) {
-      reasons.push('母亲电话应为11位且以1开头');
+    if (motherPhone.raw !== '' && !motherPhone.ok) {
+      reasons.push(describePhoneError(motherPhone, '母亲电话'));
     }
 
-    if (!data.enrollDate) {
-      reasons.push('入学时间为必填项');
-    } else if (!/^\d{4}-\d{2}-\d{2}$/.test(data.enrollDate) || !dayjs(data.enrollDate).isValid()) {
-      reasons.push('入学时间格式应为 YYYY-MM-DD');
-    }
+    // 入学时间：支持多种写法，统一规范化为 YYYY-MM-DD；无法识别时说明原始值与期望格式
+    if (!enrollDate.ok) reasons.push(describeDateError(enrollDate, '入学时间'));
 
     if (reasons.length > 0) {
       failures.push({ row, studentNo: studentNo || '—', name: name || '—', reason: reasons.join('；'), data });
