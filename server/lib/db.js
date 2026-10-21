@@ -98,8 +98,11 @@ const SCHEMA_STATEMENTS = [
     createdAt TEXT,
     PRIMARY KEY (classId, userId, roleType)
   )`,
-  `CREATE INDEX IF NOT EXISTS idx_cc_user ON classCounselors(userId, roleType)`,
-  `CREATE INDEX IF NOT EXISTS idx_cc_role ON classCounselors(roleType)`,
+  /* 注意：classCounselors 的索引（idx_cc_user / idx_cc_role）不在此处创建。
+     老库的该表仍是二维结构（无 roleType 列），若在迁移前建索引会抛
+     "no such column: roleType" 导致启动崩溃（云端既有实例已复现）。
+     索引统一由 lib/teacherSourceMigrate.js 在表结构升级完成后创建，
+     「已升级」与「需重建」两条路径均已覆盖。 */
   /* 教师批量导入批次：预览态暂存待确认数据，确认后落结果；clientRequestId 唯一保证重复提交幂等 */
   `CREATE TABLE IF NOT EXISTS teacherImportBatches (
     id TEXT PRIMARY KEY,
