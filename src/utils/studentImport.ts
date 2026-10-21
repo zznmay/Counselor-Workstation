@@ -1,7 +1,8 @@
 import dayjs from 'dayjs';
-import * as XLSX from 'xlsx';
+import type * as XLSX from 'xlsx';
 
 import { GENDERS, STUDENT_STATUSES } from '@/constants';
+import { loadXLSX } from './xlsx';
 import type { ParsedStudentRow, Student, StudentImportFailure } from '@/types';
 
 import {
@@ -114,7 +115,8 @@ const EXAMPLE_ROWS: (string | undefined)[][] = [
 ];
 
 /** 生成导入模板工作簿：「学生名单」数据表 + 「填写说明」说明表 */
-export function buildStudentTemplateWorkbook(): XLSX.WorkBook {
+export async function buildStudentTemplateWorkbook(): Promise<XLSX.WorkBook> {
+  const XLSX = await loadXLSX();
   const wb = XLSX.utils.book_new();
 
   const dataWs = XLSX.utils.aoa_to_sheet([[...TEMPLATE_HEADERS], ...EXAMPLE_ROWS]);
@@ -156,12 +158,14 @@ export function buildStudentTemplateWorkbook(): XLSX.WorkBook {
 }
 
 /** 浏览器端触发下载学生名单导入模板 */
-export function downloadStudentTemplate(): void {
-  XLSX.writeFile(buildStudentTemplateWorkbook(), '学生名单导入模板.xlsx');
+export async function downloadStudentTemplate(): Promise<void> {
+  const XLSX = await loadXLSX();
+  XLSX.writeFile(await buildStudentTemplateWorkbook(), '学生名单导入模板.xlsx');
 }
 
 /** 解析上传的学生名单 Excel（自动定位「学生名单」工作表，按列标题取值，跳过空行） */
 export async function parseStudentExcel(file: File): Promise<ParsedStudentRow[]> {
+  const XLSX = await loadXLSX();
   const data = new Uint8Array(await file.arrayBuffer());
   const wb = XLSX.read(data, { type: 'array' });
   const sheetName = wb.SheetNames.find((n) => n.includes('学生名单')) ?? wb.SheetNames[0];
@@ -321,7 +325,8 @@ export function validateStudentRows(
 }
 
 /** 导出失败明细（保留模板全部列 + 失败原因列），修正后可直接重新上传 */
-export function exportImportFailures(failures: StudentImportFailure[]): void {
+export async function exportImportFailures(failures: StudentImportFailure[]): Promise<void> {
+  const XLSX = await loadXLSX();
   const aoa: unknown[][] = [[...TEMPLATE_HEADERS, '失败原因']];
   failures.forEach(({ data, studentNo, name, reason }) => {
     // 校验失败记录均携带原始行数据；兜底对象保证极端情况下导出不报错

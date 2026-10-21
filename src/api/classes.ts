@@ -23,7 +23,7 @@ export function getGrades(): Promise<Grade[]> {
 }
 
 export function getGradeOptions(): Promise<GradeOption[]> {
-  return request<GradeOption[]>('/grades/options');
+  return request<GradeOption[]>('/grades/options', { cacheTtl: 60_000 });
 }
 
 export function createGrade(name: string): Promise<Grade> {
@@ -56,7 +56,7 @@ export function getClasses(query: ClassQuery): Promise<PageResult<SchoolClass>> 
 
 export function getClassOptions(gradeId?: number): Promise<ClassOption[]> {
   const suffix = gradeId !== undefined ? `?gradeId=${gradeId}` : '';
-  return request<ClassOption[]>(`/classes/options${suffix}`);
+  return request<ClassOption[]>(`/classes/options${suffix}`, { cacheTtl: 60_000 });
 }
 
 /** 人员入参（可选：不传 = 不动人员；传数组 = 覆盖该班人员配置） */

@@ -11,8 +11,6 @@ const router = express.Router();
 router.use(auth.authMiddleware);
 router.use(requirePermission('warnings'));
 
-const STATUS_ORDER = { 待处理: 0, 处理中: 1, 已解除: 2 };
-
 /** 列表：关键字 + 类型/等级/状态筛选（待处理优先，时间倒序） */
 router.get('/', (req, res) => {
   const { keyword = '', type, level, status } = req.query;
@@ -32,18 +30,39 @@ router.get('/', (req, res) => {
   if (status) { conds.push('x.status = ?'); params.push(status); }
 
   const where = `${conds.join(' AND ')} ${scope.where}`;
+  const total = dbx.get(
+    `SELECT COUNT(*) AS c FROM warnings x JOIN students s ON s.id = x.studentId WHERE ${where}`,
+    [...params, ...scope.params],
+  ).c;
+  // 排序与分页下推到 SQL：避免把全部预警捞回 Node 再排序切片
   const rows = dbx.all(
     `SELECT x.*, s.name AS studentName, s.studentNo, s.className FROM warnings x
-     JOIN students s ON s.id = x.studentId WHERE ${where} ORDER BY x.raisedAt DESC`,
-    [...params, ...scope.params],
+     JOIN students s ON s.id = x.studentId WHERE ${where}
+     ORDER BY CASE x.status WHEN '待处理' THEN 0 WHEN '处理中' THEN 1 WHEN '已解除' THEN 2 ELSE 9 END,
+              x.raisedAt DESC, x.rowid ASC
+     LIMIT ? OFFSET ?`,
+    [...params, ...scope.params, pageSize, (page - 1) * pageSize],
   );
-  rows.sort((a, b) => {
-    const byStatus = (STATUS_ORDER[a.status] ?? 9) - (STATUS_ORDER[b.status] ?? 9);
-    if (byStatus !== 0) return byStatus;
-    return b.raisedAt.localeCompare(a.raisedAt);
-  });
 
-  res.json({ list: rows.slice((page - 1) * pageSize, page * pageSize), total: rows.length, page, pageSize });
+  res.json({ list: rows, total, page, pageSize });
+});
+
+/**
+ * 移动端名册预警角标：只返回每个学生当前最高预警级别。
+ * 原实现拉取「待处理」「处理中」各 100 条完整预警再在前端归并，数据量与请求数都偏大。
+ */
+router.get('/active-map', (req, res) => {
+  const scope = sensitiveScope(req.user, 'x');
+  const rows = dbx.all(
+    `SELECT x.studentId,
+            CASE MAX(CASE x.level WHEN '红色' THEN 3 WHEN '橙色' THEN 2 WHEN '黄色' THEN 1 ELSE 0 END)
+              WHEN 3 THEN '红色' WHEN 2 THEN '橙色' WHEN 1 THEN '黄色' ELSE NULL END AS level
+     FROM warnings x JOIN students s ON s.id = x.studentId
+     WHERE x.status != '已解除' ${scope.where}
+     GROUP BY x.studentId`,
+    [...scope.params],
+  );
+  res.json(rows.filter((r) => r.level));
 });
 
 function resolveStudent(studentId) {

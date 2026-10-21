@@ -1,29 +1,42 @@
-import BasicLayout from '@/layouts/BasicLayout';
-import AdminLogs from '@/pages/admin/logs';
-import AdminRoles from '@/pages/admin/roles';
-import AdminUsers from '@/pages/admin/users';
-/* 数据管理（备份 / 恢复 / 迁移）：系统管理菜单第 4 项，与用户/角色/日志同为管理员专属 */
-import AdminData from '@/pages/admin/data';
-import Classes from '@/pages/classes';
-import Grades from '@/pages/classes/grades';
-import Conversations from '@/pages/conversations';
-import Dashboard from '@/pages/dashboard';
-import Dormitories from '@/pages/dormitories';
-import Forbidden from '@/pages/forbidden';
-import Login from '@/pages/login';
-import Mental from '@/pages/mental';
-import MorePage from '@/pages/more';
-import Students from '@/pages/students';
-import StudentDetailMobile from '@/pages/students/mobileDetail';
-import Templates from '@/pages/templates';
-import TodoList from '@/pages/todos';
-import ToolRunner from '@/pages/tools/ToolRunner';
-import ToolsIndex from '@/pages/tools';
-import Warnings from '@/pages/warnings';
 import { Navigate, createBrowserRouter } from 'react-router-dom';
+import { lazy, Suspense } from 'react';
 import type { ReactNode } from 'react';
 
+import RouteFallback from '@/components/RouteFallback';
 import { canAccessModule, getStoredUser, getToken, isSystemAdmin } from '@/lib/auth';
+import RouteError from '@/pages/routeError';
+
+/**
+ * 路由级按需加载：登录页、工作台外壳与业务页面各自成 chunk。
+ * 首屏只解析路由表与守卫，不把 antd / xlsx / 各业务页打进同一个包。
+ */
+const Login = lazy(() => import('@/pages/login'));
+const WorkbenchShell = lazy(() => import('@/layouts/WorkbenchShell'));
+
+const Dashboard = lazy(() => import('@/pages/dashboard'));
+const Students = lazy(() => import('@/pages/students'));
+const StudentDetailMobile = lazy(() => import('@/pages/students/mobileDetail'));
+const MorePage = lazy(() => import('@/pages/more'));
+const Conversations = lazy(() => import('@/pages/conversations'));
+const Warnings = lazy(() => import('@/pages/warnings'));
+const Mental = lazy(() => import('@/pages/mental'));
+const TodoList = lazy(() => import('@/pages/todos'));
+const Templates = lazy(() => import('@/pages/templates'));
+const ToolsIndex = lazy(() => import('@/pages/tools'));
+const ToolRunner = lazy(() => import('@/pages/tools/ToolRunner'));
+const Classes = lazy(() => import('@/pages/classes'));
+const Grades = lazy(() => import('@/pages/classes/grades'));
+const Dormitories = lazy(() => import('@/pages/dormitories'));
+const AdminUsers = lazy(() => import('@/pages/admin/users'));
+const AdminRoles = lazy(() => import('@/pages/admin/roles'));
+const AdminLogs = lazy(() => import('@/pages/admin/logs'));
+const AdminData = lazy(() => import('@/pages/admin/data'));
+const Forbidden = lazy(() => import('@/pages/forbidden'));
+
+/** 页面级加载兜底：只替换内容区，侧边栏/顶栏保持可用 */
+function page(node: ReactNode) {
+  return <Suspense fallback={<RouteFallback />}>{node}</Suspense>;
+}
 
 /** 路由守卫：未登录统一跳转登录页 */
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -53,36 +66,43 @@ function RequireAdmin({ children }: { children: ReactNode }) {
  *   /tools/:toolKey 工具运行页（iframe 内嵌），新增工具无需改路由
  */
 export const router = createBrowserRouter([
-  { path: '/login', element: <Login /> },
+  {
+    path: '/login',
+    element: <Suspense fallback={<RouteFallback full />}><Login /></Suspense>,
+    errorElement: <RouteError />,
+  },
   {
     path: '/',
     element: (
       <RequireAuth>
-        <BasicLayout />
+        <Suspense fallback={<RouteFallback full />}>
+          <WorkbenchShell />
+        </Suspense>
       </RequireAuth>
     ),
+    errorElement: <RouteError />,
     children: [
-      { index: true, element: <RequireModule moduleKey="dashboard"><Dashboard /></RequireModule> },
-      { path: 'students', element: <RequireModule moduleKey="students"><Students /></RequireModule> },
+      { index: true, element: <RequireModule moduleKey="dashboard">{page(<Dashboard />)}</RequireModule> },
+      { path: 'students', element: <RequireModule moduleKey="students">{page(<Students />)}</RequireModule> },
       /* 移动端学生详情走全屏页（替代桌面端弹窗）；桌面端仍从列表弹窗进入 */
-      { path: 'students/:id', element: <RequireModule moduleKey="students"><StudentDetailMobile /></RequireModule> },
+      { path: 'students/:id', element: <RequireModule moduleKey="students">{page(<StudentDetailMobile />)}</RequireModule> },
       /* 移动端底部导航第 5 项「更多」收纳页 */
-      { path: 'more', element: <MorePage /> },
-      { path: 'conversations', element: <RequireModule moduleKey="conversations"><Conversations /></RequireModule> },
-      { path: 'warnings', element: <RequireModule moduleKey="warnings"><Warnings /></RequireModule> },
-      { path: 'mental', element: <RequireModule moduleKey="mentalHealth"><Mental /></RequireModule> },
-      { path: 'todos', element: <RequireModule moduleKey="todos"><TodoList /></RequireModule> },
-      { path: 'templates', element: <RequireModule moduleKey="templates"><Templates /></RequireModule> },
-      { path: 'tools', element: <RequireModule moduleKey="tools"><ToolsIndex /></RequireModule> },
-      { path: 'tools/:toolKey', element: <RequireModule moduleKey="tools"><ToolRunner /></RequireModule> },
-      { path: 'classes', element: <RequireModule moduleKey="classes"><Classes /></RequireModule> },
-      { path: 'classes/grades', element: <RequireModule moduleKey="classes"><Grades /></RequireModule> },
-      { path: 'dormitories', element: <RequireModule moduleKey="dormitories"><Dormitories /></RequireModule> },
-      { path: 'admin/users', element: <RequireAdmin><AdminUsers /></RequireAdmin> },
-      { path: 'admin/roles', element: <RequireAdmin><AdminRoles /></RequireAdmin> },
-      { path: 'admin/logs', element: <RequireAdmin><AdminLogs /></RequireAdmin> },
-      { path: 'admin/data', element: <RequireAdmin><AdminData /></RequireAdmin> },
-      { path: 'forbidden', element: <Forbidden /> },
+      { path: 'more', element: page(<MorePage />) },
+      { path: 'conversations', element: <RequireModule moduleKey="conversations">{page(<Conversations />)}</RequireModule> },
+      { path: 'warnings', element: <RequireModule moduleKey="warnings">{page(<Warnings />)}</RequireModule> },
+      { path: 'mental', element: <RequireModule moduleKey="mentalHealth">{page(<Mental />)}</RequireModule> },
+      { path: 'todos', element: <RequireModule moduleKey="todos">{page(<TodoList />)}</RequireModule> },
+      { path: 'templates', element: <RequireModule moduleKey="templates">{page(<Templates />)}</RequireModule> },
+      { path: 'tools', element: <RequireModule moduleKey="tools">{page(<ToolsIndex />)}</RequireModule> },
+      { path: 'tools/:toolKey', element: <RequireModule moduleKey="tools">{page(<ToolRunner />)}</RequireModule> },
+      { path: 'classes', element: <RequireModule moduleKey="classes">{page(<Classes />)}</RequireModule> },
+      { path: 'classes/grades', element: <RequireModule moduleKey="classes">{page(<Grades />)}</RequireModule> },
+      { path: 'dormitories', element: <RequireModule moduleKey="dormitories">{page(<Dormitories />)}</RequireModule> },
+      { path: 'admin/users', element: <RequireAdmin>{page(<AdminUsers />)}</RequireAdmin> },
+      { path: 'admin/roles', element: <RequireAdmin>{page(<AdminRoles />)}</RequireAdmin> },
+      { path: 'admin/logs', element: <RequireAdmin>{page(<AdminLogs />)}</RequireAdmin> },
+      { path: 'admin/data', element: <RequireAdmin>{page(<AdminData />)}</RequireAdmin> },
+      { path: 'forbidden', element: page(<Forbidden />) },
       { path: '*', element: <Navigate to="/" replace /> },
     ],
   },

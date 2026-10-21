@@ -125,9 +125,9 @@ export default function ExportInterviewDialog({ open, onClose }: ExportInterview
         if (collected.length >= total) break;
       }
       if (cancelRef.current) return;
-      // 让「正在生成 Excel」先渲染，再执行同步的 xlsx 生成
+      // 让「正在生成 Excel」先渲染，再按需加载 xlsx 并生成
       await new Promise((r) => window.setTimeout(r, 60));
-      const name = downloadInterviewExport(collected, filterDesc());
+      const name = await downloadInterviewExport(collected, filterDesc());
       setFileName(name);
       setExported(collected.length);
       setProgress(100);

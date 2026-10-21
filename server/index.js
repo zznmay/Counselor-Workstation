@@ -9,6 +9,8 @@ const config = require('./lib/config');
 const auth = require('./lib/auth');
 const { ensureEntryHtml, assetSnapshot } = require('./lib/entryHtml');
 const { auditWrite } = require('./lib/audit');
+const { responseCompression } = require('./lib/compress');
+const { compressDir, servePrecompressed } = require('./lib/precompress');
 
 config.ensureDirs();
 
@@ -17,14 +19,46 @@ config.ensureDirs();
  * dist/index.html 可能仍指向旧构建（发布链路不更新该文件），按 dist/assets 中最新资产
  * 改写出 dist/entry.html 作为实际入口，避免线上一直加载旧包。
  */
-const entryFile = fs.existsSync(config.DIST_DIR) ? ensureEntryHtml() : null;
+let entryFile = null;
+if (fs.existsSync(config.DIST_DIR)) {
+  try {
+    entryFile = ensureEntryHtml();
+  } catch (e) {
+    // 只读发布目录等场景：入口自愈失败不应阻断服务启动，回退原 index.html
+    console.warn('[entry] 入口自愈失败，回退 index.html:', e && e.message);
+    entryFile = path.join(config.DIST_DIR, 'index.html');
+  }
+}
+
+// 预压缩旁路文件：构建期已生成；若发布链路只上传了原始 dist，则在启动时补做一次。
+// 失败不阻塞启动，后续由 express.static 回退未压缩文件。
+if (fs.existsSync(config.DIST_DIR)) {
+  try {
+    const result = compressDir(config.DIST_DIR);
+    if (result.compressed > 0) {
+      console.error(`[static] 预压缩完成：${result.compressed}/${result.files} 个文件，节省约 ${Math.round(result.bytesSaved / 1024)} KB`);
+    }
+    if (result.errors.length > 0) {
+      console.warn(`[static] 预压缩部分失败（${result.errors.length} 个）：${result.errors[0]}`);
+    }
+  } catch (e) {
+    console.warn('[static] 预压缩不可用，将回退未压缩资源:', e && e.message);
+  }
+}
 
 const app = express();
 app.disable('x-powered-by');
 app.use(express.json({ limit: '20mb' }));
+app.use(responseCompression());
 
 // ---- REST API ----
 const api = express.Router();
+// 接口响应含账号/学生数据，禁止浏览器与中间代理缓存；压缩由 responseCompression 处理。
+api.use((req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Vary', 'Accept-Encoding');
+  next();
+});
 api.use('/auth', require('./routes/auth'));
 api.use('/users', require('./routes/users'));
 api.use('/roles', require('./routes/roles'));
@@ -80,6 +114,8 @@ if (fs.existsSync(config.DIST_DIR)) {
   }
   const sendEntry = (res) => res.sendFile(
     entryFile && fs.existsSync(entryFile) ? entryFile : path.join(config.DIST_DIR, 'index.html'),
+    // 入口 HTML 每次协商缓存：构建自愈后必须让浏览器立刻拿到新资产引用
+    { headers: { 'Cache-Control': 'no-cache', Vary: 'Accept-Encoding' } },
   );
   /**
    * 判断请求路径是否命中 dist 内真实存在的静态 HTML（实用工具页 /tools/*.html 等）。
@@ -112,7 +148,20 @@ if (fs.existsSync(config.DIST_DIR)) {
     if (req.path.endsWith('.html') && !isRealDistHtml(req.path)) return sendEntry(res);
     return next();
   });
-  app.use(express.static(config.DIST_DIR));
+  // 预压缩文件优先：哈希资产一年 immutable，HTML 协商，其余按小时缓存
+  app.use(servePrecompressed(config.DIST_DIR));
+  app.use(express.static(config.DIST_DIR, {
+    setHeaders: (res, filePath) => {
+      res.setHeader('Vary', 'Accept-Encoding');
+      if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      } else if (filePath.endsWith('.html')) {
+        res.setHeader('Cache-Control', 'no-cache');
+      } else {
+        res.setHeader('Cache-Control', 'public, max-age=3600');
+      }
+    },
+  }));
   app.use((req, res, next) => {
     if (req.method === 'GET' && !req.path.startsWith('/api')) return sendEntry(res);
     return next();

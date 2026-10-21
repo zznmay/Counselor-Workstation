@@ -26,14 +26,18 @@ export function useList<T, Q extends PageQuery>(
 
   const queryRef = useRef(query);
   queryRef.current = query;
+  /** 请求序号：快速切换筛选时只接受最后一次响应，避免旧请求覆盖新结果 */
+  const seqRef = useRef(0);
 
   const run = useCallback(
     async (q: Q) => {
+      const seq = ++seqRef.current;
       setLoading(true);
       try {
-        setData(await fetcher(q));
+        const next = await fetcher(q);
+        if (seq === seqRef.current) setData(next);
       } finally {
-        setLoading(false);
+        if (seq === seqRef.current) setLoading(false);
       }
     },
     [fetcher],

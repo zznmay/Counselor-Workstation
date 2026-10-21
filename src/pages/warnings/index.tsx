@@ -19,10 +19,9 @@ import dayjs, { type Dayjs } from 'dayjs';
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
-import { getStudentOptions } from '@/api/student';
-import { canManageStudentFront, getStoredUser } from '@/lib/auth';
 import { createWarning, deleteWarning, getWarnings, updateWarning } from '@/api/warning';
 import PageHeader from '@/components/PageHeader';
+import { useStudentOptions } from '@/hooks/useStudentOptions';
 import {
   toOptions,
   WARNING_LEVELS,
@@ -69,18 +68,19 @@ function WarningsDesktop() {
   });
 
   const [keywordInput, setKeywordInput] = useState('');
-  const [studentOptions, setStudentOptions] = useState<StudentOption[]>([]);
   const [editing, setEditing] = useState<Warning | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [detail, setDetail] = useState<Warning | null>(null);
+  const [pickedStudent, setPickedStudent] = useState<StudentOption | null>(null);
 
-  useEffect(() => {
-    const authUser = getStoredUser();
-    getStudentOptions()
-      .then((list) => setStudentOptions(list.filter((s) => canManageStudentFront(authUser, s.classId))))
-      .catch(() => undefined);
-  }, []);
+  /* 表单学生下拉：打开弹窗时按需搜索，编辑对象始终置顶回显 */
+  const {
+    options: studentOptions,
+    loading: studentOptionsLoading,
+    search: searchStudents,
+    handlePopupScroll,
+  } = useStudentOptions({ enabled: modalOpen, manageableOnly: true, selected: pickedStudent });
 
   useEffect(() => {
     if (!modalOpen) return;
@@ -93,11 +93,20 @@ function WarningsDesktop() {
 
   const openCreate = () => {
     setEditing(null);
+    setPickedStudent(null);
+    searchStudents('');
     setModalOpen(true);
   };
 
   const openEdit = (record: Warning) => {
     setEditing(record);
+    searchStudents('');
+    setPickedStudent({
+      id: record.studentId,
+      name: record.studentName,
+      studentNo: record.studentNo,
+      className: record.className,
+    });
     setModalOpen(true);
   };
 
@@ -341,8 +350,14 @@ function WarningsDesktop() {
           >
             <Select
               showSearch
+              filterOption={false}
+              onSearch={searchStudents}
+              onPopupScroll={handlePopupScroll}
+              loading={studentOptionsLoading}
               placeholder="输入姓名或学号搜索"
-              optionFilterProp="label"
+              onChange={(value) => {
+                setPickedStudent(studentOptions.find((s) => s.id === value) ?? null);
+              }}
               options={studentOptions.map((s) => ({
                 value: s.id,
                 label: `${s.name}（${s.className} · ${s.studentNo}）`,

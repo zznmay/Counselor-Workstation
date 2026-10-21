@@ -38,8 +38,8 @@ import {
 } from '@/api/dormitory';
 import type { DormitoryQuery } from '@/api/dormitory';
 import { getClassOptions, getGradeOptions } from '@/api/classes';
-import { getStudentOptions } from '@/api/student';
 import PageHeader from '@/components/PageHeader';
+import { useStudentOptions } from '@/hooks/useStudentOptions';
 import { canManageStudentFront, getStoredUser, isModuleOwner, subscribeSession } from '@/lib/auth';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useList } from '@/hooks/useList';
@@ -100,7 +100,6 @@ function DormitoriesDesktop() {
   const [nameInput, setNameInput] = useState('');
   const [roomInput, setRoomInput] = useState('');
   const [options, setOptions] = useState<DormitoryOptions>({ buildings: [], classNames: [] });
-  const [studentOptions, setStudentOptions] = useState<StudentOption[]>([]);
   const [gradeOptions, setGradeOptions] = useState<GradeOption[]>([]);
   const [classOptions, setClassOptions] = useState<ClassOption[]>([]);
 
@@ -113,6 +112,7 @@ function DormitoriesDesktop() {
   const [editing, setEditing] = useState<Dormitory | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [detail, setDetail] = useState<Dormitory | null>(null);
+  const [pickedStudent, setPickedStudent] = useState<StudentOption | null>(null);
 
   /* ---------- 批量导入状态 ---------- */
   const [importOpen, setImportOpen] = useState(false);
@@ -133,9 +133,16 @@ function DormitoriesDesktop() {
 
   const loadOptions = () => {
     getDormitoryOptions().then(setOptions).catch(() => undefined);
-    getStudentOptions().then(setStudentOptions).catch(() => undefined);
   };
   useEffect(loadOptions, []);
+
+  /* 学生下拉：打开表单时按需搜索；编辑分配时学生字段禁用并置顶回显 */
+  const {
+    options: studentOptions,
+    loading: studentOptionsLoading,
+    search: searchStudents,
+    handlePopupScroll,
+  } = useStudentOptions({ enabled: modalOpen, selected: pickedStudent });
 
   /* 年级/班级字典（由「班级管理」维护），仅需加载一次 */
   useEffect(() => {
@@ -252,8 +259,24 @@ function DormitoriesDesktop() {
     }
   }, [modalOpen, editing, form]);
 
+  const openCreate = () => {
+    form.resetFields();
+    setEditing(null);
+    setPickedStudent(null);
+    searchStudents('');
+    setModalOpen(true);
+  };
+
   const openEdit = (record: Dormitory) => {
     setEditing(record);
+    searchStudents('');
+    setPickedStudent({
+      id: record.studentId,
+      name: record.name,
+      studentNo: record.studentNo,
+      className: record.className,
+      classId: record.classId,
+    });
     setModalOpen(true);
   };
 
@@ -324,7 +347,7 @@ function DormitoriesDesktop() {
         message.warning('没有可导出的寝室分配');
         return;
       }
-      exportDormitories(targets, authUser?.displayName);
+      await exportDormitories(targets, authUser?.displayName);
       message.success(`已导出 ${targets.length} 条寝室分配`);
     } catch (e) {
       message.error(e instanceof Error ? e.message : '导出失败');
@@ -513,11 +536,7 @@ function DormitoriesDesktop() {
         <Button
           type="primary"
           icon={<PlusOutlined />}
-          onClick={() => {
-            form.resetFields();
-            setEditing(null);
-            setModalOpen(true);
-          }}
+          onClick={openCreate}
         >
           新增分配
         </Button>
@@ -568,13 +587,19 @@ function DormitoriesDesktop() {
             <Select
               showSearch
               disabled={!!editing}
+              filterOption={false}
+              onSearch={searchStudents}
+              onPopupScroll={handlePopupScroll}
+              loading={studentOptionsLoading}
               placeholder="按姓名或学号搜索学生"
-              optionFilterProp="label"
+              onChange={(value) => {
+                setPickedStudent(studentOptions.find((s) => s.studentNo === value) ?? null);
+              }}
               options={studentOptions.map((s) => ({
                 value: s.studentNo,
                 label: `${s.name}（${s.studentNo}）${s.className ? ` · ${s.className}` : ''}`,
               }))}
-              notFoundContent={studentOptions.length === 0 ? '在读学生为空，请先在「学生名册」录入' : '未找到匹配的学生'}
+              notFoundContent="未找到匹配的学生，请先在「学生名册」确认在读学生"
             />
           </Form.Item>
           <Form.Item name="building" label="宿舍楼" rules={BUILDING_RULES}>

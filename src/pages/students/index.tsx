@@ -586,7 +586,7 @@ function StudentsDesktop() {
         });
       }
       const fileName = buildExportFileName(authUser?.displayName);
-      writeStudentWorkbook(fields, rows, fileName);
+      await writeStudentWorkbook(fields, rows, fileName);
       rememberExportFieldKeys(fields.map((f) => f.key));
       message.success(`已导出 ${rows.length} 名学生（${fileName}）`);
       setExportOpen(false);

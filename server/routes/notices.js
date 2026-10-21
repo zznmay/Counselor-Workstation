@@ -22,14 +22,21 @@ router.get('/', (req, res) => {
   if (status) { conds.push('status = ?'); params.push(status); }
   const where = conds.join(' AND ');
 
-  const rows = dbx.all(`SELECT * FROM notices WHERE ${where}`, params);
-  rows.sort((a, b) => {
-    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-    const timeOf = (n) => n.publishAt ?? n.createdAt;
-    return timeOf(b).localeCompare(timeOf(a));
-  });
+  const total = dbx.get(`SELECT COUNT(*) AS c FROM notices WHERE ${where}`, params).c;
+  // 置顶优先 + 发布时间倒序；排序与分页下推到 SQL
+  const rows = dbx.all(
+    `SELECT * FROM notices WHERE ${where}
+     ORDER BY pinned DESC, COALESCE(publishAt, createdAt) DESC, rowid ASC
+     LIMIT ? OFFSET ?`,
+    [...params, pageSize, (page - 1) * pageSize],
+  );
 
-  res.json({ list: rows.map((r) => ({ ...r, pinned: !!r.pinned })).slice((page - 1) * pageSize, page * pageSize), total: rows.length, page, pageSize });
+  res.json({
+    list: rows.map((r) => ({ ...r, pinned: !!r.pinned })),
+    total,
+    page,
+    pageSize,
+  });
 });
 
 router.post('/', (req, res) => {

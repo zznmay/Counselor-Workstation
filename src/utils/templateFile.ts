@@ -1,6 +1,6 @@
 import dayjs from 'dayjs';
-import * as XLSX from 'xlsx';
 
+import { loadXLSX } from './xlsx';
 import type { TemplateFile, TemplateFormat } from '@/types';
 
 /**
@@ -61,7 +61,8 @@ function wordBlob(t: TemplateFile): Blob {
 }
 
 /** 生成 xls / xlsx 真实工作簿 */
-function sheetBlob(t: TemplateFile): Blob {
+async function sheetBlob(t: TemplateFile): Promise<Blob> {
+  const XLSX = await loadXLSX();
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet([
     [t.name],
@@ -125,7 +126,7 @@ function pdfBlob(t: TemplateFile): Blob {
 }
 
 /** 构建模板下载内容：有上传字节时回放原文件，否则按格式生成示例内容 */
-export function buildTemplateBlob(t: TemplateFile, bytes?: Uint8Array): Blob {
+export async function buildTemplateBlob(t: TemplateFile, bytes?: Uint8Array): Promise<Blob> {
   if (bytes && bytes.length > 0) return new Blob([bytes.buffer as ArrayBuffer]);
   switch (t.format) {
     case 'xls':

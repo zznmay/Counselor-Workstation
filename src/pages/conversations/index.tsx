@@ -30,8 +30,8 @@ import dayjs from 'dayjs';
 import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
-import { getStudentOptions } from '@/api/student';
-import { canManageStudentFront, getStoredUser } from '@/lib/auth';
+import { getStudent } from '@/api/student';
+import { useStudentOptions } from '@/hooks/useStudentOptions';
 import {
   createConversation,
   deleteConversation,
@@ -82,7 +82,7 @@ function ConversationsDesktop() {
   );
 
   const [keywordInput, setKeywordInput] = useState('');
-  const [studentOptions, setStudentOptions] = useState<StudentOption[]>([]);
+  const [pickedStudent, setPickedStudent] = useState<StudentOption | null>(null);
 
   /* ---------- 时间线视图状态 ---------- */
   const [talkedStudents, setTalkedStudents] = useState<TalkedStudentOption[]>([]);
@@ -98,12 +98,13 @@ function ConversationsDesktop() {
   const [submitting, setSubmitting] = useState(false);
   const [detail, setDetail] = useState<Conversation | null>(null);
 
-  useEffect(() => {
-    const authUser = getStoredUser();
-    getStudentOptions()
-      .then((list) => setStudentOptions(list.filter((s) => canManageStudentFront(authUser, s.classId))))
-      .catch(() => undefined);
-  }, []);
+  /* 学生下拉：打开表单时按需搜索，只返回可维护班级；编辑对象置顶回显 */
+  const {
+    options: studentOptions,
+    loading: studentOptionsLoading,
+    search: searchStudents,
+    handlePopupScroll,
+  } = useStudentOptions({ enabled: modalOpen, manageableOnly: true, selected: pickedStudent });
 
   const loadTalkedStudents = useCallback(() => {
     return getTalkedStudents()
@@ -114,11 +115,14 @@ function ConversationsDesktop() {
       .catch(() => undefined);
   }, []);
 
+  /* 时间线数据只在切到时间线视图时加载：列表视图不再额外发 talked-students/timeline 请求 */
   useEffect(() => {
+    if (view !== 'timeline') return;
     void loadTalkedStudents();
-  }, [loadTalkedStudents]);
+  }, [view, loadTalkedStudents]);
 
   const loadTimeline = useCallback(() => {
+    if (view !== 'timeline') return;
     if (!timelineStudentId) {
       setTimelineData([]);
       return;
@@ -128,18 +132,20 @@ function ConversationsDesktop() {
       .then(setTimelineData)
       .catch(() => message.error('时间线数据加载失败'))
       .finally(() => setTimelineLoading(false));
-  }, [timelineStudentId, timelineType, timelineTick, message]);
+  }, [view, timelineStudentId, timelineType, timelineTick, message]);
 
   useEffect(() => {
     loadTimeline();
   }, [loadTimeline]);
 
-  /** 增删改后统一刷新：列表 + 时间线学生选项 + 时间线内容 */
+  /** 增删改后统一刷新：列表必刷；时间线仅当前可见时刷新，避免隐藏视图空跑请求 */
   const refreshAll = useCallback(() => {
     refresh();
-    void loadTalkedStudents();
-    setTimelineTick((t) => t + 1);
-  }, [refresh, loadTalkedStudents]);
+    if (view === 'timeline') {
+      void loadTalkedStudents();
+      setTimelineTick((t) => t + 1);
+    }
+  }, [refresh, view, loadTalkedStudents]);
 
   useEffect(() => {
     if (!modalOpen) return;
@@ -160,11 +166,20 @@ function ConversationsDesktop() {
   const openCreate = (preset?: string) => {
     setPresetStudentId(preset);
     setEditing(null);
+    setPickedStudent(null);
+    searchStudents('');
     setModalOpen(true);
   };
 
   const openEdit = (record: Conversation) => {
     setEditing(record);
+    searchStudents('');
+    setPickedStudent({
+      id: record.studentId,
+      name: record.studentName,
+      studentNo: record.studentNo,
+      className: '',
+    });
     setModalOpen(true);
   };
 
@@ -172,7 +187,17 @@ function ConversationsDesktop() {
   const [searchParams] = useSearchParams();
   const presetFromUrl = searchParams.get('studentId');
   useEffect(() => {
-    if (presetFromUrl) openCreate(presetFromUrl);
+    if (!presetFromUrl) return;
+    openCreate(presetFromUrl);
+    // 预选学生可能不在分页首屏，拉取单条详情保证下拉回显姓名
+    getStudent(presetFromUrl)
+      .then((s) => setPickedStudent({
+        id: s.id,
+        name: s.name,
+        studentNo: s.studentNo,
+        className: s.className,
+      }))
+      .catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [presetFromUrl]);
 
@@ -529,11 +554,19 @@ function ConversationsDesktop() {
         >
           <Select
             showSearch
+            filterOption={false}
+            onSearch={searchStudents}
+            onPopupScroll={handlePopupScroll}
+            loading={studentOptionsLoading}
             placeholder="输入姓名或学号搜索"
-            optionFilterProp="label"
+            onChange={(value) => {
+              setPickedStudent(studentOptions.find((s) => s.id === value) ?? null);
+            }}
             options={studentOptions.map((s) => ({
               value: s.id,
-              label: `${s.name}（${s.className} · ${s.studentNo}）`,
+              label: s.className
+                ? `${s.name}（${s.className} · ${s.studentNo}）`
+                : `${s.name}（${s.studentNo}）`,
             }))}
           />
         </Form.Item>

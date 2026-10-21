@@ -1,6 +1,7 @@
 import dayjs from 'dayjs';
-import * as XLSX from 'xlsx';
+import type * as XLSX from 'xlsx';
 
+import { loadXLSX } from './xlsx';
 import type { InterviewExportRecord } from '@/types';
 
 /**
@@ -37,10 +38,11 @@ function levelText(level: string | null | undefined): string {
 }
 
 /** 生成导出工作簿：「访谈记录」数据表 + 「导出说明」说明表 */
-export function buildInterviewExportWorkbook(
+export async function buildInterviewExportWorkbook(
   rows: InterviewExportRecord[],
   filterDesc: string[],
-): XLSX.WorkBook {
+): Promise<XLSX.WorkBook> {
+  const XLSX = await loadXLSX();
   const questions = collectExportQuestions(rows);
 
   const headers = [
@@ -113,8 +115,9 @@ export function buildInterviewExportWorkbook(
 }
 
 /** 生成并触发浏览器下载；返回文件名（供完成态展示） */
-export function downloadInterviewExport(rows: InterviewExportRecord[], filterDesc: string[]): string {
+export async function downloadInterviewExport(rows: InterviewExportRecord[], filterDesc: string[]): Promise<string> {
+  const XLSX = await loadXLSX();
   const fileName = `心理访谈记录导出-${dayjs().format('YYYYMMDD-HHmm')}.xlsx`;
-  XLSX.writeFile(buildInterviewExportWorkbook(rows, filterDesc), fileName);
+  XLSX.writeFile(await buildInterviewExportWorkbook(rows, filterDesc), fileName);
   return fileName;
 }

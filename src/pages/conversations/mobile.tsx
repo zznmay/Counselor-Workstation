@@ -10,10 +10,10 @@ import {
   getTalkedStudents,
   updateConversation,
 } from '@/api/conversation';
-import { getStudentOptions } from '@/api/student';
+import { getStudent } from '@/api/student';
 import FilterSheet from '@/components/mobile/FilterSheet';
 import { MIcon } from '@/components/mobile/icons';
-import { canManageStudentFront, getStoredUser } from '@/lib/auth';
+import { useStudentOptions } from '@/hooks/useStudentOptions';
 import { TALK_TYPES, TALK_WAYS } from '@/constants';
 import type {
   Conversation,
@@ -93,7 +93,8 @@ export default function ConversationsMobile() {
   const [pickerKw, setPickerKw] = useState('');
 
   /* ---------- 表单与详情 ---------- */
-  const [studentOptions, setStudentOptions] = useState<StudentOption[]>([]);
+  const [studentSearch, setStudentSearch] = useState('');
+  const [pickedStudent, setPickedStudent] = useState<StudentOption | null>(null);
   const [sheet, setSheet] = useState<{ open: boolean; mode: 'create' | 'edit'; record: Conversation | null }>({
     open: false,
     mode: 'create',
@@ -123,6 +124,15 @@ export default function ConversationsMobile() {
   useEffect(() => {
     if (!presetFromUrl) return;
     openCreate(presetFromUrl);
+    // 预选学生可能不在分页首屏，拉取单条详情保证下拉能显示姓名而不是裸 ID
+    getStudent(presetFromUrl)
+      .then((s) => setPickedStudent({
+        id: s.id,
+        name: s.name,
+        studentNo: s.studentNo,
+        className: s.className,
+      }))
+      .catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [presetFromUrl]);
 
@@ -174,11 +184,14 @@ export default function ConversationsMobile() {
       .catch(() => undefined);
   }, []);
 
+  /* 时间线数据只在切到时间线视图时加载，列表视图不再多发请求 */
   useEffect(() => {
+    if (view !== 'timeline') return;
     void loadTalkedStudents();
-  }, [loadTalkedStudents]);
+  }, [view, loadTalkedStudents]);
 
   const loadTimeline = useCallback(() => {
+    if (view !== 'timeline') return;
     if (!tlStudentId) {
       setTlData([]);
       return;
@@ -188,45 +201,34 @@ export default function ConversationsMobile() {
       .then(setTlData)
       .catch(() => showToast('时间线数据加载失败'))
       .finally(() => setTlLoading(false));
-  }, [tlStudentId, tlType]);
+  }, [view, tlStudentId, tlType]);
 
   useEffect(() => {
     loadTimeline();
   }, [loadTimeline]);
 
-  /** 增删改后统一刷新：列表 + 时间线学生选项 + 时间线内容 */
+  /** 增删改后统一刷新：列表必刷；时间线仅当前可见时刷新 */
   const refreshAll = useCallback(() => {
     void fetchPage(1, keyword, filters);
-    void loadTalkedStudents();
-    loadTimeline();
-  }, [fetchPage, keyword, filters, loadTalkedStudents, loadTimeline]);
-
-  /* 学生下拉：打开表单时懒加载（按带班过滤，与桌面同口径） */
-  useEffect(() => {
-    if (!sheet.open || studentOptions.length > 0) return;
-    let alive = true;
-    const authUser = getStoredUser();
-    getStudentOptions()
-      .then((opts) => {
-        if (alive) setStudentOptions(opts.filter((s) => canManageStudentFront(authUser, s.classId)));
-      })
-      .catch(() => undefined);
-    return () => {
-      alive = false;
-    };
-  }, [sheet.open, studentOptions.length]);
-
-  /* 编辑历史学生时确保下拉能回显 */
-  const studentSelectOptions = useMemo(() => {
-    const cur = sheet.record?.studentId;
-    if (sheet.mode === 'edit' && cur && !studentOptions.some((s) => s.id === cur)) {
-      return [{ id: cur, name: sheet.record!.studentName, studentNo: sheet.record!.studentNo, className: '' }, ...studentOptions];
+    if (view === 'timeline') {
+      void loadTalkedStudents();
+      loadTimeline();
     }
-    return studentOptions;
-  }, [studentOptions, sheet]);
+  }, [fetchPage, keyword, filters, view, loadTalkedStudents, loadTimeline]);
+
+  /* 学生下拉：打开表单时按需搜索，只返回可维护班级；编辑对象/预选对象置顶回显 */
+  const {
+    options: studentOptions,
+    loading: studentOptionsLoading,
+    hasMore: studentOptionsHasMore,
+    search: searchStudents,
+  } = useStudentOptions({ enabled: sheet.open, manageableOnly: true, selected: pickedStudent });
 
   const openCreate = (presetStudentId?: string) => {
     setSheet({ open: true, mode: 'create', record: null });
+    setPickedStudent(null);
+    setStudentSearch('');
+    searchStudents('');
     setDraft({
       studentId: presetStudentId ?? '',
       talkTime: localNow(),
@@ -241,6 +243,14 @@ export default function ConversationsMobile() {
 
   const openEdit = (c: Conversation) => {
     setSheet({ open: true, mode: 'edit', record: c });
+    setPickedStudent({
+      id: c.studentId,
+      name: c.studentName,
+      studentNo: c.studentNo,
+      className: '',
+    });
+    setStudentSearch('');
+    searchStudents('');
     setDraft({
       studentId: c.studentId,
       talkTime: c.talkTime,
@@ -797,21 +807,36 @@ export default function ConversationsMobile() {
             学生
             <span className="m-req">*</span>
           </label>
+          <input
+            className="m-inp"
+            style={{ marginBottom: 8 }}
+            placeholder="搜索姓名或学号"
+            value={studentSearch}
+            onChange={(e) => {
+              setStudentSearch(e.target.value);
+              searchStudents(e.target.value);
+            }}
+          />
           <select
             className="m-inp"
             value={draft.studentId}
             onChange={(e) => {
-              setDraft({ ...draft, studentId: e.target.value });
+              const value = e.target.value;
+              setDraft({ ...draft, studentId: value });
+              setPickedStudent(studentOptions.find((s) => s.id === value) ?? null);
               if (errors.studentId) setErrors({ ...errors, studentId: '' });
             }}
           >
-            <option value="">请选择学生</option>
-            {studentSelectOptions.map((s) => (
+            <option value="">{studentOptionsLoading && studentOptions.length === 0 ? '正在加载学生…' : '请选择学生'}</option>
+            {studentOptions.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.className ? `${s.name}（${s.className} · ${s.studentNo}）` : `${s.name}（${s.studentNo}）`}
               </option>
             ))}
           </select>
+          {studentOptionsHasMore && (
+            <div className="m-t4" style={{ marginTop: 6 }}>结果较多，请输入更精确的姓名或学号</div>
+          )}
           <div className="m-form-err">
             {errors.studentId && (
               <>

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { getStudentMajors, getStudents } from '@/api/student';
-import { getWarnings } from '@/api/warning';
+import { getActiveWarningLevels } from '@/api/warning';
 import { getClassOptions, getGradeOptions } from '@/api/classes';
 import FilterSheet from '@/components/mobile/FilterSheet';
 import { MIcon } from '@/components/mobile/icons';
@@ -85,18 +85,15 @@ export default function StudentsMobile() {
   }, [loadMajors]);
 
   const loadWarnMap = useCallback(async () => {
-    const [pending, handling] = await Promise.all([
-      getWarnings({ page: 1, pageSize: 100, status: '待处理' }),
-      getWarnings({ page: 1, pageSize: 100, status: '处理中' }),
-    ]);
-    const map: Record<string, WarningLevel> = {};
-    [...pending.list, ...handling.list].forEach((w) => {
-      // 同一学生取更严重级别
-      const order: WarningLevel[] = ['黄色', '橙色', '红色'];
-      const prev = map[w.studentId];
-      if (!prev || order.indexOf(w.level) > order.indexOf(prev)) map[w.studentId] = w.level;
-    });
-    setWarnMap(map);
+    try {
+      // 服务端已按学生聚合出最高级别，一次请求替代「待处理/处理中」两页完整列表
+      const rows = await getActiveWarningLevels();
+      const map: Record<string, WarningLevel> = {};
+      rows.forEach((w) => { map[w.studentId] = w.level; });
+      setWarnMap(map);
+    } catch {
+      // 预警角标失败不影响名册主流程
+    }
   }, []);
 
   const fetchPage = useCallback(

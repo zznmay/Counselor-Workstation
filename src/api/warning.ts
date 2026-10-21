@@ -1,6 +1,11 @@
 /** 学业与心理预警：服务端接口（待处理优先排序在服务端完成） */
 import { request } from './request';
-import type { PageResult, Warning, WarningInput, WarningQuery } from '@/types';
+import type { PageResult, Warning, WarningInput, WarningLevel, WarningQuery } from '@/types';
+
+export interface ActiveWarningLevel {
+  studentId: string;
+  level: WarningLevel;
+}
 
 /** 预警列表：关键字 + 类型/等级/状态筛选 + 分页 */
 export async function getWarnings(query: WarningQuery): Promise<PageResult<Warning>> {
@@ -9,6 +14,11 @@ export async function getWarnings(query: WarningQuery): Promise<PageResult<Warni
     if (value !== undefined && value !== '') params.set(key, String(value));
   });
   return request<PageResult<Warning>>(`/warnings?${params.toString()}`);
+}
+
+/** 名册预警角标：每个学生当前最高预警级别（轻量接口，避免拉取完整列表） */
+export async function getActiveWarningLevels(): Promise<ActiveWarningLevel[]> {
+  return request<ActiveWarningLevel[]>('/warnings/active-map', { cacheTtl: 15_000 });
 }
 
 /** 录入预警（学生信息由服务端按 id 反查补全） */

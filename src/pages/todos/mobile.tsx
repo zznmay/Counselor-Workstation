@@ -1,12 +1,12 @@
 import { Popconfirm } from 'antd';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { getStudentOptions } from '@/api/student';
 import { createTodo, deleteTodo, getTodos, updateTodo } from '@/api/todo';
 import FilterSheet from '@/components/mobile/FilterSheet';
 import { MIcon } from '@/components/mobile/icons';
 import { TODO_PRIORITIES, TODO_TYPES } from '@/constants';
-import type { StudentOption, Todo, TodoInput, TodoPriority, TodoStatus, TodoType } from '@/types';
+import { useStudentOptions } from '@/hooks/useStudentOptions';
+import type { Todo, TodoInput, TodoPriority, TodoStatus, TodoType } from '@/types';
 
 const PAGE_SIZE = 10;
 
@@ -62,7 +62,7 @@ export default function TodosMobile() {
   const [draft, setDraft] = useState<TodoDraft>(() => emptyDraft(localDate()));
   const [errors, setErrors] = useState<{ title?: string; dueDate?: string }>({});
   const [saving, setSaving] = useState(false);
-  const [studentOptions, setStudentOptions] = useState<StudentOption[]>([]);
+  const [relatedSearch, setRelatedSearch] = useState('');
 
   const todayStr = useMemo(() => localDate(), []);
 
@@ -99,33 +99,34 @@ export default function TodosMobile() {
     window.setTimeout(() => setToast(''), 2600);
   };
 
-  /* 关联学生下拉：面板打开时懒加载（失败静默，下拉留空不影响保存） */
-  useEffect(() => {
-    if (!sheet.open || studentOptions.length > 0) return;
-    let alive = true;
-    getStudentOptions()
-      .then((opts) => { if (alive) setStudentOptions(opts); })
-      .catch(() => undefined);
-    return () => { alive = false; };
-  }, [sheet.open, studentOptions.length]);
+  /* 关联学生下拉：面板打开时按需搜索；当前值不在结果中时置顶回显 */
+  const {
+    options: studentOptions,
+    loading: studentOptionsLoading,
+    hasMore: studentOptionsHasMore,
+    search: searchStudents,
+  } = useStudentOptions({ enabled: sheet.open });
 
-  /* 编辑历史关联学生时，确保下拉能回显（该学生可能已不在当前可见范围） */
   const relatedOptions = useMemo(() => {
-    const cur = sheet.todo?.relatedStudent;
+    const cur = draft.relatedStudent;
     if (cur && !studentOptions.some((s) => s.name === cur)) {
       return [{ id: `__current__${cur}`, name: cur, studentNo: '', className: '' }, ...studentOptions];
     }
     return studentOptions;
-  }, [studentOptions, sheet.todo]);
+  }, [studentOptions, draft.relatedStudent]);
 
   const openCreate = () => {
     setSheet({ open: true, mode: 'create', todo: null });
+    setRelatedSearch('');
+    searchStudents('');
     setDraft(emptyDraft(todayStr));
     setErrors({});
   };
 
   const openEdit = (t: Todo) => {
     setSheet({ open: true, mode: 'edit', todo: t });
+    setRelatedSearch('');
+    searchStudents('');
     setDraft({
       title: t.title,
       type: t.type,
@@ -447,18 +448,34 @@ export default function TodosMobile() {
 
         <div className="m-field">
           <label>关联学生（选填）</label>
+          <input
+            className="m-inp"
+            style={{ marginBottom: 8 }}
+            placeholder="搜索姓名"
+            value={relatedSearch}
+            onChange={(e) => {
+              setRelatedSearch(e.target.value);
+              searchStudents(e.target.value);
+            }}
+          />
           <select
             className="m-inp"
             value={draft.relatedStudent}
             onChange={(e) => setDraft({ ...draft, relatedStudent: e.target.value })}
           >
             <option value="">不关联</option>
+            {studentOptionsLoading && studentOptions.length === 0 && (
+              <option value="" disabled>正在加载学生…</option>
+            )}
             {relatedOptions.map((s) => (
               <option key={s.id} value={s.name}>
                 {s.className ? `${s.name}（${s.className}）` : s.name}
               </option>
             ))}
           </select>
+          {studentOptionsHasMore && (
+            <div className="m-t4" style={{ marginTop: 6 }}>结果较多，请输入更精确的姓名</div>
+          )}
         </div>
 
         <div className="m-field">

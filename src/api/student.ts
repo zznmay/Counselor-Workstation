@@ -27,7 +27,7 @@ export async function getStudents(query: StudentQuery): Promise<PageResult<Stude
  * 否则会出现「选项筛不出学生」或「名册里的专业选不到」。
  */
 export async function getStudentMajors(): Promise<string[]> {
-  return request<string[]>('/students/majors');
+  return request<string[]>('/students/majors', { cacheTtl: 60_000 });
 }
 
 /** 当前筛选条件下的全部学生精简信息（「全选筛选结果」用，不分页；仅管理员） */
@@ -73,9 +73,25 @@ export async function batchDeleteStudents(ids: string[]): Promise<BatchDeleteRes
   });
 }
 
-/** 表单下拉用：在读学生精简列表（可见范围内） */
-export async function getStudentOptions(): Promise<StudentOption[]> {
-  return request<StudentOption[]>('/students/options');
+export interface StudentOptionQuery {
+  keyword?: string;
+  page?: number;
+  pageSize?: number;
+  /** 仅返回当前账号可维护班级的学生（与前端 canManageStudentFront 同口径） */
+  manageableOnly?: boolean;
+}
+
+/** 学生下拉分页搜索：大花名册不再一次下发全部学生 */
+export async function searchStudentOptions(query: StudentOptionQuery = {}): Promise<PageResult<StudentOption>> {
+  const params = new URLSearchParams({
+    page: String(query.page ?? 1),
+    pageSize: String(query.pageSize ?? 50),
+  });
+  if (query.keyword) params.set('keyword', query.keyword);
+  if (query.manageableOnly) params.set('manageableOnly', '1');
+  return request<PageResult<StudentOption>>(`/students/options/page?${params.toString()}`, {
+    cacheTtl: 30_000,
+  });
 }
 
 /**
@@ -101,5 +117,5 @@ export async function importStudents(rows: ParsedStudentRow[]): Promise<StudentI
 
 /** 供表单选择共管老师 */
 export async function getCounselorOptions(): Promise<CoManager[]> {
-  return request<CoManager[]>('/users/counselors');
+  return request<CoManager[]>('/users/counselors', { cacheTtl: 60_000 });
 }

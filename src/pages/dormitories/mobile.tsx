@@ -11,8 +11,8 @@ import {
   updateDormitory,
 } from '@/api/dormitory';
 import { getClassOptions, getGradeOptions } from '@/api/classes';
-import { getStudentOptions } from '@/api/student';
 import FilterSheet from '@/components/mobile/FilterSheet';
+import { useStudentOptions } from '@/hooks/useStudentOptions';
 import { MIcon } from '@/components/mobile/icons';
 import { canManageStudentFront, getStoredUser, isModuleOwner, subscribeSession } from '@/lib/auth';
 import { exportDormitories, fetchAllDormitories } from '@/utils/dormExport';
@@ -65,7 +65,6 @@ export default function DormitoriesMobile() {
   const [draftBuilding, setDraftBuilding] = useState<string | undefined>(undefined);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [options, setOptions] = useState<DormitoryOptions>({ buildings: [], classNames: [] });
-  const [studentOptions, setStudentOptions] = useState<StudentOption[]>([]);
   const [gradeOptions, setGradeOptions] = useState<GradeOption[]>([]);
   const [classOptions, setClassOptions] = useState<ClassOption[]>([]);
 
@@ -79,6 +78,7 @@ export default function DormitoriesMobile() {
   const [editing, setEditing] = useState<Dormitory | null>(null);
   const [detail, setDetail] = useState<Dormitory | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [pickedStudent, setPickedStudent] = useState<StudentOption | null>(null);
   const [form] = Form.useForm<DormFormValues>();
 
   /* ---------- 批量导入 ---------- */
@@ -100,8 +100,15 @@ export default function DormitoriesMobile() {
 
   const loadOptions = useCallback(() => {
     getDormitoryOptions().then(setOptions).catch(() => undefined);
-    getStudentOptions().then(setStudentOptions).catch(() => undefined);
   }, []);
+
+  /* 学生下拉：打开表单时按需搜索；编辑分配时学生字段禁用并置顶回显 */
+  const {
+    options: studentOptions,
+    loading: studentOptionsLoading,
+    search: searchStudents,
+    handlePopupScroll,
+  } = useStudentOptions({ enabled: formOpen, selected: pickedStudent });
 
   /* 年级/班级字典（由「班级管理」维护），仅需加载一次 */
   useEffect(() => {
@@ -189,6 +196,14 @@ export default function DormitoriesMobile() {
   /* ---------- 表单 ---------- */
   const openForm = (record?: Dormitory) => {
     setEditing(record ?? null);
+    searchStudents('');
+    setPickedStudent(record ? {
+      id: record.studentId,
+      name: record.name,
+      studentNo: record.studentNo,
+      className: record.className,
+      classId: record.classId,
+    } : null);
     if (record) {
       form.setFieldsValue({ studentNo: record.studentNo, building: record.building, room: record.room });
     } else {
@@ -273,7 +288,7 @@ export default function DormitoriesMobile() {
         message.warning('没有可导出的寝室分配');
         return;
       }
-      exportDormitories(targets, authUser?.displayName);
+      await exportDormitories(targets, authUser?.displayName);
       message.success(`已导出 ${targets.length} 条寝室分配`);
     } catch (e) {
       message.error(e instanceof Error ? e.message : '导出失败');
@@ -720,8 +735,14 @@ export default function DormitoriesMobile() {
             <Select
               showSearch
               disabled={!!editing}
+              filterOption={false}
+              onSearch={searchStudents}
+              onPopupScroll={handlePopupScroll}
+              loading={studentOptionsLoading}
               placeholder="按姓名或学号搜索"
-              optionFilterProp="label"
+              onChange={(value) => {
+                setPickedStudent(studentOptions.find((s) => s.studentNo === value) ?? null);
+              }}
               options={studentOptions.map((s) => ({
                 value: s.studentNo,
                 label: `${s.name}（${s.studentNo}）${s.className ? ` · ${s.className}` : ''}`,

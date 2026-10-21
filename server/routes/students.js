@@ -7,7 +7,7 @@ const express = require('express');
 
 const dbx = require('../lib/db');
 const auth = require('../lib/auth');
-const { canManageStudent, rosterScope } = require('../lib/scope');
+const { canManageStudent, rosterScope, isAdmin } = require('../lib/scope');
 const { normalizeTarget, diffStudentFields } = require('../lib/studentDiff');
 const { mirrorStudentDorm, removeDormOfStudent, renameDormStudentNo, syncDormFromText } = require('../lib/dormitory');
 const { derivedTeachersOfClass } = require('../lib/teacherSync');
@@ -138,6 +138,46 @@ router.get('/options', (req, res) => {
 });
 
 /**
+ * 学生下拉分页搜索（大花名册用）：
+ * - keyword 匹配姓名 / 学号 / 班级；pageSize 上限 100；
+ * - manageableOnly=1 按「可维护班级」收口，与前端 canManageStudentFront 同口径
+ *   （辅导员角色可见全员，但表单下拉只应出现自己带的班）；
+ * - 旧 /options 保持原样，旧前端缓存包在滚动发布期间仍可工作。
+ */
+router.get('/options/page', (req, res) => {
+  const kw = String(req.query.keyword ?? '').trim().slice(0, 50);
+  const page = Math.max(1, parseInt(req.query.page) || 1);
+  const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize) || 50));
+  const manageableOnly = String(req.query.manageableOnly ?? '') === '1';
+
+  const scope = manageableOnly
+    ? (isAdmin(req.user)
+      ? null
+      : { sql: 's.classId IN (SELECT classId FROM classCounselors WHERE userId = ?)', params: [req.user.id] })
+    : rosterScope(req.user);
+
+  const conds = ["s.status = '在读'"];
+  const params = [];
+  if (scope) {
+    conds.push(scope.sql);
+    params.push(...scope.params);
+  }
+  if (kw) {
+    conds.push('(s.name LIKE ? OR s.studentNo LIKE ? OR s.className LIKE ?)');
+    params.push(`%${kw}%`, `%${kw}%`, `%${kw}%`);
+  }
+  const where = conds.join(' AND ');
+
+  const total = dbx.get(`SELECT COUNT(*) AS c FROM students s WHERE ${where}`, params).c;
+  const rows = dbx.all(
+    `SELECT s.id, s.name, s.studentNo, s.className, s.classId FROM students s
+     WHERE ${where} ORDER BY s.studentNo LIMIT ? OFFSET ?`,
+    [...params, pageSize, (page - 1) * pageSize],
+  );
+  res.json({ list: rows, total, page, pageSize });
+});
+
+/**
  * 导入查重用：可见范围内学号（学号全局唯一，导入接口仍做全局查重兜底，
  * 故收口到可见范围不会放过重复学号，只影响前端预检提示的覆盖度）。
  */
@@ -198,7 +238,8 @@ router.get('/:id', (req, res) => {
     );
     if (!inScope) return res.status(403).json({ message: '仅可查看其所带班级的学生' });
   }
-  res.json({ ...row, coManagerIds: coManagersOf(req.params.id).map((u) => u.id), coManagers: coManagersOf(req.params.id) });
+  const coManagers = coManagersOf(req.params.id);
+  res.json({ ...row, coManagerIds: coManagers.map((u) => u.id), coManagers });
 });
 
 /**

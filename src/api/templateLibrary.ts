@@ -5,7 +5,7 @@ import type { TemplateCategoryWithCount, TemplateFile, TemplateQuery } from '@/t
 
 /** 类别列表（含模板数量） */
 export async function getTemplateCategories(): Promise<TemplateCategoryWithCount[]> {
-  return request<TemplateCategoryWithCount[]>('/templates/categories');
+  return request<TemplateCategoryWithCount[]>('/templates/categories', { cacheTtl: 30_000 });
 }
 
 /** 新增类别 */
@@ -80,5 +80,5 @@ export async function deleteTemplate(id: string): Promise<void> {
 export async function getTemplateBlob(id: string): Promise<Blob> {
   const meta = await getTemplateById(id);
   if (meta.uploaded) return requestBlob(`/templates/${id}/download`);
-  return buildTemplateBlob(meta);
+  return await buildTemplateBlob(meta);
 }

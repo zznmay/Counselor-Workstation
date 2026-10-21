@@ -48,15 +48,19 @@ router.get('/', (req, res) => {
   if (status) { conds.push('status = ?'); params.push(status); }
   const where = conds.join(' AND ');
 
-  const rows = dbx.all(`SELECT * FROM todos WHERE ${where}`, params);
-  rows.sort((a, b) => {
-    if (a.status !== b.status) return a.status === '未完成' ? -1 : 1;
-    const timeOf = (t) => `${t.dueDate} ${t.dueTime ?? '23:59'}`;
-    if (a.status === '未完成') return timeOf(a).localeCompare(timeOf(b));
-    return timeOf(b).localeCompare(timeOf(a));
-  });
+  const total = dbx.get(`SELECT COUNT(*) AS c FROM todos WHERE ${where}`, params).c;
+  // 未完成按截止时间升序、已完成按截止时间倒序；排序与分页下推到 SQL
+  const rows = dbx.all(
+    `SELECT * FROM todos WHERE ${where}
+     ORDER BY CASE WHEN status = '未完成' THEN 0 ELSE 1 END,
+              CASE WHEN status = '未完成' THEN dueDate || ' ' || COALESCE(dueTime, '23:59') END ASC,
+              CASE WHEN status <> '未完成' THEN dueDate || ' ' || COALESCE(dueTime, '23:59') END DESC,
+              rowid ASC
+     LIMIT ? OFFSET ?`,
+    [...params, pageSize, (page - 1) * pageSize],
+  );
 
-  res.json({ list: rows.slice((page - 1) * pageSize, page * pageSize), total: rows.length, page, pageSize });
+  res.json({ list: rows, total, page, pageSize });
 });
 
 router.post('/', (req, res) => {

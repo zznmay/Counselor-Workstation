@@ -421,6 +421,36 @@ if (!todoCols.includes('createdBy')) {
 }
 
 /**
+ * 查询索引：必须在老库补列（students.classId / todos.createdBy）之后创建，
+ * 否则旧库会因「no such column」在启动阶段崩溃。
+ * 逐条 try/catch：极老库若缺少某列，只跳过对应索引，不阻断启动。
+ */
+const INDEX_STATEMENTS = [
+  'CREATE INDEX IF NOT EXISTS idx_students_class ON students(classId)',
+  'CREATE INDEX IF NOT EXISTS idx_students_status ON students(status)',
+  'CREATE INDEX IF NOT EXISTS idx_students_grade ON students(grade)',
+  'CREATE INDEX IF NOT EXISTS idx_conv_student_time ON conversations(studentId, talkTime DESC)',
+  'CREATE INDEX IF NOT EXISTS idx_conv_talktime ON conversations(talkTime)',
+  'CREATE INDEX IF NOT EXISTS idx_warn_student ON warnings(studentId)',
+  'CREATE INDEX IF NOT EXISTS idx_warn_status_time ON warnings(status, raisedAt DESC)',
+  "CREATE INDEX IF NOT EXISTS idx_warn_active_time ON warnings(raisedAt DESC) WHERE status != '已解除'",
+  'CREATE INDEX IF NOT EXISTS idx_appr_student ON approvals(studentId)',
+  'CREATE INDEX IF NOT EXISTS idx_appr_status_time ON approvals(status, submittedAt DESC)',
+  "CREATE INDEX IF NOT EXISTS idx_appr_pending_time ON approvals(submittedAt DESC) WHERE status = '待审批'",
+  'CREATE INDEX IF NOT EXISTS idx_todos_owner_status_due ON todos(createdBy, status, dueDate)',
+  'CREATE INDEX IF NOT EXISTS idx_tpl_category ON templateFiles(categoryId)',
+  'CREATE INDEX IF NOT EXISTS idx_mh_level ON mentalHealth(level)',
+  'CREATE INDEX IF NOT EXISTS idx_sc_user ON studentCounselors(userId)',
+];
+for (const sql of INDEX_STATEMENTS) {
+  try {
+    db.prepare(sql).run();
+  } catch (e) {
+    console.warn(`[db] 索引创建跳过（${sql.match(/idx_[a-z_]+/)?.[0] ?? 'unknown'}）：${e && e.message}`);
+  }
+}
+
+/**
  * 内置角色（幂等）：admin 全量权限；counselor 默认可见业务模块；
  * headTeacher（班主任）仅心理健康 + 心理访谈（数据范围由用户管理里的带班班级决定）。
  * 已存在时不覆盖 —— 管理员对内置角色权限的调整在重启后保留。

@@ -18,14 +18,14 @@ import {
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs, { type Dayjs } from 'dayjs';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
-import { getStudentOptions } from '@/api/student';
 import { createTodo, deleteTodo, getTodos, updateTodo } from '@/api/todo';
 import PageHeader from '@/components/PageHeader';
 import { TODO_PRIORITIES, TODO_PRIORITY_COLOR, TODO_STATUSES, TODO_TYPES, TODO_TYPE_COLOR, toOptions } from '@/constants';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useList } from '@/hooks/useList';
+import { useStudentOptions } from '@/hooks/useStudentOptions';
 import type { StudentOption, Todo, TodoInput, TodoPriority, TodoQuery, TodoStatus, TodoType } from '@/types';
 import TodosMobile from './mobile';
 
@@ -52,15 +52,26 @@ function TodosDesktop() {
 
   const todayStr = dayjs().format('YYYY-MM-DD');
   const [keywordInput, setKeywordInput] = useState('');
-  const [studentOptions, setStudentOptions] = useState<StudentOption[]>([]);
   const [editing, setEditing] = useState<Todo | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [detail, setDetail] = useState<Todo | null>(null);
 
-  useEffect(() => {
-    getStudentOptions().then(setStudentOptions).catch(() => undefined);
-  }, []);
+  /* 关联学生下拉：打开弹窗时按需搜索；编辑值不在首屏结果时置顶回显 */
+  const {
+    options: studentOptions,
+    loading: studentOptionsLoading,
+    search: searchStudents,
+    handlePopupScroll,
+  } = useStudentOptions({ enabled: modalOpen });
+
+  const relatedOptions = useMemo<StudentOption[]>(() => {
+    const cur = editing?.relatedStudent;
+    if (cur && !studentOptions.some((s) => s.name === cur)) {
+      return [{ id: `__current__${cur}`, name: cur, studentNo: '', className: '' }, ...studentOptions];
+    }
+    return studentOptions;
+  }, [studentOptions, editing]);
 
   useEffect(() => {
     if (!modalOpen) return;
@@ -77,11 +88,13 @@ function TodosDesktop() {
 
   const openCreate = () => {
     setEditing(null);
+    searchStudents('');
     setModalOpen(true);
   };
 
   const openEdit = (record: Todo) => {
     setEditing(record);
+    searchStudents('');
     setModalOpen(true);
   };
 
@@ -367,9 +380,15 @@ function TodosDesktop() {
             <Select
               showSearch
               allowClear
+              filterOption={false}
+              onSearch={searchStudents}
+              onPopupScroll={handlePopupScroll}
+              loading={studentOptionsLoading}
               placeholder="输入姓名搜索"
-              optionFilterProp="label"
-              options={studentOptions.map((s) => ({ value: s.name, label: `${s.name}（${s.className}）` }))}
+              options={relatedOptions.map((s) => ({
+                value: s.name,
+                label: s.className ? `${s.name}（${s.className}）` : s.name,
+              }))}
             />
           </Form.Item>
           <Form.Item name="note" label="备注">

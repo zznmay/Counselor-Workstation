@@ -1,7 +1,8 @@
 import dayjs from 'dayjs';
-import * as XLSX from 'xlsx';
+import type * as XLSX from 'xlsx';
 
 import { ATTENTION_LEVELS } from '@/constants/mental';
+import { loadXLSX } from './xlsx';
 import type { AttentionLevel, MentalImportRow, MentalImportSkip } from '@/types';
 
 /**
@@ -34,7 +35,8 @@ const EXAMPLE_ROWS: string[][] = [
 ];
 
 /** 生成导入模板工作簿：「关注学生名单」数据表 + 「填写说明」说明表 */
-export function buildMentalImportTemplateWorkbook(): XLSX.WorkBook {
+export async function buildMentalImportTemplateWorkbook(): Promise<XLSX.WorkBook> {
+  const XLSX = await loadXLSX();
   const wb = XLSX.utils.book_new();
 
   const dataWs = XLSX.utils.aoa_to_sheet([[...MENTAL_IMPORT_HEADERS], ...EXAMPLE_ROWS]);
@@ -57,12 +59,14 @@ export function buildMentalImportTemplateWorkbook(): XLSX.WorkBook {
 }
 
 /** 浏览器端触发下载导入模板 */
-export function downloadMentalImportTemplate(): void {
-  XLSX.writeFile(buildMentalImportTemplateWorkbook(), '心理关注学生导入模板.xlsx');
+export async function downloadMentalImportTemplate(): Promise<void> {
+  const XLSX = await loadXLSX();
+  XLSX.writeFile(await buildMentalImportTemplateWorkbook(), '心理关注学生导入模板.xlsx');
 }
 
 /** 解析上传的关注名单 Excel（自动定位「关注学生名单」工作表，按列标题取值，跳过空行） */
 export async function parseMentalImportExcel(file: File): Promise<MentalImportRow[]> {
+  const XLSX = await loadXLSX();
   const data = new Uint8Array(await file.arrayBuffer());
   const wb = XLSX.read(data, { type: 'array' });
   const sheetName = wb.SheetNames.find((n) => n.includes('关注')) ?? wb.SheetNames[0];
@@ -102,7 +106,8 @@ export async function parseMentalImportExcel(file: File): Promise<MentalImportRo
 }
 
 /** 导出跳过明细（行号 + 学号 + 姓名 + 原因），修正后可直接重新上传 */
-export function exportMentalImportSkips(skipped: MentalImportSkip[]): void {
+export async function exportMentalImportSkips(skipped: MentalImportSkip[]): Promise<void> {
+  const XLSX = await loadXLSX();
   const aoa: unknown[][] = [
     ['Excel 行号', '学号', '姓名', '跳过原因'],
     ...skipped.map((s) => [s.row, s.studentNo, s.name, s.reason]),

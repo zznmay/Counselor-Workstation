@@ -40,10 +40,12 @@ const toClient = (row) => ({ ...row, uploaded: !!row.uploaded, pinned: undefined
 
 router.get('/categories', (req, res) => {
   const rows = dbx.all('SELECT * FROM templateCategories ORDER BY id');
-  res.json(rows.map((c) => ({
-    ...c,
-    count: dbx.get('SELECT COUNT(*) AS c FROM templateFiles WHERE categoryId = ?', [c.id]).c,
-  })));
+  // 一次 GROUP BY 取代按类别逐条 COUNT 的 N+1 查询
+  const counts = new Map(
+    dbx.all('SELECT categoryId, COUNT(*) AS c FROM templateFiles GROUP BY categoryId')
+      .map((r) => [r.categoryId, r.c]),
+  );
+  res.json(rows.map((c) => ({ ...c, count: counts.get(c.id) ?? 0 })));
 });
 
 router.post('/categories', auth.adminOnly, (req, res) => {

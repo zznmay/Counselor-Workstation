@@ -1635,3 +1635,88 @@ body {
     font-size: 16px !important;
   }
 }
+
+/* ======================================================================
+   路由级加载/错误兜底（不依赖 antd，登录首屏也可用）
+   ====================================================================== */
+.route-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 45vh;
+  color: var(--app-ink-secondary);
+  font-size: 13px;
+}
+
+.route-fallback-full {
+  min-height: 100vh;
+}
+
+.route-fallback-spinner {
+  width: 22px;
+  height: 22px;
+  border: 2px solid #dbe4f8;
+  border-top-color: var(--app-primary);
+  border-radius: 50%;
+  animation: route-fallback-spin 0.8s linear infinite;
+}
+
+@keyframes route-fallback-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .route-fallback-spinner { animation-duration: 2s; }
+}
+
+.route-error {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  color: var(--app-ink);
+  text-align: center;
+}
+
+.route-error-title {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.route-error-desc {
+  max-width: 520px;
+  color: var(--app-ink-secondary);
+  font-size: 13px;
+  line-height: 1.7;
+  word-break: break-word;
+}
+
+.route-error-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 8px;
+}
+
+.route-error-btn {
+  padding: 8px 22px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--app-primary);
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+  box-shadow: var(--app-primary-glow);
+}
+
+.route-error-btn:hover { background: var(--app-primary-strong); }
+
+.route-error-link {
+  color: var(--app-primary);
+  font-size: 13px;
+  text-decoration: none;
+}

@@ -1,11 +1,12 @@
 /** 寝室分配批量导出（纯前端）：按当前筛选条件下拉全量数据 → xlsx 生成与下载 */
 import dayjs from 'dayjs';
-import * as XLSX from 'xlsx';
+import type * as XLSX from 'xlsx';
 
 import { getDormitories } from '@/api/dormitory';
 import type { Dormitory, DormitoryQuery } from '@/types';
 import { formatDorm } from './dormitory';
 import { sanitizeCellValue } from './studentExport';
+import { loadXLSX } from './xlsx';
 
 const FETCH_PAGE_SIZE = 100;
 
@@ -47,7 +48,8 @@ export function buildDormExportFileName(displayName?: string, date = dayjs()): s
 }
 
 /** 生成并触发浏览器下载；bookSST 避免单元格被当作公式执行 */
-export function exportDormitories(rows: Dormitory[], displayName?: string): void {
+export async function exportDormitories(rows: Dormitory[], displayName?: string): Promise<void> {
+  const XLSX = await loadXLSX();
   const header = COLUMNS.map((c) => c.label);
   const body = rows.map((row) => COLUMNS.map((c) => sanitizeCellValue(c.value(row))));
   const ws = XLSX.utils.aoa_to_sheet([header, ...body]);

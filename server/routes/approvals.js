@@ -27,19 +27,21 @@ router.get('/', (req, res) => {
   if (status) { conds.push('x.status = ?'); params.push(status); }
 
   const where = `${conds.join(' AND ')} ${scope.where}`;
+  const total = dbx.get(
+    `SELECT COUNT(*) AS c FROM approvals x JOIN students s ON s.id = x.studentId WHERE ${where}`,
+    [...params, ...scope.params],
+  ).c;
+  // 待审批优先 + 提交时间倒序，排序与分页下推到 SQL
   const rows = dbx.all(
     `SELECT x.*, s.name AS studentName, s.studentNo, s.className FROM approvals x
-     JOIN students s ON s.id = x.studentId WHERE ${where} ORDER BY x.submittedAt DESC`,
-    [...params, ...scope.params],
+     JOIN students s ON s.id = x.studentId WHERE ${where}
+     ORDER BY CASE WHEN x.status = '待审批' THEN 0 ELSE 1 END,
+              x.submittedAt DESC, x.rowid ASC
+     LIMIT ? OFFSET ?`,
+    [...params, ...scope.params, pageSize, (page - 1) * pageSize],
   );
-  rows.sort((a, b) => {
-    const pa = a.status === '待审批' ? 0 : 1;
-    const pb = b.status === '待审批' ? 0 : 1;
-    if (pa !== pb) return pa - pb;
-    return b.submittedAt.localeCompare(a.submittedAt);
-  });
 
-  res.json({ list: rows.slice((page - 1) * pageSize, page * pageSize), total: rows.length, page, pageSize });
+  res.json({ list: rows, total, page, pageSize });
 });
 
 function resolveStudent(studentId) {

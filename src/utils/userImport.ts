@@ -1,7 +1,8 @@
 import dayjs from 'dayjs';
-import * as XLSX from 'xlsx';
+import type * as XLSX from 'xlsx';
 
 import type { ClassOption, ParsedUserRow, RoleOption, UserImportFailure } from '@/types';
+import { loadXLSX } from './xlsx';
 
 /**
  * 用户账号 Excel 批量导入工具（与 studentImport/classImport 同一套 xlsx 模式）：
@@ -32,7 +33,8 @@ function fieldGuide(roleNames: string[]): [string, string, string][] {
 }
 
 /** 生成用户导入模板（「用户名单」数据表 + 「填写说明」说明表） */
-export function buildUserTemplateWorkbook(roleNames: string[]): XLSX.WorkBook {
+export async function buildUserTemplateWorkbook(roleNames: string[]): Promise<XLSX.WorkBook> {
+  const XLSX = await loadXLSX();
   const wb = XLSX.utils.book_new();
   const exampleRole = roleNames[0] ?? '辅导员';
   const dataWs = XLSX.utils.aoa_to_sheet([
@@ -55,12 +57,14 @@ export function buildUserTemplateWorkbook(roleNames: string[]): XLSX.WorkBook {
 }
 
 /** 下载用户导入模板（角色列表动态写入说明页） */
-export function downloadUserTemplate(roleNames: string[]): void {
-  XLSX.writeFile(buildUserTemplateWorkbook(roleNames), '用户账号导入模板.xlsx');
+export async function downloadUserTemplate(roleNames: string[]): Promise<void> {
+  const XLSX = await loadXLSX();
+  XLSX.writeFile(await buildUserTemplateWorkbook(roleNames), '用户账号导入模板.xlsx');
 }
 
 /** 解析用户 Excel：定位「用户名单」工作表，逐行取 用户名/姓名/角色/所辖班级（多余列忽略，兼容旧版模板） */
 export async function parseUserExcel(file: File): Promise<ParsedUserRow[]> {
+  const XLSX = await loadXLSX();
   const data = new Uint8Array(await file.arrayBuffer());
   const wb = XLSX.read(data, { type: 'array' });
   const sheetName = wb.SheetNames.find((n) => n.includes('用户名单')) ?? wb.SheetNames[0];
@@ -181,7 +185,8 @@ export function validateUserRows(
 }
 
 /** 导出失败明细（模板全部列 + 失败原因列），修正后可直接重新上传 */
-export function exportUserImportFailures(failures: UserImportFailure[]): void {
+export async function exportUserImportFailures(failures: UserImportFailure[]): Promise<void> {
+  const XLSX = await loadXLSX();
   const aoa: unknown[][] = [[...USER_HEADERS, '失败原因']];
   failures.forEach(({ data, username, displayName, reason }) => {
     const d = data ?? { username, displayName, role: '', classNames: '' };

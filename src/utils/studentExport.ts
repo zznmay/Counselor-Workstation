@@ -1,9 +1,10 @@
 /** 学生名册批量导出（纯前端）：字段定义 → 数据取值 → xlsx 生成与下载 */
 import dayjs from 'dayjs';
-import * as XLSX from 'xlsx';
+import type * as XLSX from 'xlsx';
 
 import type { Student, StudentQuery } from '@/types';
 import { getStudents } from '@/api/student';
+import { loadXLSX } from './xlsx';
 
 /**
  * 可导出字段（顺序 = 「恢复默认」时的列顺序）。
@@ -99,7 +100,8 @@ export function buildExportFileName(displayName: string | undefined, date = dayj
 /* ---------- 工作簿生成 ---------- */
 
 /** 按所选字段顺序生成工作簿：中文表头 + 数据行 + 列宽 + 表头行自动筛选 */
-export function buildStudentWorkbook(fields: ExportFieldDef[], rows: Student[]): XLSX.WorkBook {
+export async function buildStudentWorkbook(fields: ExportFieldDef[], rows: Student[]): Promise<XLSX.WorkBook> {
+  const XLSX = await loadXLSX();
   const header = fields.map((f) => f.label);
   const body = rows.map((row) => fields.map((f) => sanitizeCellValue(f.value(row))));
   const ws = XLSX.utils.aoa_to_sheet([header, ...body]);
@@ -115,8 +117,9 @@ export function buildStudentWorkbook(fields: ExportFieldDef[], rows: Student[]):
 }
 
 /** 生成并触发浏览器下载；bookSST 让全部值落共享字符串表，杜绝公式注入 */
-export function writeStudentWorkbook(fields: ExportFieldDef[], rows: Student[], fileName: string): void {
-  XLSX.writeFile(buildStudentWorkbook(fields, rows), fileName, { bookSST: true });
+export async function writeStudentWorkbook(fields: ExportFieldDef[], rows: Student[], fileName: string): Promise<void> {
+  const XLSX = await loadXLSX();
+  XLSX.writeFile(await buildStudentWorkbook(fields, rows), fileName, { bookSST: true });
 }
 
 /* ---------- 数据获取（复用现有列表接口，不新增后端） ---------- */

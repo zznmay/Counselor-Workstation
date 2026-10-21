@@ -1,7 +1,8 @@
 import dayjs from 'dayjs';
-import * as XLSX from 'xlsx';
+import type * as XLSX from 'xlsx';
 
 import { MAX_BUILDING, MAX_ROOM } from './dormitory';
+import { loadXLSX } from './xlsx';
 import type { DormImportFailure, ParsedDormRow } from '@/types';
 
 /**
@@ -31,7 +32,8 @@ const EXAMPLE_ROWS: (string | undefined)[][] = [
 ];
 
 /** 生成寝室导入模板工作簿（「寝室名单」数据表 + 「填写说明」说明表） */
-export function buildDormTemplateWorkbook(): XLSX.WorkBook {
+export async function buildDormTemplateWorkbook(): Promise<XLSX.WorkBook> {
+  const XLSX = await loadXLSX();
   const wb = XLSX.utils.book_new();
   const dataWs = XLSX.utils.aoa_to_sheet([[...DORM_HEADERS], ...EXAMPLE_ROWS]);
   dataWs['!cols'] = [{ wch: 14 }, { wch: 10 }, { wch: 12 }, { wch: 10 }, { wch: 6 }, { wch: 12 }, { wch: 10 }];
@@ -48,12 +50,14 @@ export function buildDormTemplateWorkbook(): XLSX.WorkBook {
 }
 
 /** 下载寝室导入模板 */
-export function downloadDormTemplate(): void {
-  XLSX.writeFile(buildDormTemplateWorkbook(), '寝室名单导入模板.xlsx');
+export async function downloadDormTemplate(): Promise<void> {
+  const XLSX = await loadXLSX();
+  XLSX.writeFile(await buildDormTemplateWorkbook(), '寝室名单导入模板.xlsx');
 }
 
 /** 解析寝室 Excel：定位「寝室名单」工作表，逐行取出七个字段 */
 export async function parseDormExcel(file: File): Promise<ParsedDormRow[]> {
+  const XLSX = await loadXLSX();
   const data = new Uint8Array(await file.arrayBuffer());
   const wb = XLSX.read(data, { type: 'array' });
   const sheetName = wb.SheetNames.find((n) => n.includes('寝室名单')) ?? wb.SheetNames[0];
@@ -143,7 +147,8 @@ export function validateDormRows(
 }
 
 /** 导出失败明细（模板全部列 + 失败原因列），修正后可直接重新上传 */
-export function exportDormImportFailures(failures: DormImportFailure[]): void {
+export async function exportDormImportFailures(failures: DormImportFailure[]): Promise<void> {
+  const XLSX = await loadXLSX();
   const aoa: unknown[][] = [[...DORM_HEADERS, '失败原因']];
   failures.forEach(({ data, studentNo, name, building, room, reason }) => {
     const d = data ?? { studentNo, name, className: '', grade: '', gender: '', building, room };

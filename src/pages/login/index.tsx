@@ -1,12 +1,15 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { request } from '@/api/request';
+import RouteFallback from '@/components/RouteFallback';
 import { firstAccessiblePath, setSession } from '@/lib/auth';
 import type { AuthUser } from '@/lib/auth';
 import { useIsMobile } from '@/hooks/useIsMobile';
-import LoginMobile from '@/pages/login/mobile';
 import './desktop.css';
+
+/** 移动端登录依赖 antd 消息上下文，单独成包；桌面端登录不加载 antd */
+const LoginMobile = lazy(() => import('./mobileHost'));
 
 /** 设计稿基准画布 (16:9) */
 const DESIGN_W = 836;
@@ -349,5 +352,10 @@ function LoginDesktop() {
  */
 export default function Login() {
   const isMobile = useIsMobile();
-  return isMobile ? <LoginMobile /> : <LoginDesktop />;
+  if (!isMobile) return <LoginDesktop />;
+  return (
+    <Suspense fallback={<RouteFallback full />}>
+      <LoginMobile />
+    </Suspense>
+  );
 }

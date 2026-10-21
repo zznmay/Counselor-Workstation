@@ -1,7 +1,8 @@
 import dayjs from 'dayjs';
-import * as XLSX from 'xlsx';
+import type * as XLSX from 'xlsx';
 
 import type { ClassImportFailure, ParsedClassRow } from '@/types';
+import { loadXLSX } from './xlsx';
 
 /**
  * 班级名单 Excel 批量导入工具（与 studentImport.ts 同一套 xlsx 模式）：
@@ -40,7 +41,8 @@ const EXAMPLE_ROWS: (string | undefined)[][] = [
 ];
 
 /** 生成班级名单导入模板工作簿（「班级名单」数据表 + 「填写说明」说明表） */
-export function buildClassTemplateWorkbook(): XLSX.WorkBook {
+export async function buildClassTemplateWorkbook(): Promise<XLSX.WorkBook> {
+  const XLSX = await loadXLSX();
   const wb = XLSX.utils.book_new();
   const dataWs = XLSX.utils.aoa_to_sheet([[...CLASS_HEADERS], ...EXAMPLE_ROWS]);
   dataWs['!cols'] = [{ wch: 16 }, { wch: 12 }, { wch: 24 }, { wch: 20 }, { wch: 24 }, { wch: 20 }];
@@ -58,12 +60,14 @@ export function buildClassTemplateWorkbook(): XLSX.WorkBook {
 }
 
 /** 下载班级名单导入模板 */
-export function downloadClassTemplate(): void {
-  XLSX.writeFile(buildClassTemplateWorkbook(), '班级名单导入模板.xlsx');
+export async function downloadClassTemplate(): Promise<void> {
+  const XLSX = await loadXLSX();
+  XLSX.writeFile(await buildClassTemplateWorkbook(), '班级名单导入模板.xlsx');
 }
 
 /** 解析班级名单 Excel：定位「班级名单」工作表，逐行取出 6 列字段 */
 export async function parseClassExcel(file: File): Promise<ParsedClassRow[]> {
+  const XLSX = await loadXLSX();
   const data = new Uint8Array(await file.arrayBuffer());
   const wb = XLSX.read(data, { type: 'array' });
   const sheetName = wb.SheetNames.find((n) => n.includes('班级名单')) ?? wb.SheetNames[0];
@@ -211,7 +215,8 @@ export function validateClassRows(
 }
 
 /** 导出失败明细（模板全部列 + 失败原因列），修正后可直接重新上传 */
-export function exportClassImportFailures(failures: ClassImportFailure[]): void {
+export async function exportClassImportFailures(failures: ClassImportFailure[]): Promise<void> {
+  const XLSX = await loadXLSX();
   const aoa: unknown[][] = [[...CLASS_HEADERS, '失败原因']];
   failures.forEach(({ data, name, grade, reason }) => {
     const d = data ?? { name, grade, counselorNos: '', counselorNames: '', headTeacherNos: '', headTeacherNames: '' };
