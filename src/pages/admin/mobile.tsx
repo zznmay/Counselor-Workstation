@@ -6,6 +6,7 @@ import type { ManagedUser } from '@/api/admin';
 import { getClassOptions } from '@/api/classes';
 import { getRoleOptions } from '@/api/roles';
 import { MIcon } from '@/components/mobile/icons';
+import ClassMultiSelect from '@/components/ClassMultiSelect';
 import { getStoredUser } from '@/lib/auth';
 import type { ClassOption, RoleOption } from '@/types';
 
@@ -63,41 +64,8 @@ export default function AdminUsersMobile() {
   const canDelete = (u: ManagedUser) =>
     u.id !== currentUser?.id && !(u.role === 'admin' && enabledAdminCount <= 1);
 
-  /** 班级选项按年级分组（新增/分配共用） */
-  const gradeGroups = useMemo(() => {
-    const groups: { gradeName: string; items: ClassOption[] }[] = [];
-    const index = new Map<string, number>();
-    for (const opt of classOptions) {
-      let gi = index.get(opt.gradeName);
-      if (gi === undefined) {
-        gi = groups.length;
-        index.set(opt.gradeName, gi);
-        groups.push({ gradeName: opt.gradeName, items: [] });
-      }
-      groups[gi].items.push(opt);
-    }
-    return groups;
-  }, [classOptions]);
-
-  const classSelect = (
-    <Select
-      mode="multiple"
-      allowClear
-      showSearch
-      optionFilterProp="children"
-      placeholder="选择所辖班级（可多选）"
-    >
-      {gradeGroups.map((g) => (
-        <Select.OptGroup key={g.gradeName} label={g.gradeName}>
-          {g.items.map((c) => (
-            <Select.Option key={c.id} value={c.id}>
-              {c.name}
-            </Select.Option>
-          ))}
-        </Select.OptGroup>
-      ))}
-    </Select>
-  );
+  /** 班级多选（新增/分配共用） */
+  const classSelect = <ClassMultiSelect classOptions={classOptions} />;
 
   /* ---------- 搜索（本地过滤：姓名 / 用户名 / 角色名） ---------- */
   const visibleUsers = useMemo(() => {

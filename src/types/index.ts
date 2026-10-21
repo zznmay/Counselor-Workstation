@@ -192,8 +192,12 @@ export interface DormitoryQuery extends PageQuery {
   studentNo?: string;
   /** 姓名（模糊） */
   name?: string;
-  /** 班级（模糊） */
+  /** 班级名称（模糊，兼容旧调用） */
   className?: string;
+  /** 年级（精确） */
+  grade?: string;
+  /** 班级字典 ID（多选，命中任一班级） */
+  classIds?: number[];
   /** 宿舍楼（模糊） */
   building?: string;
   /** 房间号（模糊） */

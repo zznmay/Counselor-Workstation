@@ -699,7 +699,9 @@ function StudentsDesktop() {
           allowClear
           showSearch
           optionFilterProp="label"
-          style={{ minWidth: 140 }}
+          style={{ width: 240, flex: '0 0 auto' }}
+          popupMatchSelectWidth={false}
+          popupClassName="students-class-select-popup"
           options={filterClassOptions}
           value={query.classId}
           onChange={(classId) => patchQuery({ classId })}

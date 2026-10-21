@@ -112,6 +112,20 @@ describe('寝室管理（dormitories）', () => {
     const byClass = await requestJson(base, 'GET', `/api/dormitories?page=1&pageSize=10&className=${encodeURIComponent(CLASS_NAME)}`);
     assert.equal(byClass.body.total, 2);
 
+    // 年级精确筛选 + 多班级（字典 ID，逗号分隔）筛选
+    const classId = dbx.get(
+      'SELECT c.id FROM classes c JOIN grades g ON g.id = c.gradeId WHERE c.name = ? AND g.name = ?',
+      [CLASS_NAME, GRADE],
+    ).id;
+    const byGrade = await requestJson(base, 'GET', `/api/dormitories?page=1&pageSize=10&grade=${encodeURIComponent(GRADE)}`);
+    assert.equal(byGrade.body.total, 2);
+    const byOtherGrade = await requestJson(base, 'GET', `/api/dormitories?page=1&pageSize=10&grade=${encodeURIComponent('2025级')}`);
+    assert.equal(byOtherGrade.body.total, 0);
+    const byClassIds = await requestJson(base, 'GET', `/api/dormitories?page=1&pageSize=10&classIds=${classId},999999`);
+    assert.equal(byClassIds.body.total, 2);
+    const byUnknownClassIds = await requestJson(base, 'GET', '/api/dormitories?page=1&pageSize=10&classIds=999999');
+    assert.equal(byUnknownClassIds.body.total, 0);
+
     const byRoom = await requestJson(base, 'GET', '/api/dormitories?page=1&pageSize=10&room=101');
     assert.equal(byRoom.body.total, 1);
 
@@ -170,5 +184,28 @@ describe('寝室管理（dormitories）', () => {
     const row = studentRow('2026010101');
     assert.equal(row.dormBuilding, null);
     assert.equal(row.dorm, null);
+  });
+
+  it('批量删除：一次清除多条并同步名册镜像，重复/空选择分别返回 409/400', async () => {
+    const targets = ['2026010102', '2026010103'].map((no) => dormOf(no));
+    assert.equal(targets.length, 2);
+    const res = await requestJson(base, 'POST', '/api/dormitories/batch-delete', {
+      ids: targets.map((t) => t.id),
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.deletedCount, 2);
+    for (const no of ['2026010102', '2026010103']) {
+      assert.equal(dormOf(no), null);
+      assert.equal(studentRow(no).dorm, null);
+    }
+
+    // 已删除的记录再次提交 → 409（提示刷新后重选）
+    const again = await requestJson(base, 'POST', '/api/dormitories/batch-delete', {
+      ids: targets.map((t) => t.id),
+    });
+    assert.equal(again.status, 409);
+
+    const empty = await requestJson(base, 'POST', '/api/dormitories/batch-delete', { ids: [] });
+    assert.equal(empty.status, 400);
   });
 });

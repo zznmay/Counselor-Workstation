@@ -23,6 +23,8 @@ const BUSINESS: MoreItem[] = [
   { key: '/conversations', label: '谈心谈话', icon: 'comment', module: 'conversations' },
   /* 预警管理：2026-10-20 由底部 Tab 下撤为二级入口（路由与页面行为不变），角标随之迁移 */
   { key: '/warnings', label: '预警管理', icon: 'triangle', badge: 'warnings', module: 'warnings' },
+  /* 寝室管理：日常业务操作，2026-10-21 由系统管理分组移入业务办理 */
+  { key: '/dormitories', label: '寝室管理', icon: 'home', module: 'dormitories' },
 ];
 
 const RESOURCES: MoreItem[] = [
@@ -32,7 +34,6 @@ const RESOURCES: MoreItem[] = [
 
 const SYSTEM: MoreItem[] = [
   { key: '/classes', label: '班级管理', icon: 'school', module: 'classes' },
-  { key: '/dormitories', label: '寝室管理', icon: 'home', module: 'dormitories' },
   { key: '/admin/users', label: '用户管理', icon: 'users', adminOnly: true },
   { key: '/admin/roles', label: '角色管理', icon: 'shield', adminOnly: true },
   { key: '/admin/logs', label: '访问日志', icon: 'clock', adminOnly: true },

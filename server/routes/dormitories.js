@@ -12,7 +12,7 @@ const express = require('express');
 const dbx = require('../lib/db');
 const auth = require('../lib/auth');
 const { canManageStudent, rosterScope } = require('../lib/scope');
-const { requirePermission } = require('../lib/permissions');
+const { requirePermission, isModuleOwner } = require('../lib/permissions');
 const {
   MAX_BUILDING,
   MAX_ROOM,
@@ -42,7 +42,8 @@ function pushLike(conds, params, field, value) {
 
 /**
  * 列表筛选口径：学号 / 姓名 / 班级 / 宿舍楼 / 房间号 五项均支持模糊查询，
- * 另提供 keyword 综合关键字（学号、姓名、房间号 任一命中）供移动端单搜索框使用。
+ * 另提供年级精确筛选、classIds 多班级筛选（逗号分隔字典 ID），
+ * 以及 keyword 综合关键字（学号、姓名、房间号 任一命中）供移动端单搜索框使用。
  */
 function buildFilter(query) {
   const conds = ['1 = 1'];
@@ -52,6 +53,21 @@ function buildFilter(query) {
   pushLike(conds, params, 's.className', query.className);
   pushLike(conds, params, 'd.building', query.building);
   pushLike(conds, params, 'd.room', query.room);
+
+  const grade = String(query.grade ?? '').trim();
+  if (grade) {
+    conds.push('s.grade = ?');
+    params.push(grade);
+  }
+
+  const rawClassIds = Array.isArray(query.classIds) ? query.classIds.join(',') : String(query.classIds ?? '');
+  const classIds = [...new Set(
+    rawClassIds.split(',').map((v) => Number(v)).filter((n) => Number.isInteger(n) && n > 0),
+  )];
+  if (classIds.length > 0) {
+    conds.push(`s.classId IN (${classIds.map(() => '?').join(', ')})`);
+    params.push(...classIds);
+  }
 
   const kw = String(query.keyword ?? '').trim();
   if (kw) {
@@ -214,6 +230,52 @@ router.delete('/:id', (req, res) => {
 });
 
 /**
+ * 批量删除：先校验全部记录存在且在维护权限内，再在一个事务里删除并同步名册镜像。
+ * 任一条不满足则整批拒绝，避免出现「删了一半」的中间状态。
+ */
+router.post('/batch-delete', (req, res) => {
+  const raw = Array.isArray(req.body?.ids) ? req.body.ids : [];
+  const ids = [...new Set(
+    raw.map((v) => Number(v)).filter((n) => Number.isInteger(n) && n > 0),
+  )];
+  if (ids.length === 0) return res.status(400).json({ message: '请选择要删除的寝室分配' });
+  if (ids.length > 500) return res.status(400).json({ message: '单次最多删除 500 条，请分批操作' });
+
+  const marks = ids.map(() => '?').join(', ');
+  const targets = dbx.all(`${LIST_SELECT} WHERE d.id IN (${marks})`, ids);
+  if (targets.length !== ids.length) {
+    return res.status(409).json({
+      message: `所选记录中有 ${ids.length - targets.length} 条已不存在，请刷新列表后重新选择`,
+    });
+  }
+  const denied = targets.filter((t) => !canManageStudent(req.user, t.studentId));
+  if (denied.length > 0) {
+    return res.status(403).json({
+      message: `所选记录中有 ${denied.length} 条不在您可维护的班级范围内，未执行删除`,
+    });
+  }
+
+  dbx.db.exec('BEGIN IMMEDIATE');
+  try {
+    for (const target of targets) {
+      dbx.run('DELETE FROM dormitories WHERE id = ?', [target.id]);
+      mirrorStudentDorm(target.studentNo);
+    }
+    dbx.db.exec('COMMIT');
+  } catch (e) {
+    dbx.db.exec('ROLLBACK');
+    console.error('[dormitories/batch-delete] 事务回滚：', e.message);
+    return res.status(500).json({ message: '批量删除失败，已全部回滚，未产生任何数据变更' });
+  }
+
+  logAccess(
+    req,
+    `批量删除寝室分配 ${targets.length} 条：${targets.map((t) => `${t.name}（${t.studentNo}）`).join('、')}`,
+  );
+  res.json({ ok: true, deletedCount: targets.length });
+});
+
+/**
  * 批量导入寝室分配（upsert 语义）：以学号为唯一标识 ——
  * - 学号在名册中不存在 → 失败（寝室数据必须挂在真实学生上）；
  * - 学号不在维护权限内 → 失败（与名册编辑口径一致）；
@@ -223,6 +285,10 @@ router.delete('/:id', (req, res) => {
  * 校验在事务外完成，写入包事务保证单次请求原子性。
  */
 router.post('/import', (req, res) => {
+  // 批量导入为高影响写入（upsert 全量覆盖），仅「寝室管理」主负责辅导员 / 管理员可操作
+  if (!isModuleOwner(req.user, 'dormitories')) {
+    return res.status(403).json({ message: '批量导入仅寝室管理主负责辅导员或管理员可操作' });
+  }
   const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
   const failures = [];
   const pending = []; // 校验通过的待写入项

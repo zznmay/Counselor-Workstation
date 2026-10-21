@@ -13,13 +13,16 @@ import type {
 /** 查询条件类型随接口一并导出，页面无需再从 types 单独引入 */
 export type { DormitoryQuery } from '@/types';
 
-/** 列表：学号 / 姓名 / 班级 / 宿舍楼 / 房间号 模糊筛选 + 分页 */
+/** 列表：学号 / 姓名 / 年级 / 多班级 / 宿舍楼 / 房间号 筛选 + 分页 */
 export function getDormitories(query: DormitoryQuery): Promise<PageResult<Dormitory>> {
   const params = new URLSearchParams({ page: String(query.page), pageSize: String(query.pageSize) });
-  ['studentNo', 'name', 'className', 'building', 'room', 'keyword'].forEach((key) => {
+  ['studentNo', 'name', 'className', 'grade', 'building', 'room', 'keyword'].forEach((key) => {
     const value = query[key as keyof DormitoryQuery];
     if (value !== undefined && value !== '') params.set(key, String(value));
   });
+  if (query.classIds && query.classIds.length > 0) {
+    params.set('classIds', query.classIds.join(','));
+  }
   return request<PageResult<Dormitory>>(`/dormitories?${params.toString()}`);
 }
 
@@ -43,6 +46,14 @@ export function updateDormitory(id: number, data: Partial<DormitoryInput>): Prom
 
 export function deleteDormitory(id: number): Promise<{ ok: true }> {
   return request<{ ok: true }>(`/dormitories/${id}`, { method: 'DELETE' });
+}
+
+/** 批量删除（服务端逐条校验维护权限，任一越权则整批不执行） */
+export function batchDeleteDormitories(ids: number[]): Promise<{ ok: true; deletedCount: number }> {
+  return request<{ ok: true; deletedCount: number }>('/dormitories/batch-delete', {
+    method: 'POST',
+    body: JSON.stringify({ ids }),
+  });
 }
 
 /** 批量导入（预检通过的行；服务端逐条校验 + 事务写入，失败行返回行号与原因） */

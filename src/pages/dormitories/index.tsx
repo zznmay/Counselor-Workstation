@@ -1,4 +1,5 @@
 import {
+  DeleteOutlined,
   DownloadOutlined,
   EyeOutlined,
   InboxOutlined,
@@ -24,9 +25,10 @@ import {
   Upload,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import {
+  batchDeleteDormitories,
   createDormitory,
   deleteDormitory,
   getDormitories,
@@ -35,11 +37,13 @@ import {
   updateDormitory,
 } from '@/api/dormitory';
 import type { DormitoryQuery } from '@/api/dormitory';
+import { getClassOptions, getGradeOptions } from '@/api/classes';
 import { getStudentOptions } from '@/api/student';
 import PageHeader from '@/components/PageHeader';
-import { canManageStudentFront, getStoredUser, subscribeSession } from '@/lib/auth';
+import { canManageStudentFront, getStoredUser, isModuleOwner, subscribeSession } from '@/lib/auth';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useList } from '@/hooks/useList';
+import { exportDormitories, fetchAllDormitories } from '@/utils/dormExport';
 import { formatDorm, MAX_BUILDING, MAX_ROOM } from '@/utils/dormitory';
 import {
   downloadDormTemplate,
@@ -48,10 +52,12 @@ import {
   validateDormRows,
 } from '@/utils/dormImport';
 import type {
+  ClassOption,
   DormImportFailure,
   DormImportResult,
   Dormitory,
   DormitoryOptions,
+  GradeOption,
   ParsedDormRow,
   StudentOption,
 } from '@/types';
@@ -79,7 +85,7 @@ const ROOM_RULES = [
  * 提供新增、编辑、删除、查看与批量导入；姓名/班级/年级/性别一律读取学生名册。
  */
 function DormitoriesDesktop() {
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const [form] = Form.useForm<DormFormValues>();
   /** 角色/带班范围变更后实时重算操作按钮显隐（布局层刷新会话时广播） */
   const [authUser, setAuthUser] = useState(getStoredUser);
@@ -89,12 +95,18 @@ function DormitoriesDesktop() {
     { page: 1, pageSize: 10 },
   );
 
-  /* ---------- 筛选：三个文本输入（防抖）+ 两个下拉 ---------- */
+  /* ---------- 筛选：三个文本输入（防抖）+ 年级/多班级/宿舍楼下拉 ---------- */
   const [studentNoInput, setStudentNoInput] = useState('');
   const [nameInput, setNameInput] = useState('');
   const [roomInput, setRoomInput] = useState('');
   const [options, setOptions] = useState<DormitoryOptions>({ buildings: [], classNames: [] });
   const [studentOptions, setStudentOptions] = useState<StudentOption[]>([]);
+  const [gradeOptions, setGradeOptions] = useState<GradeOption[]>([]);
+  const [classOptions, setClassOptions] = useState<ClassOption[]>([]);
+
+  /* ---------- 批量选择 / 导出 / 删除 ---------- */
+  const [selectedKeys, setSelectedKeys] = useState<number[]>([]);
+  const [exporting, setExporting] = useState(false);
 
   /* ---------- 表单状态 ---------- */
   const [modalOpen, setModalOpen] = useState(false);
@@ -116,11 +128,41 @@ function DormitoriesDesktop() {
 
   useEffect(() => subscribeSession(setAuthUser), []);
 
+  /** 批量导入为高影响写入：仅寝室管理主负责辅导员 / 管理员可用（与服务端口径一致） */
+  const isDormOwner = isModuleOwner(authUser, 'dormitories');
+
   const loadOptions = () => {
     getDormitoryOptions().then(setOptions).catch(() => undefined);
     getStudentOptions().then(setStudentOptions).catch(() => undefined);
   };
   useEffect(loadOptions, []);
+
+  /* 年级/班级字典（由「班级管理」维护），仅需加载一次 */
+  useEffect(() => {
+    getGradeOptions().then(setGradeOptions).catch(() => undefined);
+    getClassOptions().then(setClassOptions).catch(() => undefined);
+  }, []);
+
+  /** 年级与班级联动：选了年级只展示该年级下的班级 */
+  const filterGradeId = useMemo(
+    () => (query.grade ? gradeOptions.find((g) => g.name === query.grade)?.id : undefined),
+    [query.grade, gradeOptions],
+  );
+  const filterClassOptions = useMemo(
+    () => classOptions
+      .filter((c) => filterGradeId === undefined || c.gradeId === filterGradeId)
+      .map((c) => ({
+        value: c.id,
+        label: filterGradeId === undefined ? `${c.gradeName} · ${c.name}` : c.name,
+      })),
+    [classOptions, filterGradeId],
+  );
+
+  /** 筛选条件变化后清空选择，避免「看不见的记录」被批量删除 */
+  const classIdsKey = query.classIds?.join(',') ?? '';
+  useEffect(() => {
+    setSelectedKeys([]);
+  }, [query.studentNo, query.name, query.className, query.grade, classIdsKey, query.building, query.room]);
 
   /** 文本筛选防抖 400ms：避免逐字请求，同时保证「输入即查」的模糊查询体验 */
   const appliedRef = useRef({ studentNo: '', name: '', room: '' });
@@ -256,6 +298,63 @@ function DormitoriesDesktop() {
     }
   };
 
+  const currentFilter = () => ({
+    studentNo: query.studentNo,
+    name: query.name,
+    className: query.className,
+    grade: query.grade,
+    classIds: query.classIds,
+    building: query.building,
+    room: query.room,
+    keyword: query.keyword,
+  });
+
+  /** 批量导出：有勾选导出勾选项，否则导出当前筛选条件下的全部数据 */
+  const handleBatchExport = async () => {
+    if (selectedKeys.length === 0 && data.total === 0) {
+      message.warning('当前没有可导出的寝室分配');
+      return;
+    }
+    setExporting(true);
+    try {
+      const rows = await fetchAllDormitories(currentFilter());
+      const selected = new Set(selectedKeys);
+      const targets = selectedKeys.length > 0 ? rows.filter((r) => selected.has(r.id)) : rows;
+      if (targets.length === 0) {
+        message.warning('没有可导出的寝室分配');
+        return;
+      }
+      exportDormitories(targets, authUser?.displayName);
+      message.success(`已导出 ${targets.length} 条寝室分配`);
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '导出失败');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleBatchDelete = () => {
+    if (selectedKeys.length === 0) return;
+    modal.confirm({
+      title: `确定删除选中的 ${selectedKeys.length} 条寝室分配吗？`,
+      content: '删除后学生名册的「宿舍」将显示为未分配，操作不可恢复。',
+      okText: '删除',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          const res = await batchDeleteDormitories(selectedKeys);
+          message.success(`已删除 ${res.deletedCount} 条寝室分配`);
+          setSelectedKeys([]);
+          refresh();
+          loadOptions();
+        } catch (e) {
+          message.error(e instanceof Error ? e.message : '批量删除失败');
+        }
+      },
+    });
+  };
+
   const resetFilters = () => {
     setStudentNoInput('');
     setNameInput('');
@@ -266,6 +365,8 @@ function DormitoriesDesktop() {
       name: undefined,
       room: undefined,
       className: undefined,
+      grade: undefined,
+      classIds: undefined,
       building: undefined,
     });
   };
@@ -347,13 +448,26 @@ function DormitoriesDesktop() {
           onChange={(e) => setNameInput(e.target.value)}
         />
         <Select
-          placeholder="班级"
+          placeholder="年级"
+          allowClear
+          style={{ minWidth: 110 }}
+          options={gradeOptions.map((g) => ({ value: g.name, label: g.name }))}
+          value={query.grade}
+          onChange={(grade) => patchQuery({ grade, classIds: undefined })}
+        />
+        <Select
+          mode="multiple"
+          placeholder="班级（可多选）"
           allowClear
           showSearch
-          style={{ minWidth: 130 }}
-          options={options.classNames.map((c) => ({ value: c, label: c }))}
-          value={query.className}
-          onChange={(className) => patchQuery({ className })}
+          optionFilterProp="label"
+          style={{ minWidth: 200, maxWidth: 320 }}
+          popupMatchSelectWidth={false}
+          popupClassName="class-filter-select-popup"
+          options={filterClassOptions}
+          value={query.classIds}
+          onChange={(classIds) => patchQuery({ classIds: classIds.length > 0 ? classIds : undefined })}
+          disabled={filterClassOptions.length === 0}
         />
         <Select
           placeholder="宿舍楼"
@@ -375,9 +489,27 @@ function DormitoriesDesktop() {
           重置
         </Button>
         <div className="toolbar-spacer" />
-        <Button icon={<UploadOutlined />} onClick={openImport}>
-          批量导入
+        <Button
+          icon={<DownloadOutlined />}
+          loading={exporting}
+          disabled={data.total === 0 && selectedKeys.length === 0}
+          onClick={() => void handleBatchExport()}
+        >
+          批量导出{selectedKeys.length > 0 ? `（${selectedKeys.length}）` : ''}
         </Button>
+        <Button
+          danger
+          icon={<DeleteOutlined />}
+          disabled={selectedKeys.length === 0}
+          onClick={handleBatchDelete}
+        >
+          批量删除{selectedKeys.length > 0 ? `（${selectedKeys.length}）` : ''}
+        </Button>
+        {isDormOwner && (
+          <Button icon={<UploadOutlined />} onClick={openImport}>
+            批量导入
+          </Button>
+        )}
         <Button
           type="primary"
           icon={<PlusOutlined />}
@@ -398,6 +530,14 @@ function DormitoriesDesktop() {
         loading={loading}
         scroll={{ x: 1080 }}
         locale={{ emptyText: '暂无寝室分配数据，可点击「新增分配」或「批量导入」录入' }}
+        rowSelection={{
+          selectedRowKeys: selectedKeys,
+          preserveSelectedRowKeys: true,
+          onChange: (keys) => setSelectedKeys(keys.map(Number)),
+          getCheckboxProps: (record) => ({
+            disabled: !canManageStudentFront(authUser, record.classId),
+          }),
+        }}
         pagination={{
           current: data.page,
           pageSize: data.pageSize,

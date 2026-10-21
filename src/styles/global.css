@@ -251,6 +251,57 @@ body {
   flex: 1 1 auto;
 }
 
+/* 学生名册班级筛选下拉：宽度独立于触发器，长班级全称换行完整展示 */
+.students-class-select-popup {
+  /* antd 会写入与触发器同宽的行内 min-width，需提高优先级放宽下拉 */
+  min-width: 280px !important;
+  max-width: min(420px, calc(100vw - 32px));
+}
+.students-class-select-popup .ant-select-item-option-content {
+  white-space: normal;
+  word-break: break-word;
+}
+
+/* 寝室管理班级多选筛选：下拉宽度独立于触发器，长班级名完整展示 */
+.class-filter-select-popup {
+  min-width: 260px !important;
+  max-width: min(420px, calc(100vw - 32px));
+}
+.class-filter-select-popup .ant-select-item-option-content {
+  white-space: normal;
+  word-break: break-word;
+}
+
+/* 用户管理-所辖班级多选：全院/年级批量勾选 */
+.class-multi-select .class-select-total {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #7686a8;
+}
+.class-multi-select .class-select-total b { color: #1f2d3d; }
+.class-bulk-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px 6px;
+}
+.class-bulk-count { font-size: 12px; color: #7686a8; }
+.class-bulk-divider {
+  height: 1px;
+  margin: 0 8px 4px;
+  background: rgba(5, 5, 5, 0.06);
+}
+.class-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+.class-group-head .ant-checkbox-wrapper { font-weight: 600; }
+.class-group-hint { font-size: 12px; color: #98a2b3; font-weight: 400; }
+.class-group-count { margin-left: auto; font-size: 12px; color: #98a2b3; font-weight: 400; }
+
 /* 列表表格：白色分层卡片 */
 .page .ant-table-wrapper {
   background: #fff;

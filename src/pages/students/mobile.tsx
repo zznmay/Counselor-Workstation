@@ -1,15 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { getStudentMajors, getStudents } from '@/api/student';
 import { getWarnings } from '@/api/warning';
-import { getGradeOptions } from '@/api/classes';
+import { getClassOptions, getGradeOptions } from '@/api/classes';
 import FilterSheet from '@/components/mobile/FilterSheet';
 import { MIcon } from '@/components/mobile/icons';
 import { canManageStudentFront, canViewAllStudents, getStoredUser, subscribeSession } from '@/lib/auth';
 import { MAJORS, STUDENT_STATUSES } from '@/constants';
 import { dormOfStudent } from '@/utils/dormitory';
-import type { Student, StudentQuery, StudentStatus, WarningLevel } from '@/types';
+import type { ClassOption, GradeOption, Student, StudentQuery, StudentStatus, WarningLevel } from '@/types';
 
 const PAGE_SIZE = 10;
 
@@ -43,20 +43,30 @@ export default function StudentsMobile() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [keyword, setKeyword] = useState('');
-  const [filters, setFilters] = useState<{ grade?: string; major?: string; status?: StudentStatus }>({});
+  const [filters, setFilters] = useState<{ grade?: string; classId?: number; major?: string; status?: StudentStatus }>({});
   const [sheetOpen, setSheetOpen] = useState(false);
   const [draft, setDraft] = useState(filters);
 
   /** 未解除预警学生 → 级别（用于在卡片上标注预警状态） */
   const [warnMap, setWarnMap] = useState<Record<string, WarningLevel>>({});
 
-  /* 年级字典动态获取（由「班级管理」模块维护） */
-  const [gradeNames, setGradeNames] = useState<string[]>([]);
+  /* 年级/班级字典动态获取（由「班级管理」模块维护） */
+  const [gradeOptions, setGradeOptions] = useState<GradeOption[]>([]);
+  const [classOptions, setClassOptions] = useState<ClassOption[]>([]);
   useEffect(() => {
-    getGradeOptions()
-      .then((opts) => setGradeNames(opts.map((g) => g.name)))
-      .catch(() => undefined);
+    getGradeOptions().then(setGradeOptions).catch(() => undefined);
+    getClassOptions().then(setClassOptions).catch(() => undefined);
   }, []);
+
+  /* 班级筛选项与年级联动（与桌面同口径：选了年级只展示该年级班级） */
+  const draftGradeId = useMemo(
+    () => gradeOptions.find((g) => g.name === draft.grade)?.id,
+    [gradeOptions, draft.grade],
+  );
+  const draftClassOptions = useMemo(
+    () => (draftGradeId === undefined ? classOptions : classOptions.filter((c) => c.gradeId === draftGradeId)),
+    [classOptions, draftGradeId],
+  );
 
   /**
    * 专业筛选项：取自名册数据本身（服务端去重、与列表同口径）。
@@ -98,6 +108,7 @@ export default function StudentsMobile() {
           pageSize: PAGE_SIZE,
           keyword: applied.keyword || undefined,
           grade: applied.filters.grade,
+          classId: applied.filters.classId,
           major: applied.filters.major,
           status: applied.filters.status,
         };
@@ -291,13 +302,30 @@ export default function StudentsMobile() {
         <div className="m-field">
           <label>年级</label>
           <div className="m-seg" style={{ flexWrap: 'wrap' }}>
-            <button type="button" className={`m-seg-btn${!draft.grade ? ' on' : ''}`} onClick={() => setDraft((d) => ({ ...d, grade: undefined }))}>全部</button>
-            {gradeNames.map((g) => (
-              <button key={g} type="button" className={`m-seg-btn${draft.grade === g ? ' on' : ''}`} onClick={() => setDraft((d) => ({ ...d, grade: g }))}>
-                {g}
+            <button type="button" className={`m-seg-btn${!draft.grade ? ' on' : ''}`} onClick={() => setDraft((d) => ({ ...d, grade: undefined, classId: undefined }))}>全部</button>
+            {gradeOptions.map((g) => (
+              <button key={g.id} type="button" className={`m-seg-btn${draft.grade === g.name ? ' on' : ''}`} onClick={() => setDraft((d) => ({ ...d, grade: g.name, classId: undefined }))}>
+                {g.name}
               </button>
             ))}
           </div>
+        </div>
+        <div className="m-field">
+          <label>班级</label>
+          <select
+            className="m-inp"
+            value={draft.classId === undefined ? '' : String(draft.classId)}
+            onChange={(e) => setDraft((d) => ({ ...d, classId: e.target.value ? Number(e.target.value) : undefined }))}
+            disabled={draftClassOptions.length === 0}
+            aria-label="按班级筛选"
+          >
+            <option value="">{draftClassOptions.length === 0 ? '暂无可选班级' : '全部班级'}</option>
+            {draftClassOptions.map((c) => (
+              <option key={c.id} value={c.id}>
+                {draft.grade ? c.name : `${c.gradeName} · ${c.name}`}
+              </option>
+            ))}
+          </select>
         </div>
         <div className="m-field">
           <label>专业</label>

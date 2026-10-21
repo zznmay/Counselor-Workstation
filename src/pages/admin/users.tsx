@@ -27,6 +27,7 @@ import type { ManagedUser } from '@/api/admin';
 import { getClassOptions } from '@/api/classes';
 import { getRoleOptions } from '@/api/roles';
 import PageHeader from '@/components/PageHeader';
+import ClassMultiSelect from '@/components/ClassMultiSelect';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { getStoredUser } from '@/lib/auth';
 import type {
@@ -131,42 +132,8 @@ function AdminUsersDesktop() {
     [users],
   );
 
-  /** 班级选项按年级分组（Select OptGroup 展示） */
-  const gradeGroups = useMemo(() => {
-    const groups: { gradeName: string; items: ClassOption[] }[] = [];
-    const index = new Map<string, number>();
-    for (const opt of classOptions) {
-      let gi = index.get(opt.gradeName);
-      if (gi === undefined) {
-        gi = groups.length;
-        index.set(opt.gradeName, gi);
-        groups.push({ gradeName: opt.gradeName, items: [] });
-      }
-      groups[gi].items.push(opt);
-    }
-    return groups;
-  }, [classOptions]);
-
   /** 按年级分组的班级多选（新增账号与分配班级共用） */
-  const classSelect = (
-    <Select
-      mode="multiple"
-      allowClear
-      showSearch
-      optionFilterProp="children"
-      placeholder="选择所辖班级（可多选）"
-    >
-      {gradeGroups.map((g) => (
-        <Select.OptGroup key={g.gradeName} label={g.gradeName}>
-          {g.items.map((c) => (
-            <Select.Option key={c.id} value={c.id}>
-              {c.name}
-            </Select.Option>
-          ))}
-        </Select.OptGroup>
-      ))}
-    </Select>
-  );
+  const classSelect = <ClassMultiSelect classOptions={classOptions} />;
 
   const openAssign = (user: ManagedUser) => {
     setAssignTarget(user);

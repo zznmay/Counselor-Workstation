@@ -1,7 +1,8 @@
 import { App, Button, Descriptions, Form, Input, Modal, Popconfirm, Select, Upload } from 'antd';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
+  batchDeleteDormitories,
   createDormitory,
   deleteDormitory,
   getDormitories,
@@ -9,10 +10,12 @@ import {
   importDormitories,
   updateDormitory,
 } from '@/api/dormitory';
+import { getClassOptions, getGradeOptions } from '@/api/classes';
 import { getStudentOptions } from '@/api/student';
 import FilterSheet from '@/components/mobile/FilterSheet';
 import { MIcon } from '@/components/mobile/icons';
-import { canManageStudentFront, getStoredUser, subscribeSession } from '@/lib/auth';
+import { canManageStudentFront, getStoredUser, isModuleOwner, subscribeSession } from '@/lib/auth';
+import { exportDormitories, fetchAllDormitories } from '@/utils/dormExport';
 import { formatDorm, MAX_BUILDING, MAX_ROOM } from '@/utils/dormitory';
 import {
   downloadDormTemplate,
@@ -21,10 +24,12 @@ import {
   validateDormRows,
 } from '@/utils/dormImport';
 import type {
+  ClassOption,
   DormImportFailure,
   DormImportResult,
   Dormitory,
   DormitoryOptions,
+  GradeOption,
   ParsedDormRow,
   StudentOption,
 } from '@/types';
@@ -43,7 +48,7 @@ interface DormFormValues {
  * 复用 mobile.css 现有令牌（m-card / m-btn / m-tag / FilterSheet），不新增样式。
  */
 export default function DormitoriesMobile() {
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const [authUser, setAuthUser] = useState(getStoredUser);
 
   /* ---------- 列表 ---------- */
@@ -52,13 +57,22 @@ export default function DormitoriesMobile() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [keyword, setKeyword] = useState('');
-  const [className, setClassName] = useState<string | undefined>(undefined);
+  const [grade, setGrade] = useState<string | undefined>(undefined);
+  const [classIds, setClassIds] = useState<number[]>([]);
   const [building, setBuilding] = useState<string | undefined>(undefined);
-  const [draftClassName, setDraftClassName] = useState<string | undefined>(undefined);
+  const [draftGrade, setDraftGrade] = useState<string | undefined>(undefined);
+  const [draftClassIds, setDraftClassIds] = useState<number[]>([]);
   const [draftBuilding, setDraftBuilding] = useState<string | undefined>(undefined);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [options, setOptions] = useState<DormitoryOptions>({ buildings: [], classNames: [] });
   const [studentOptions, setStudentOptions] = useState<StudentOption[]>([]);
+  const [gradeOptions, setGradeOptions] = useState<GradeOption[]>([]);
+  const [classOptions, setClassOptions] = useState<ClassOption[]>([]);
+
+  /* ---------- 批量选择 / 导出 / 删除 ---------- */
+  const [batchMode, setBatchMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [exporting, setExporting] = useState(false);
 
   /* ---------- 表单与详情 ---------- */
   const [formOpen, setFormOpen] = useState(false);
@@ -81,20 +95,44 @@ export default function DormitoriesMobile() {
 
   useEffect(() => subscribeSession(setAuthUser), []);
 
+  /** 批量导入为高影响写入：仅寝室管理主负责辅导员 / 管理员可用（与服务端口径一致） */
+  const isDormOwner = isModuleOwner(authUser, 'dormitories');
+
   const loadOptions = useCallback(() => {
     getDormitoryOptions().then(setOptions).catch(() => undefined);
     getStudentOptions().then(setStudentOptions).catch(() => undefined);
   }, []);
 
+  /* 年级/班级字典（由「班级管理」维护），仅需加载一次 */
+  useEffect(() => {
+    getGradeOptions().then(setGradeOptions).catch(() => undefined);
+    getClassOptions().then(setClassOptions).catch(() => undefined);
+  }, []);
+
+  /** 筛选抽屉内：班级选项随所选年级联动 */
+  const draftGradeId = useMemo(
+    () => (draftGrade ? gradeOptions.find((g) => g.name === draftGrade)?.id : undefined),
+    [draftGrade, gradeOptions],
+  );
+  const draftClassOptions = useMemo(
+    () => classOptions.filter((c) => draftGradeId === undefined || c.gradeId === draftGradeId),
+    [classOptions, draftGradeId],
+  );
+  const selectedClassNames = useMemo(
+    () => classOptions.filter((c) => classIds.includes(c.id)).map((c) => c.name),
+    [classOptions, classIds],
+  );
+
   const loadList = useCallback(
-    async (targetPage: number, kw: string, cn?: string, bd?: string) => {
+    async (targetPage: number, kw: string, g?: string, cids: number[] = [], bd?: string) => {
       setLoading(true);
       try {
         const res = await getDormitories({
           page: targetPage,
           pageSize: PAGE_SIZE,
           keyword: kw || undefined,
-          className: cn,
+          grade: g,
+          classIds: cids.length > 0 ? cids : undefined,
           building: bd,
         });
         setList((prev) => (targetPage === 1 ? res.list : [...prev, ...res.list]));
@@ -113,15 +151,23 @@ export default function DormitoriesMobile() {
 
   /* 关键词防抖 300ms；筛选条件变化立即回到第 1 页 */
   const firstRun = useRef(true);
+  const classIdsKey = classIds.join(',');
+
+  /* 筛选条件变化后退出批量选择并清空选择，避免误删不可见记录 */
+  useEffect(() => {
+    setSelectedIds([]);
+    setBatchMode(false);
+  }, [keyword, grade, classIdsKey, building]);
+
   useEffect(() => {
     if (firstRun.current) {
       firstRun.current = false;
-      void loadList(1, keyword, className, building);
+      void loadList(1, keyword, grade, classIds, building);
       return;
     }
-    const timer = setTimeout(() => void loadList(1, keyword, className, building), 300);
+    const timer = setTimeout(() => void loadList(1, keyword, grade, classIds, building), 300);
     return () => clearTimeout(timer);
-  }, [keyword, className, building, loadList]);
+  }, [keyword, grade, classIds, building, loadList]);
 
   const hasMore = list.length < total;
   const sentinel = useRef<HTMLDivElement | null>(null);
@@ -129,14 +175,14 @@ export default function DormitoriesMobile() {
     const el = sentinel.current;
     if (!el || !hasMore || loading) return undefined;
     const io = new IntersectionObserver((entries) => {
-      if (entries[0]?.isIntersecting) void loadList(page + 1, keyword, className, building);
+      if (entries[0]?.isIntersecting) void loadList(page + 1, keyword, grade, classIds, building);
     });
     io.observe(el);
     return () => io.disconnect();
-  }, [hasMore, loading, page, keyword, className, building, loadList]);
+  }, [hasMore, loading, page, keyword, grade, classIds, building, loadList]);
 
   const reloadAll = () => {
-    void loadList(1, keyword, className, building);
+    void loadList(1, keyword, grade, classIds, building);
     loadOptions();
   };
 
@@ -188,6 +234,74 @@ export default function DormitoriesMobile() {
     } catch (e) {
       message.error(e instanceof Error ? e.message : '删除失败');
     }
+  };
+
+  const toggleSelect = (id: number) => {
+    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const pageManageableIds = list
+    .filter((d) => canManageStudentFront(authUser, d.classId))
+    .map((d) => d.id);
+  const allPageSelected = pageManageableIds.length > 0 && pageManageableIds.every((id) => selectedIds.includes(id));
+
+  const toggleSelectPage = () => {
+    setSelectedIds((prev) => (allPageSelected
+      ? prev.filter((id) => !pageManageableIds.includes(id))
+      : [...new Set([...prev, ...pageManageableIds])]));
+  };
+
+  const currentFilter = () => ({
+    keyword: keyword || undefined,
+    grade,
+    classIds: classIds.length > 0 ? classIds : undefined,
+    building,
+  });
+
+  /** 批量导出：有勾选导出勾选项，否则导出当前筛选条件下的全部数据 */
+  const handleBatchExport = async () => {
+    if (selectedIds.length === 0 && total === 0) {
+      message.warning('当前没有可导出的寝室分配');
+      return;
+    }
+    setExporting(true);
+    try {
+      const rows = await fetchAllDormitories(currentFilter());
+      const selected = new Set(selectedIds);
+      const targets = selectedIds.length > 0 ? rows.filter((r) => selected.has(r.id)) : rows;
+      if (targets.length === 0) {
+        message.warning('没有可导出的寝室分配');
+        return;
+      }
+      exportDormitories(targets, authUser?.displayName);
+      message.success(`已导出 ${targets.length} 条寝室分配`);
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '导出失败');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleBatchDelete = () => {
+    if (selectedIds.length === 0) return;
+    modal.confirm({
+      title: `确定删除选中的 ${selectedIds.length} 条寝室分配吗？`,
+      content: '删除后学生名册的「宿舍」将显示为未分配，操作不可恢复。',
+      okText: '删除',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          const res = await batchDeleteDormitories(selectedIds);
+          message.success(`已删除 ${res.deletedCount} 条寝室分配`);
+          setSelectedIds([]);
+          setBatchMode(false);
+          reloadAll();
+        } catch (e) {
+          message.error(e instanceof Error ? e.message : '批量删除失败');
+        }
+      },
+    });
   };
 
   /* ---------- 批量导入 ---------- */
@@ -248,7 +362,8 @@ export default function DormitoriesMobile() {
           type="button"
           className="m-btn m-btn-ghost"
           onClick={() => {
-            setDraftClassName(className);
+            setDraftGrade(grade);
+            setDraftClassIds(classIds);
             setDraftBuilding(building);
             setSheetOpen(true);
           }}
@@ -259,31 +374,82 @@ export default function DormitoriesMobile() {
       </div>
 
       <div className="m-t4" style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-        共 {total} 条寝室分配
-        {className ? ` · ${className}` : ''}
-        {building ? ` · ${building}` : ''}
-        <button
-          type="button"
-          className="m-btn m-btn-soft"
-          style={{ marginLeft: 'auto' }}
-          onClick={() => openForm()}
-        >
-          <MIcon name="plus" size={14} />
-          新增
-        </button>
-        <button
-          type="button"
-          className="m-btn m-btn-ghost"
-          onClick={() => {
-            setParsed(null);
-            setImportResult(null);
-            setImportDone(false);
-            setImportOpen(true);
-          }}
-        >
-          <MIcon name="upload" size={14} />
-          导入
-        </button>
+        <span>
+          {batchMode ? (
+            <>已选 <b>{selectedIds.length}</b> 条</>
+          ) : (
+            <>
+              共 {total} 条寝室分配
+              {grade ? ` · ${grade}` : ''}
+              {selectedClassNames.length > 0 ? ` · ${selectedClassNames.join('、')}` : ''}
+              {building ? ` · ${building}` : ''}
+            </>
+          )}
+        </span>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            className="m-btn m-btn-ghost"
+            disabled={exporting || (total === 0 && selectedIds.length === 0)}
+            onClick={() => void handleBatchExport()}
+          >
+            <MIcon name="download" size={14} />
+            {exporting ? '导出中…' : '批量导出'}
+          </button>
+          <button
+            type="button"
+            className="m-btn m-btn-ghost"
+            style={{ color: 'var(--danger-fg)' }}
+            disabled={selectedIds.length === 0}
+            onClick={handleBatchDelete}
+          >
+            <MIcon name="trash" size={14} />
+            批量删除
+          </button>
+          {batchMode ? (
+            <>
+              <button type="button" className="m-btn m-btn-soft" onClick={toggleSelectPage}>
+                {allPageSelected ? '取消本页' : '全选本页'}
+              </button>
+              <button
+                type="button"
+                className="m-btn m-btn-ghost"
+                onClick={() => {
+                  setBatchMode(false);
+                  setSelectedIds([]);
+                }}
+              >
+                取消
+              </button>
+            </>
+          ) : (
+            <>
+              <button type="button" className="m-btn m-btn-soft" onClick={() => openForm()}>
+                <MIcon name="plus" size={14} />
+                新增
+              </button>
+              {isDormOwner && (
+                <button
+                  type="button"
+                  className="m-btn m-btn-ghost"
+                  onClick={() => {
+                    setParsed(null);
+                    setImportResult(null);
+                    setImportDone(false);
+                    setImportOpen(true);
+                  }}
+                >
+                  <MIcon name="upload" size={14} />
+                  导入
+                </button>
+              )}
+              <button type="button" className="m-btn m-btn-ghost" onClick={() => setBatchMode(true)}>
+                <MIcon name="check" size={14} />
+                选择
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       {list.length === 0 && !loading ? (
@@ -297,9 +463,34 @@ export default function DormitoriesMobile() {
       ) : (
         list.map((d) => {
           const canManage = canManageStudentFront(authUser, d.classId);
+          const selectable = batchMode && canManage;
+          const checked = selectedIds.includes(d.id);
           return (
-            <div className="m-card" key={d.id}>
+            <div
+              className={`m-card${selectable ? ' press' : ''}`}
+              key={d.id}
+              role={selectable ? 'button' : undefined}
+              tabIndex={selectable ? 0 : undefined}
+              aria-label={selectable ? `${checked ? '取消选择' : '选择'} ${d.name} 的寝室分配` : undefined}
+              onClick={selectable ? () => toggleSelect(d.id) : undefined}
+              onKeyDown={selectable
+                ? (e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      toggleSelect(d.id);
+                    }
+                  }
+                : undefined}
+            >
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                {selectable && (
+                  <span className="m-check" aria-hidden="true">
+                    <input type="checkbox" className="m-cbx" checked={checked} readOnly tabIndex={-1} />
+                    <span className="m-box">
+                      <MIcon name="check" size={14} />
+                    </span>
+                  </span>
+                )}
                 <span className="m-ava">{d.name.slice(0, 1)}</span>
                 <div className="m-row-main" style={{ minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
@@ -319,56 +510,58 @@ export default function DormitoriesMobile() {
                   </div>
                 </div>
               </div>
-              <div
-                style={{
-                  display: 'flex',
-                  gap: 4,
-                  marginTop: 6,
-                  borderTop: '1px solid var(--m-border)',
-                  paddingTop: 4,
-                }}
-              >
-                <a
-                  className="m-act"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setDetail(d);
+              {!batchMode && (
+                <div
+                  style={{
+                    display: 'flex',
+                    gap: 4,
+                    marginTop: 6,
+                    borderTop: '1px solid var(--m-border)',
+                    paddingTop: 4,
                   }}
-                  aria-label={`查看 ${d.name} 的寝室信息`}
                 >
-                  <MIcon name="eye" size={18} />
-                  查看
-                </a>
-                {canManage && (
                   <a
                     className="m-act"
                     onClick={(e) => {
                       e.stopPropagation();
-                      openForm(d);
+                      setDetail(d);
                     }}
-                    aria-label={`编辑 ${d.name} 的寝室信息`}
+                    aria-label={`查看 ${d.name} 的寝室信息`}
                   >
-                    <MIcon name="edit" size={18} />
-                    编辑
+                    <MIcon name="eye" size={18} />
+                    查看
                   </a>
-                )}
-                {canManage && (
-                  <Popconfirm
-                    title="确定删除该寝室分配吗？"
-                    description="删除后学生名册的「宿舍」将显示为未分配"
-                    onConfirm={() => void handleDelete(d)}
-                  >
+                  {canManage && (
                     <a
-                      className="m-act danger"
-                      onClick={(e) => e.stopPropagation()}
-                      aria-label={`删除 ${d.name} 的寝室分配`}
+                      className="m-act"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openForm(d);
+                      }}
+                      aria-label={`编辑 ${d.name} 的寝室信息`}
                     >
-                      <MIcon name="trash" size={18} />
-                      删除
+                      <MIcon name="edit" size={18} />
+                      编辑
                     </a>
-                  </Popconfirm>
-                )}
-              </div>
+                  )}
+                  {canManage && (
+                    <Popconfirm
+                      title="确定删除该寝室分配吗？"
+                      description="删除后学生名册的「宿舍」将显示为未分配"
+                      onConfirm={() => void handleDelete(d)}
+                    >
+                      <a
+                        className="m-act danger"
+                        onClick={(e) => e.stopPropagation()}
+                        aria-label={`删除 ${d.name} 的寝室分配`}
+                      >
+                        <MIcon name="trash" size={18} />
+                        删除
+                      </a>
+                    </Popconfirm>
+                  )}
+                </div>
+              )}
             </div>
           );
         })
@@ -386,7 +579,7 @@ export default function DormitoriesMobile() {
         <button
           type="button"
           className="m-btn m-btn-ghost m-btn-block"
-          onClick={() => void loadList(page + 1, keyword, className, building)}
+          onClick={() => void loadList(page + 1, keyword, grade, classIds, building)}
         >
           加载更多（还有 {total - list.length} 条）
         </button>
@@ -406,9 +599,11 @@ export default function DormitoriesMobile() {
               type="button"
               className="m-btn m-btn-ghost"
               onClick={() => {
-                setDraftClassName(undefined);
+                setDraftGrade(undefined);
+                setDraftClassIds([]);
                 setDraftBuilding(undefined);
-                setClassName(undefined);
+                setGrade(undefined);
+                setClassIds([]);
                 setBuilding(undefined);
                 setSheetOpen(false);
               }}
@@ -419,7 +614,8 @@ export default function DormitoriesMobile() {
               type="button"
               className="m-btn m-btn-primary"
               onClick={() => {
-                setClassName(draftClassName);
+                setGrade(draftGrade);
+                setClassIds(draftClassIds);
                 setBuilding(draftBuilding);
                 setSheetOpen(false);
               }}
@@ -430,28 +626,53 @@ export default function DormitoriesMobile() {
         }
       >
         <div className="m-field">
-          <label>班级</label>
+          <label>年级</label>
           <div className="m-seg" style={{ flexWrap: 'wrap' }}>
             <button
               type="button"
-              className={`m-seg-btn${!draftClassName ? ' on' : ''}`}
+              className={`m-seg-btn${!draftGrade ? ' on' : ''}`}
               style={{ flex: '0 0 auto' }}
-              onClick={() => setDraftClassName(undefined)}
+              onClick={() => {
+                setDraftGrade(undefined);
+                setDraftClassIds([]);
+              }}
             >
               全部
             </button>
-            {options.classNames.map((c) => (
+            {gradeOptions.map((g) => (
               <button
-                key={c}
+                key={g.id}
                 type="button"
-                className={`m-seg-btn${draftClassName === c ? ' on' : ''}`}
+                className={`m-seg-btn${draftGrade === g.name ? ' on' : ''}`}
                 style={{ flex: '0 0 auto' }}
-                onClick={() => setDraftClassName(c)}
+                onClick={() => {
+                  setDraftGrade(g.name);
+                  setDraftClassIds([]);
+                }}
               >
-                {c}
+                {g.name}
               </button>
             ))}
           </div>
+        </div>
+        <div className="m-field" style={{ marginTop: 14 }}>
+          <label>班级{draftClassIds.length > 0 ? `（已选 ${draftClassIds.length} 个）` : '（可多选，支持搜索）'}</label>
+          <Select
+            mode="multiple"
+            allowClear
+            showSearch
+            optionFilterProp="label"
+            placeholder="输入关键字搜索班级"
+            style={{ width: '100%' }}
+            options={draftClassOptions.map((c) => ({
+              value: c.id,
+              label: draftGrade ? c.name : `${c.gradeName} · ${c.name}`,
+            }))}
+            value={draftClassIds}
+            onChange={(ids) => setDraftClassIds(ids)}
+            disabled={draftClassOptions.length === 0}
+            notFoundContent="该年级下暂无可选班级"
+          />
         </div>
         <div className="m-field" style={{ marginTop: 14 }}>
           <label>宿舍楼</label>
