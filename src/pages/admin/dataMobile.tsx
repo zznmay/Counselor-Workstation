@@ -1,5 +1,5 @@
 import { Popconfirm } from 'antd';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   createDataBundle,
@@ -10,6 +10,7 @@ import {
   getDataOverview,
   getAutoBackup,
   previewRestore,
+  quickBackup,
   restoreData,
   runAutoBackup,
   saveAutoBackup,
@@ -23,6 +24,7 @@ import {
   AUTO_BACKUP_KEEP_MIN,
   BUNDLE_CREATE_KINDS,
   BUNDLE_KINDS,
+  DATA_TABLE_LABELS,
   RESTORE_CONFIRM_PHRASE,
 } from '@/constants';
 import type {
@@ -106,6 +108,19 @@ export default function AdminDataMobile() {
   const [autoCfg, setAutoCfg] = useState<AutoBackupConfig | null>(null);
   const [autoOpen, setAutoOpen] = useState(false);
   const [autoSaving, setAutoSaving] = useState(false);
+  const [quickBaking, setQuickBaking] = useState(false);
+
+  const tableRows = useMemo(() => {
+    if (!overview) return [];
+    if (overview.tableStats?.length) return overview.tableStats;
+    return Object.entries(overview.counts).map(([table, count]) => ({
+      table,
+      name: DATA_TABLE_LABELS[table] ?? '其他数据',
+      count,
+      bytes: 0,
+      updatedAt: null,
+    }));
+  }, [overview]);
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -215,6 +230,21 @@ export default function AdminDataMobile() {
       void loadMeta();
     } catch (e) {
       showToast(e instanceof Error ? e.message : '删除失败');
+    }
+  };
+
+  /** 一键备份：服务端自动命名，无需填写标签 */
+  const handleQuickBackup = async () => {
+    setQuickBaking(true);
+    try {
+      const row = await quickBackup();
+      showToast(`备份完成：${row.label}`);
+      await fetchPage(1, keyword, filters);
+      void loadMeta();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '一键备份失败');
+    } finally {
+      setQuickBaking(false);
     }
   };
 
@@ -422,7 +452,7 @@ export default function AdminDataMobile() {
                     <div className="m-stat-l">业务记录（条）</div>
                   </div>
                   <div className="m-stat-cell">
-                    <div className="m-stat-v">{formatBytes(overview.db.sizeBytes)}</div>
+                    <div className="m-stat-v">{formatBytes(overview.db.sizeBytes + overview.db.walBytes)}</div>
                     <div className="m-stat-l">数据库体积</div>
                   </div>
                   <div className="m-stat-cell">
@@ -434,13 +464,31 @@ export default function AdminDataMobile() {
 
               <div className="m-card">
                 <div className="m-sec-title" style={{ marginBottom: 6 }}>
+                  <MIcon name="download" size={15} />
+                  一键备份
+                </div>
+                <div className="m-t4">系统按日期时间自动命名并立即生成全量备份，无需手动输入名称。</div>
+                <button
+                  type="button"
+                  className="m-btn m-btn-primary m-btn-block"
+                  style={{ marginTop: 10 }}
+                  disabled={quickBaking}
+                  onClick={() => void handleQuickBackup()}
+                >
+                  <MIcon name="download" size={16} />
+                  {quickBaking ? '备份中…' : '立即一键备份'}
+                </button>
+              </div>
+
+              <div className="m-card">
+                <div className="m-sec-title" style={{ marginBottom: 6 }}>
                   <MIcon name="grid" size={15} />
                   各表条数
                 </div>
-                {Object.entries(overview.counts).map(([table, count]) => (
-                  <div className="m-kv" key={table}>
-                    <span className="m-kv-k" style={{ minWidth: 140 }}>{table}</span>
-                    <span className="m-kv-v">{count}</span>
+                {tableRows.map((item) => (
+                  <div className="m-kv" key={item.table}>
+                    <span className="m-kv-k" style={{ minWidth: 140 }}>{item.name}</span>
+                    <span className="m-kv-v">{item.count}</span>
                   </div>
                 ))}
               </div>
@@ -465,10 +513,14 @@ export default function AdminDataMobile() {
                     className="m-btn m-btn-primary"
                     style={{ flex: 1 }}
                     onClick={async () => {
-                      const res = await runAutoBackup();
-                      showToast(res.skipped ? '内容未变化，已跳过写包' : `已生成备份 #${res.bundleId}`);
-                      await fetchPage(1, keyword, filters);
-                      void loadMeta();
+                      try {
+                        const res = await runAutoBackup();
+                        showToast(res.skipped ? '内容未变化，已跳过写包' : `已生成备份 #${res.bundleId}`);
+                        await fetchPage(1, keyword, filters);
+                        void loadMeta();
+                      } catch (e) {
+                        showToast(e instanceof Error ? e.message : '执行失败');
+                      }
                     }}
                   >
                     立即执行
@@ -714,7 +766,7 @@ export default function AdminDataMobile() {
                     </div>
                     {preview.diff.slice(0, 12).map((d) => (
                       <div className="m-kv" key={d.table}>
-                        <span className="m-kv-k" style={{ minWidth: 140 }}>{d.table}</span>
+                        <span className="m-kv-k" style={{ minWidth: 140 }}>{d.name ?? DATA_TABLE_LABELS[d.table] ?? '其他数据'}</span>
                         <span className="m-kv-v">
                           {d.current} → {d.incoming}（{d.delta > 0 ? `+${d.delta}` : d.delta}）
                         </span>

@@ -55,6 +55,18 @@ router.get('/bundles', (req, res) => {
   }
 });
 
+/** 一键备份：名称由服务端按日期时间自动生成，无需手工输入 */
+router.post('/bundles/quick', (req, res) => {
+  try {
+    const label = `一键备份-${dm.nowStr()}`;
+    const row = dm.createBackup({ kind: '手动备份', label, note: '一键备份自动生成', actor: actorOf(req) });
+    logAccess(req, `一键备份「${row.label}」`, '成功');
+    res.json(row);
+  } catch (e) {
+    fail(res, e, '一键备份失败');
+  }
+});
+
 /** 新增：立即创建一份备份 / 迁移包（label 必填，note 选填） */
 router.post('/bundles', (req, res) => {
   try {
@@ -123,21 +135,11 @@ router.post('/bundles/upload', (req, res) => {
 
 /* ==================== 恢复：预检（不落盘）→ 确认恢复 ==================== */
 
-/** 解析数据源：已有包 id / 直接上传内容 / 指定文件名 */
+/** 解析数据源：已有包 id / 直接上传内容（ZIP / gzip / JSON） */
 function resolveBundleSource(body = {}) {
   if (body.bundleId) return dm.readBundleById(body.bundleId);
   if (body.contentBase64) {
-    const raw = Buffer.from(String(body.contentBase64), 'base64');
-    const text = raw[0] === 0x1f && raw[1] === 0x8b
-      ? require('zlib').gunzipSync(raw).toString('utf8')
-      : raw.toString('utf8');
-    try {
-      return JSON.parse(text);
-    } catch {
-      const err = new Error('内容不是合法 JSON 数据包');
-      err.status = 400;
-      throw err;
-    }
+    return dm.parseBundleBuffer(Buffer.from(String(body.contentBase64), 'base64'));
   }
   const err = new Error('请提供 bundleId 或 contentBase64');
   err.status = 400;

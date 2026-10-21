@@ -180,3 +180,47 @@ export const BUNDLE_KIND_COLOR: Record<BundleKind, string> = {
   迁移包: 'purple',
   上传包: 'green',
 };
+
+/** 数据表中文名兜底（服务端 overview.tableStats 已下发中文名，此处防止旧数据缺字段时露出英文表名） */
+export const DATA_TABLE_LABELS: Record<string, string> = {
+  users: '登录账号',
+  roles: '角色权限',
+  userRoles: '账号角色',
+  students: '学生名单',
+  studentCounselors: '学生辅导员',
+  grades: '年级管理',
+  classes: '班级管理',
+  classCounselors: '班级教师',
+  classPendingStaff: '待同步教师',
+  dormitories: '寝室管理',
+  conversations: '谈心谈话',
+  mentalHealth: '心理关注',
+  mentalInterviews: '心理访谈',
+  mentalInterviewTemplates: '访谈模板',
+  mentalLevelLogs: '等级变更记录',
+  warnings: '预警记录',
+  notices: '通知公告',
+  approvals: '请假审批',
+  todos: '待办事项',
+  templateCategories: '模板分类',
+  templateFiles: '模板文件',
+  csScheduler: '值班排班',
+  accessLogs: '访问日志',
+  loginAttempts: '登录尝试',
+};
+
+/** 总览卡片圆点色板（按序循环，保持单卡一色） */
+export const DATA_CARD_COLORS = [
+  '#4f7cff',
+  '#35a37a',
+  '#c8842d',
+  '#7b61ff',
+  '#d95c5c',
+  '#2f9aa8',
+  '#8e5bd9',
+  '#c26b2b',
+  '#4f9d69',
+  '#5a6b8c',
+  '#a15bb8',
+  '#b8862b',
+];

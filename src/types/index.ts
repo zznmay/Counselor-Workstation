@@ -1042,7 +1042,10 @@ export interface DataOplogItem {
 
 /** 数据包校验明细（恢复预检） */
 export interface BundleCheck {
+  /** 中文校验项名称（服务端已翻译表名） */
   item: string;
+  /** 原始数据表名（结构版本等非表项为空） */
+  table?: string;
   ok: boolean;
   detail: string;
 }
@@ -1051,7 +1054,7 @@ export interface BundleCheck {
 export interface RestorePreview {
   ok: boolean;
   checks: BundleCheck[];
-  diff: { table: string; current: number; incoming: number; delta: number }[];
+  diff: { table: string; name?: string; current: number; incoming: number; delta: number }[];
   meta: {
     kind?: string | null;
     label?: string | null;
@@ -1061,6 +1064,15 @@ export interface RestorePreview {
   };
 }
 
+/** 数据总览：单表统计（中文名 + 条数 + 体积 + 更新时间） */
+export interface DataTableStat {
+  table: string;
+  name: string;
+  count: number;
+  bytes: number;
+  updatedAt?: string | null;
+}
+
 /** 数据总览 */
 export interface DataOverview {
   generatedAt: string;
@@ -1068,8 +1080,10 @@ export interface DataOverview {
   appVersion: string;
   tables: string[];
   counts: Record<string, number>;
+  tableStats?: DataTableStat[];
+  settings?: { count: number; updatedAt?: string | null };
   db: { file: string; sizeBytes: number; walBytes: number };
-  uploads: { files: number; bytes: number };
+  uploads: { files: number; bytes: number; updatedAt?: string | null };
   bundles: { total: number; bytes: number; byKind: { kind: string; n: number; bytes: number }[] };
   latestBundle: { id: number; label: string; kind: string; createdAt: string } | null;
   autoBackup: AutoBackupConfig;

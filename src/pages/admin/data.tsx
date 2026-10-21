@@ -2,6 +2,8 @@ import {
   CloudUploadOutlined,
   DatabaseOutlined,
   DownloadOutlined,
+  ExportOutlined,
+  FileZipOutlined,
   PlusOutlined,
   ReloadOutlined,
   SearchOutlined,
@@ -32,13 +34,13 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   createDataBundle,
   deleteDataBundle,
-  downloadBundleUrl,
   downloadBundleBytes,
   getDataBundles,
   getDataOplog,
   getDataOverview,
   getAutoBackup,
   previewRestore,
+  quickBackup,
   restoreData,
   runAutoBackup,
   saveAutoBackup,
@@ -54,6 +56,8 @@ import {
   BUNDLE_KIND_COLOR,
   BUNDLE_KINDS,
   BUNDLE_UPLOAD_MAX_BYTES,
+  DATA_CARD_COLORS,
+  DATA_TABLE_LABELS,
   RESTORE_CONFIRM_PHRASE,
   toOptions,
 } from '@/constants';
@@ -83,23 +87,59 @@ function formatBytes(n: number): string {
   return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
+/** 日期时间展示：空值统一显示中文破折号，避免露出 undefined / Invalid Date */
+function formatTime(value?: string | null, pattern = 'MM-DD HH:mm'): string {
+  if (!value) return '—';
+  const d = dayjs(value);
+  return d.isValid() ? d.format(pattern) : '—';
+}
+
+const totalOf = (counts: Record<string, number> | undefined) =>
+  Object.values(counts ?? {}).reduce((a, b) => a + b, 0);
+
 interface BundleFormValues {
   label: string;
   kind: BundleKind;
   note?: string;
 }
 
+type TabKey = 'overview' | 'backup' | 'migrate' | 'oplog';
+
+const TABS: { key: TabKey; label: string }[] = [
+  { key: 'overview', label: '数据总览' },
+  { key: 'backup', label: '备份与恢复' },
+  { key: 'migrate', label: '迁移助手' },
+  { key: 'oplog', label: '操作日志' },
+];
+
+interface RestoreSource {
+  bundleId: number;
+  label: string;
+}
+
+interface OverviewCard {
+  key: string;
+  name: string;
+  count: number;
+  meta: string;
+  color: string;
+}
+
 /**
- * 系统管理 · 数据管理（桌面端）：备份 / 恢复 / 迁移 / 自动备份 / 操作日志。
- * 沿用本模块既有范式：PageHeader 标题区 + toolbar 筛选 + antd Table 分页排序 +
- * Modal 表单（必填校验）+ Popconfirm 二次确认；恢复沿用「预检 → 确认短语 → 恢复前快照」三段式。
+ * 系统管理 · 数据管理（桌面端）：数据总览 / 备份与恢复 / 迁移助手 / 操作日志。
+ * 总览采用卡片网格（中文表名 + 条数 + 体积 + 更新时间），迁移包统一落盘为 ZIP，
+ * 一键备份由服务端按日期时间自动命名；恢复沿用「预检 → 确认短语 → 恢复前快照」三段式。
  */
 function AdminDataDesktop() {
   const { message } = App.useApp();
+  const [tab, setTab] = useState<TabKey>('overview');
   const [overview, setOverview] = useState<DataOverview | null>(null);
   const [oplog, setOplog] = useState<DataOplogItem[]>([]);
   const [autoCfg, setAutoCfg] = useState<AutoBackupConfig | null>(null);
   const [autoSaving, setAutoSaving] = useState(false);
+  const [quickBaking, setQuickBaking] = useState(false);
+  const [exportingMigration, setExportingMigration] = useState(false);
+  const [migrationList, setMigrationList] = useState<DataBundle[]>([]);
 
   const [keywordInput, setKeywordInput] = useState('');
   const [range, setRange] = useState<[Dayjs, Dayjs] | null>(null);
@@ -116,7 +156,7 @@ function AdminDataDesktop() {
 
   /* 恢复 */
   const [restoreOpen, setRestoreOpen] = useState(false);
-  const [restoreSource, setRestoreSource] = useState<{ kind: 'bundle'; bundleId: number } | { kind: 'upload'; fileName: string; contentBase64: string } | null>(null);
+  const [restoreSource, setRestoreSource] = useState<RestoreSource | null>(null);
   const [preview, setPreview] = useState<RestorePreview | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [confirmText, setConfirmText] = useState('');
@@ -133,10 +173,28 @@ function AdminDataDesktop() {
     }
   };
 
+  const loadMigrations = async () => {
+    try {
+      const res = await getDataBundles({
+        page: 1,
+        pageSize: 6,
+        kind: '迁移包',
+        sortBy: 'createdAt',
+        sortOrder: 'desc',
+      });
+      setMigrationList(res.list);
+    } catch {
+      /* 迁移包列表失败不阻断总览 */
+    }
+  };
+
   useEffect(() => {
     void loadMeta();
+    void loadMigrations();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const auto = autoCfg ?? overview?.autoBackup ?? null;
 
   const openCreate = () => {
     setEditing(null);
@@ -165,11 +223,12 @@ function AdminDataDesktop() {
         message.success('数据包信息已更新');
       } else {
         await createDataBundle({ label: values.label, kind: values.kind, note: values.note });
-        message.success('备份已创建');
+        message.success(values.kind === '迁移包' ? '迁移包已生成（ZIP 压缩）' : '备份已创建');
       }
       setFormOpen(false);
       refresh();
       void loadMeta();
+      void loadMigrations();
     } catch (e) {
       message.error(e instanceof Error ? e.message : '保存失败');
     } finally {
@@ -183,9 +242,56 @@ function AdminDataDesktop() {
       message.success(`数据包「${row.label}」已删除`);
       refresh();
       void loadMeta();
+      void loadMigrations();
     } catch (e) {
       message.error(e instanceof Error ? e.message : '删除失败');
     }
+  };
+
+  /** 一键备份：名称由服务端自动生成，点击后直接执行并给出结果提示 */
+  const handleQuickBackup = async () => {
+    setQuickBaking(true);
+    try {
+      const row = await quickBackup();
+      message.success(`备份完成：${row.label}`);
+      refresh();
+      void loadMeta();
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '一键备份失败');
+    } finally {
+      setQuickBaking(false);
+    }
+  };
+
+  /** 一键导出迁移包：服务端落盘为 ZIP，生成后立即触发下载 */
+  const handleExportMigration = async () => {
+    setExportingMigration(true);
+    try {
+      const row = await createDataBundle({
+        kind: '迁移包',
+        label: `迁移包-${dayjs().format('YYYYMMDD-HHmmss')}`,
+        note: '迁移助手导出（ZIP 压缩）',
+      });
+      message.success('迁移包已生成（ZIP）');
+      void loadMeta();
+      void loadMigrations();
+      try {
+        await downloadBundleBytes(row.id, row.fileName);
+      } catch {
+        message.warning('自动下载失败，请在「最近迁移包」中手动下载');
+      }
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '迁移包导出失败');
+    } finally {
+      setExportingMigration(false);
+    }
+  };
+
+  const openRestore = (row: DataBundle) => {
+    setRestoreSource({ bundleId: row.id, label: row.label });
+    setPreview(null);
+    setConfirmText('');
+    setRestoreOpen(true);
   };
 
   /** 预检：不落盘，仅校验与对比条数 */
@@ -196,11 +302,7 @@ function AdminDataDesktop() {
     }
     setPreviewing(true);
     try {
-      const res = await previewRestore(
-        restoreSource.kind === 'bundle'
-          ? { bundleId: restoreSource.bundleId }
-          : { contentBase64: restoreSource.contentBase64 },
-      );
+      const res = await previewRestore({ bundleId: restoreSource.bundleId });
       setPreview(res);
     } catch (e) {
       message.error(e instanceof Error ? e.message : '预检失败');
@@ -218,12 +320,7 @@ function AdminDataDesktop() {
     }
     setRestoring(true);
     try {
-      const res = await restoreData({
-        ...(restoreSource.kind === 'bundle'
-          ? { bundleId: restoreSource.bundleId }
-          : { contentBase64: restoreSource.contentBase64 }),
-        confirm: confirmText,
-      });
+      const res = await restoreData({ bundleId: restoreSource.bundleId, confirm: confirmText });
       message.success(`恢复完成，已自动生成恢复前快照 #${res.snapshotId}`);
       setRestoreOpen(false);
       setPreview(null);
@@ -231,6 +328,7 @@ function AdminDataDesktop() {
       setRestoreSource(null);
       refresh();
       void loadMeta();
+      void loadMigrations();
     } catch (e) {
       message.error(e instanceof Error ? e.message : '恢复失败');
     } finally {
@@ -247,7 +345,7 @@ function AdminDataDesktop() {
   };
 
   /** 选择上传文件：先经服务端校验并登记为数据包，再作为恢复来源（列表可追溯） */
-  const pickUploadFile = async (file: File) => {
+  const pickUploadFile = async (file: File): Promise<boolean> => {
     if (file.size > BUNDLE_UPLOAD_MAX_BYTES) {
       message.error(`文件超过 ${Math.floor(BUNDLE_UPLOAD_MAX_BYTES / 1024 / 1024)}MB 上限`);
       return false;
@@ -259,11 +357,16 @@ function AdminDataDesktop() {
       reader.readAsDataURL(file);
     });
     try {
-      const row = await uploadDataBundle({ fileName: file.name, contentBase64: base64, label: file.name.replace(/\.json(\.gz)?$/i, '') });
-      setRestoreSource({ kind: 'bundle', bundleId: row.id });
+      const row = await uploadDataBundle({
+        fileName: file.name,
+        contentBase64: base64,
+        label: file.name.replace(/\.(json(\.gz)?|zip)$/i, ''),
+      });
+      setRestoreSource({ bundleId: row.id, label: row.label });
       setPreview(null);
       setConfirmText('');
       refresh();
+      void loadMeta();
       message.success(`已上传并校验通过（数据包 #${row.id}），请点击「恢复预检」`);
       return true;
     } catch (e) {
@@ -290,11 +393,6 @@ function AdminDataDesktop() {
     }
   };
 
-  const tableCounts = useMemo(
-    () => (overview ? Object.entries(overview.counts).map(([table, count]) => ({ table, count })) : []),
-    [overview],
-  );
-
   const columns: ColumnsType<DataBundle> = [
     {
       title: '数据包',
@@ -305,9 +403,7 @@ function AdminDataDesktop() {
             <span style={{ fontWeight: 600 }}>{row.label}</span>
             <Tag color={BUNDLE_KIND_COLOR[row.kind]}>{row.kind}</Tag>
           </Space>
-          <div style={{ fontSize: 12, color: 'rgba(47,62,102,0.45)' }}>
-            {row.note || '—'}
-          </div>
+          <div style={{ fontSize: 12, color: 'rgba(47,62,102,0.45)' }}>{row.note || '—'}</div>
         </div>
       ),
     },
@@ -323,8 +419,7 @@ function AdminDataDesktop() {
       title: '记录数',
       dataIndex: 'counts',
       width: 100,
-      render: (counts: Record<string, number>) =>
-        Object.values(counts ?? {}).reduce((a, b) => a + b, 0),
+      render: (counts: Record<string, number>) => totalOf(counts),
     },
     { title: '创建人', dataIndex: 'createdBy', width: 110, render: (v?: string | null) => v || '系统' },
     {
@@ -344,16 +439,7 @@ function AdminDataDesktop() {
           <Button type="link" size="small" icon={<DownloadOutlined />} onClick={() => void handleDownload(row)}>
             下载
           </Button>
-          <Button
-            type="link"
-            size="small"
-            onClick={() => {
-              setRestoreSource({ kind: 'bundle', bundleId: row.id });
-              setPreview(null);
-              setConfirmText('');
-              setRestoreOpen(true);
-            }}
-          >
+          <Button type="link" size="small" onClick={() => openRestore(row)}>
             恢复
           </Button>
           <Button type="link" size="small" onClick={() => openEdit(row)}>
@@ -373,243 +459,401 @@ function AdminDataDesktop() {
     },
   ];
 
+  const migrationColumns: ColumnsType<DataBundle> = [
+    {
+      title: '迁移包',
+      dataIndex: 'label',
+      render: (_, row) => (
+        <Space size={6}>
+          <span style={{ fontWeight: 600 }}>{row.label}</span>
+          <Tag color="blue">ZIP</Tag>
+        </Space>
+      ),
+    },
+    { title: '体积', dataIndex: 'sizeBytes', width: 110, render: (n: number) => formatBytes(n) },
+    { title: '记录数', dataIndex: 'counts', width: 100, render: (v: Record<string, number>) => totalOf(v) },
+    { title: '创建时间', dataIndex: 'createdAt', width: 170 },
+    {
+      title: '操作',
+      key: 'action',
+      width: 170,
+      render: (_, row) => (
+        <Space size={0}>
+          <Button type="link" size="small" icon={<DownloadOutlined />} onClick={() => void handleDownload(row)}>
+            下载
+          </Button>
+          <Button type="link" size="small" onClick={() => openRestore(row)}>
+            导入
+          </Button>
+        </Space>
+      ),
+    },
+  ];
+
+  const cards = useMemo<OverviewCard[]>(() => {
+    if (!overview) return [];
+    const stats = overview.tableStats?.length
+      ? overview.tableStats
+      : Object.entries(overview.counts).map(([table, count]) => ({
+          table,
+          name: DATA_TABLE_LABELS[table] ?? '其他数据',
+          count,
+          bytes: 0,
+          updatedAt: null,
+        }));
+    const list: OverviewCard[] = stats.map((item, index) => ({
+      key: item.table,
+      name: item.name || DATA_TABLE_LABELS[item.table] || '其他数据',
+      count: item.count,
+      meta: `${formatBytes(item.bytes)} · 更新于 ${formatTime(item.updatedAt)}`,
+      color: DATA_CARD_COLORS[index % DATA_CARD_COLORS.length],
+    }));
+    list.push({
+      key: '__settings',
+      name: '系统设置',
+      count: overview.settings?.count ?? 0,
+      meta: `系统配置 · 更新于 ${formatTime(overview.settings?.updatedAt)}`,
+      color: DATA_CARD_COLORS[list.length % DATA_CARD_COLORS.length],
+    });
+    list.push({
+      key: '__uploads',
+      name: '附件文件',
+      count: overview.uploads.files,
+      meta: `${formatBytes(overview.uploads.bytes)} · 更新于 ${formatTime(overview.uploads.updatedAt)}`,
+      color: DATA_CARD_COLORS[list.length % DATA_CARD_COLORS.length],
+    });
+    return list;
+  }, [overview]);
+
+  const autoCount = overview?.bundles.byKind.find((item) => item.kind === '自动备份')?.n ?? 0;
+  const keep = auto?.keep ?? 10;
+  const nextRunText = auto?.lastRunAt && dayjs(auto.lastRunAt).isValid()
+    ? dayjs(auto.lastRunAt).add(auto.intervalHours, 'hour').format('MM-DD HH:mm')
+    : null;
+  const lastBackupText = overview?.latestBundle
+    ? `上次备份：${formatTime(overview.latestBundle.createdAt)}（共 ${overview.bundles.total} 份服务端快照，自动保留最近 ${keep} 份）`
+    : `暂无备份记录（自动保留最近 ${keep} 份）`;
+  const autoStatusText = auto
+    ? auto.enabled
+      ? `自动备份已开启（每 ${auto.intervalHours} 小时，已存 ${autoCount} 份，${
+          nextRunText ? `下次约 ${nextRunText}` : '等待首次执行'
+        }）`
+      : '自动备份未开启'
+    : '自动备份策略加载中…';
+
   return (
-    <div className="page">
+    <div className="page data-mgmt-page">
       <PageHeader
         title="数据管理"
-        subtitle="备份 / 恢复 / 迁移全库数据；数据包带 manifest 校验，恢复前自动生成快照，可整体回滚"
+        subtitle="备份 / 恢复 / 迁移全库数据；迁移包使用 ZIP 压缩，恢复前自动生成快照，可整体回滚"
         extra={
-          <Space>
-            <Button icon={<ReloadOutlined />} onClick={() => void loadMeta()}>
-              刷新总览
-            </Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-              创建备份
-            </Button>
-          </Space>
+          <Button
+            icon={<ReloadOutlined />}
+            onClick={() => {
+              void loadMeta();
+              void loadMigrations();
+              refresh();
+            }}
+          >
+            刷新
+          </Button>
         }
       />
 
-      <Alert
-        type="info"
-        showIcon
-        message="数据包为全库业务数据快照（JSON），仅系统管理员可创建、下载与恢复；恢复会整体替换当前数据，系统会先自动生成「恢复前快照」，误操作可再次恢复回滚。"
-        style={{ marginBottom: 16 }}
-      />
-
-      {/* 数据总览 */}
-      <Card title="数据总览" style={{ marginBottom: 16 }}>
-        {overview ? (
-          <>
-            <Space size={32} wrap style={{ marginBottom: 12 }}>
-              <span>
-                <Typography.Text type="secondary">业务表：</Typography.Text>
-                <b>{overview.tables.length}</b> 张
-              </span>
-              <span>
-                <Typography.Text type="secondary">业务记录：</Typography.Text>
-                <b>{Object.values(overview.counts).reduce((a, b) => a + b, 0)}</b> 条
-              </span>
-              <span>
-                <Typography.Text type="secondary">数据库体积：</Typography.Text>
-                <b>{formatBytes(overview.db.sizeBytes)}</b>
-              </span>
-              <span>
-                <Typography.Text type="secondary">数据包：</Typography.Text>
-                <b>{overview.bundles.total}</b> 个 / {formatBytes(overview.bundles.bytes)}
-              </span>
-              <span>
-                <Typography.Text type="secondary">附件目录：</Typography.Text>
-                <b>{overview.uploads.files}</b> 个 / {formatBytes(overview.uploads.bytes)}
-              </span>
-            </Space>
-            <Table
-              rowKey="table"
-              size="small"
-              dataSource={tableCounts}
-              pagination={false}
-              scroll={{ y: 220 }}
-              columns={[
-                { title: '数据表', dataIndex: 'table' },
-                {
-                  title: '条数',
-                  dataIndex: 'count',
-                  width: 120,
-                  sorter: (a, b) => a.count - b.count,
-                },
-              ]}
-            />
-          </>
-        ) : (
-          <Typography.Text type="secondary">加载中…</Typography.Text>
-        )}
-      </Card>
-
-      {/* 自动备份策略 */}
-      <Card
-        title="自动备份策略"
-        extra={
-          <Space>
-            <Button
-              icon={<DatabaseOutlined />}
-              onClick={async () => {
-                try {
-                  const res = await runAutoBackup();
-                  message.success(res.skipped ? '内容未变化，已跳过写包' : `已生成备份 #${res.bundleId}`);
-                  refresh();
-                  void loadMeta();
-                } catch (e) {
-                  message.error(e instanceof Error ? e.message : '执行失败');
-                }
-              }}
-            >
-              立即执行
-            </Button>
-            <Button type="primary" loading={autoSaving} onClick={() => void saveAuto()}>
-              保存策略
-            </Button>
-          </Space>
-        }
-        style={{ marginBottom: 16 }}
-      >
-        {autoCfg ? (
-          <Space size={24} wrap>
-            <Space>
-              <Typography.Text>启用</Typography.Text>
-              <Switch
-                checked={autoCfg.enabled}
-                onChange={(enabled) => setAutoCfg({ ...autoCfg, enabled })}
-              />
-            </Space>
-            <Space>
-              <Typography.Text>间隔</Typography.Text>
-              <Select
-                style={{ width: 110 }}
-                value={autoCfg.intervalHours}
-                onChange={(intervalHours) => setAutoCfg({ ...autoCfg, intervalHours })}
-                options={AUTO_BACKUP_INTERVALS.map((h) => ({ value: h, label: `${h} 小时` }))}
-              />
-            </Space>
-            <Space>
-              <Typography.Text>保留份数</Typography.Text>
-              <InputNumber
-                min={AUTO_BACKUP_KEEP_MIN}
-                max={AUTO_BACKUP_KEEP_MAX}
-                value={autoCfg.keep}
-                onChange={(keep) => setAutoCfg({ ...autoCfg, keep: Number(keep) })}
-              />
-            </Space>
-            <Typography.Text type="secondary">
-              上次执行：{autoCfg.lastRunAt || '从未执行'}
-              {autoCfg.lastSignature ? ' · 内容签名去重已开启' : ''}
-            </Typography.Text>
-          </Space>
-        ) : (
-          <Typography.Text type="secondary">加载中…</Typography.Text>
-        )}
-      </Card>
-
-      {/* 数据包列表 */}
-      <div className="toolbar">
-        <Input
-          allowClear
-          prefix={<SearchOutlined style={{ color: 'rgba(47,62,102,0.35)' }} />}
-          placeholder="搜索标签 / 备注 / 文件名"
-          style={{ width: 240 }}
-          value={keywordInput}
-          onChange={(e) => setKeywordInput(e.target.value)}
-          onPressEnter={() => patchQuery({ keyword: keywordInput || undefined })}
-        />
-        <Select
-          placeholder="数据包类型"
-          allowClear
-          style={{ minWidth: 140 }}
-          options={toOptions(BUNDLE_KINDS)}
-          value={query.kind}
-          onChange={(kind) => patchQuery({ kind })}
-        />
-        <DatePicker.RangePicker
-          value={range}
-          onChange={(v) => {
-            setRange(v as [Dayjs, Dayjs] | null);
-            patchQuery({
-              startDate: v?.[0] ? dayjs(v[0]).format('YYYY-MM-DD') : undefined,
-              endDate: v?.[1] ? dayjs(v[1]).format('YYYY-MM-DD') : undefined,
-            });
-          }}
-        />
-        <Button
-          icon={<ReloadOutlined />}
-          onClick={() => {
-            setKeywordInput('');
-            setRange(null);
-            patchQuery({ keyword: undefined, kind: undefined, startDate: undefined, endDate: undefined });
-          }}
-        >
-          重置
-        </Button>
-        <div className="toolbar-spacer" />
-        <Button icon={<CloudUploadOutlined />} onClick={() => document.getElementById('data-bundle-upload')?.click()}>
-          上传数据包
-        </Button>
-        <input
-          id="data-bundle-upload"
-          type="file"
-          accept=".json,.json.gz,application/json"
-          style={{ display: 'none' }}
-          onChange={async (e) => {
-            const file = e.target.files?.[0];
-            e.target.value = '';
-            if (file) {
-              await pickUploadFile(file);
-              setRestoreOpen(true);
-            }
-          }}
-        />
+      <div className="data-mgmt-tabs" role="tablist">
+        {TABS.map((item) => (
+          <button
+            key={item.key}
+            type="button"
+            role="tab"
+            aria-selected={tab === item.key}
+            className={`data-mgmt-tab${tab === item.key ? ' on' : ''}`}
+            onClick={() => setTab(item.key)}
+          >
+            {item.label}
+          </button>
+        ))}
       </div>
 
-      <Table
-        rowKey="id"
-        columns={columns}
-        dataSource={data.list}
-        loading={loading}
-        scroll={{ x: 980 }}
-        onChange={(_p, _f, sorter) => {
-          const s = Array.isArray(sorter) ? sorter[0] : sorter;
-          const field = s?.field;
-          if (field === 'createdAt' || field === 'sizeBytes') {
-            patchQuery(
-              { sortBy: field, sortOrder: s?.order === 'ascend' ? 'asc' : 'desc' },
-              false,
-            );
-          }
-        }}
-        pagination={{
-          current: data.page,
-          pageSize: data.pageSize,
-          total: data.total,
-          showSizeChanger: true,
-          showTotal: (total) => `共 ${total} 个数据包`,
-          onChange: (page, pageSize) => patchQuery({ page, pageSize }, false),
-        }}
-      />
+      {tab === 'overview' && (
+        <>
+          <div className="data-backup-banner">
+            <DownloadOutlined className="data-backup-banner-icon" />
+            <span>{lastBackupText}</span>
+            <span className="data-backup-banner-sep">；</span>
+            <span className={auto?.enabled ? 'data-backup-banner-ok' : 'data-backup-banner-muted'}>
+              {autoStatusText}
+            </span>
+          </div>
 
-      {/* 操作日志 */}
-      <Card title="最近操作" style={{ marginTop: 16 }}>
-        <Table
-          rowKey="id"
-          size="small"
-          dataSource={oplog}
-          pagination={false}
-          locale={{ emptyText: '暂无数据管理操作记录' }}
-          columns={[
-            { title: '时间', dataIndex: 'ts', width: 170 },
-            { title: '操作人', dataIndex: 'actor', width: 120, render: (v?: string | null) => v || '系统' },
-            { title: '动作', dataIndex: 'action', width: 140 },
-            { title: '摘要', dataIndex: 'summary', ellipsis: true },
-          ]}
-        />
-      </Card>
+          {overview ? (
+            <div className="data-stat-grid">
+              {cards.map((card) => (
+                <div className="data-stat-card" key={card.key}>
+                  <div className="data-stat-head">
+                    <span className="data-stat-dot" style={{ background: card.color }} />
+                    {card.name}
+                  </div>
+                  <div className="data-stat-value">{card.count}</div>
+                  <div className="data-stat-meta">{card.meta}</div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="data-stat-loading">数据总览加载中…</div>
+          )}
+
+          <div className="data-page-actions">
+            <Button
+              type="primary"
+              size="large"
+              className="data-quick-backup"
+              icon={<DownloadOutlined />}
+              loading={quickBaking}
+              onClick={() => void handleQuickBackup()}
+            >
+              一键备份
+            </Button>
+            <Button size="large" onClick={() => setTab('backup')}>
+              备份与恢复 →
+            </Button>
+            <span className="data-action-status">迁移包使用 ZIP 压缩 · 解压后可完整导入</span>
+          </div>
+        </>
+      )}
+
+      {tab === 'backup' && (
+        <>
+          <Card
+            title="自动备份策略"
+            extra={
+              <Space>
+                <Button
+                  icon={<DatabaseOutlined />}
+                  onClick={async () => {
+                    try {
+                      const res = await runAutoBackup();
+                      message.success(res.skipped ? '内容未变化，已跳过写包' : `已生成备份 #${res.bundleId}`);
+                      refresh();
+                      void loadMeta();
+                    } catch (e) {
+                      message.error(e instanceof Error ? e.message : '执行失败');
+                    }
+                  }}
+                >
+                  立即执行
+                </Button>
+                <Button type="primary" loading={autoSaving} onClick={() => void saveAuto()}>
+                  保存策略
+                </Button>
+              </Space>
+            }
+            style={{ marginBottom: 16 }}
+          >
+            {autoCfg ? (
+              <Space size={24} wrap>
+                <Space>
+                  <Typography.Text>启用</Typography.Text>
+                  <Switch
+                    checked={autoCfg.enabled}
+                    onChange={(enabled) => setAutoCfg({ ...autoCfg, enabled })}
+                  />
+                </Space>
+                <Space>
+                  <Typography.Text>间隔</Typography.Text>
+                  <Select
+                    style={{ width: 110 }}
+                    value={autoCfg.intervalHours}
+                    onChange={(intervalHours) => setAutoCfg({ ...autoCfg, intervalHours })}
+                    options={AUTO_BACKUP_INTERVALS.map((h) => ({ value: h, label: `${h} 小时` }))}
+                  />
+                </Space>
+                <Space>
+                  <Typography.Text>保留份数</Typography.Text>
+                  <InputNumber
+                    min={AUTO_BACKUP_KEEP_MIN}
+                    max={AUTO_BACKUP_KEEP_MAX}
+                    value={autoCfg.keep}
+                    onChange={(keepValue) => setAutoCfg({ ...autoCfg, keep: Number(keepValue) })}
+                  />
+                </Space>
+                <Typography.Text type="secondary">
+                  上次执行：{autoCfg.lastRunAt || '从未执行'}
+                  {autoCfg.lastSignature ? ' · 内容签名去重已开启' : ''}
+                </Typography.Text>
+              </Space>
+            ) : (
+              <Typography.Text type="secondary">加载中…</Typography.Text>
+            )}
+          </Card>
+
+          <div className="toolbar">
+            <Input
+              allowClear
+              prefix={<SearchOutlined style={{ color: 'rgba(47,62,102,0.35)' }} />}
+              placeholder="搜索标签 / 备注 / 文件名"
+              style={{ width: 240 }}
+              value={keywordInput}
+              onChange={(e) => setKeywordInput(e.target.value)}
+              onPressEnter={() => patchQuery({ keyword: keywordInput || undefined })}
+            />
+            <Select
+              placeholder="数据包类型"
+              allowClear
+              style={{ minWidth: 140 }}
+              options={toOptions(BUNDLE_KINDS)}
+              value={query.kind}
+              onChange={(kind) => patchQuery({ kind })}
+            />
+            <DatePicker.RangePicker
+              value={range}
+              onChange={(v) => {
+                setRange(v as [Dayjs, Dayjs] | null);
+                patchQuery({
+                  startDate: v?.[0] ? dayjs(v[0]).format('YYYY-MM-DD') : undefined,
+                  endDate: v?.[1] ? dayjs(v[1]).format('YYYY-MM-DD') : undefined,
+                });
+              }}
+            />
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={() => {
+                setKeywordInput('');
+                setRange(null);
+                patchQuery({ keyword: undefined, kind: undefined, startDate: undefined, endDate: undefined });
+              }}
+            >
+              重置
+            </Button>
+            <div className="toolbar-spacer" />
+            <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+              新建备份
+            </Button>
+            <Button
+              icon={<CloudUploadOutlined />}
+              onClick={() => document.getElementById('data-bundle-upload')?.click()}
+            >
+              上传数据包
+            </Button>
+            <input
+              id="data-bundle-upload"
+              type="file"
+              accept=".zip,.json,.json.gz,application/zip,application/json"
+              style={{ display: 'none' }}
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                e.target.value = '';
+                if (file && (await pickUploadFile(file))) setRestoreOpen(true);
+              }}
+            />
+          </div>
+
+          <Table
+            rowKey="id"
+            columns={columns}
+            dataSource={data.list}
+            loading={loading}
+            scroll={{ x: 980 }}
+            onChange={(_p, _f, sorter) => {
+              const s = Array.isArray(sorter) ? sorter[0] : sorter;
+              const field = s?.field;
+              if (field === 'createdAt' || field === 'sizeBytes') {
+                patchQuery({ sortBy: field, sortOrder: s?.order === 'ascend' ? 'asc' : 'desc' }, false);
+              }
+            }}
+            pagination={{
+              current: data.page,
+              pageSize: data.pageSize,
+              total: data.total,
+              showSizeChanger: true,
+              showTotal: (total) => `共 ${total} 个数据包`,
+              onChange: (page, pageSize) => patchQuery({ page, pageSize }, false),
+            }}
+          />
+        </>
+      )}
+
+      {tab === 'migrate' && (
+        <>
+          <div className="data-migrate-grid">
+            <Card className="data-migrate-card">
+              <div className="data-migrate-icon">
+                <FileZipOutlined />
+              </div>
+              <div className="data-migrate-title">导出迁移包（ZIP）</div>
+              <div className="data-migrate-desc">
+                将全库业务数据打包为 ZIP 压缩包，内含 bundle.json 与中文说明文件。压缩后体积更小，
+                可避免后续数据量增大导致迁移失败或超出上传限制。
+              </div>
+              <Button
+                type="primary"
+                icon={<ExportOutlined />}
+                loading={exportingMigration}
+                onClick={() => void handleExportMigration()}
+              >
+                一键导出迁移包
+              </Button>
+            </Card>
+
+            <Card className="data-migrate-card">
+              <div className="data-migrate-icon data-migrate-icon-upload">
+                <CloudUploadOutlined />
+              </div>
+              <div className="data-migrate-title">导入迁移包</div>
+              <div className="data-migrate-desc">
+                选择由本系统导出的 ZIP 迁移包（也兼容历史 JSON / JSON.GZ 数据包），上传后先做完整性预检，
+                确认后再整体恢复；恢复前会自动生成快照。
+              </div>
+              <Button
+                icon={<CloudUploadOutlined />}
+                onClick={() => document.getElementById('data-migration-upload')?.click()}
+              >
+                上传并导入
+              </Button>
+              <input
+                id="data-migration-upload"
+                type="file"
+                accept=".zip,.json,.json.gz,application/zip,application/json"
+                style={{ display: 'none' }}
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = '';
+                  if (file && (await pickUploadFile(file))) setRestoreOpen(true);
+                }}
+              />
+            </Card>
+          </div>
+
+          <Card title="最近迁移包" className="data-migrate-list">
+            <Table
+              rowKey="id"
+              size="small"
+              columns={migrationColumns}
+              dataSource={migrationList}
+              pagination={false}
+              locale={{ emptyText: '暂无迁移包，点击上方「一键导出迁移包」生成' }}
+            />
+          </Card>
+        </>
+      )}
+
+      {tab === 'oplog' && (
+        <Card title="数据管理操作日志">
+          <Table
+            rowKey="id"
+            size="small"
+            dataSource={oplog}
+            pagination={false}
+            locale={{ emptyText: '暂无数据管理操作记录' }}
+            columns={[
+              { title: '时间', dataIndex: 'ts', width: 170 },
+              { title: '操作人', dataIndex: 'actor', width: 120, render: (v?: string | null) => v || '系统' },
+              { title: '动作', dataIndex: 'action', width: 140 },
+              { title: '摘要', dataIndex: 'summary', ellipsis: true },
+            ]}
+          />
+        </Card>
+      )}
 
       {/* 新增 / 编辑数据包 */}
       <Modal
@@ -642,6 +886,11 @@ function AdminDataDesktop() {
           <Form.Item name="note" label="备注">
             <Input.TextArea rows={2} maxLength={100} placeholder="用途说明（选填）" />
           </Form.Item>
+          <Alert
+            type="info"
+            showIcon
+            message="选择「迁移包」时，系统会生成 ZIP 压缩包（内含 bundle.json），可在目标环境解压或直接上传导入。"
+          />
         </Form>
       </Modal>
 
@@ -676,12 +925,7 @@ function AdminDataDesktop() {
             message="恢复会用数据包内容整体替换当前业务数据。系统会先自动生成「恢复前快照」，如需回滚可再次恢复该快照。"
           />
           <Typography.Text>
-            恢复来源：
-            {restoreSource?.kind === 'bundle'
-              ? `数据包 #${restoreSource.bundleId}`
-              : restoreSource?.kind === 'upload'
-                ? `上传文件 ${restoreSource.fileName}`
-                : '未选择'}
+            恢复来源：{restoreSource ? `「${restoreSource.label}」（数据包 #${restoreSource.bundleId}）` : '未选择'}
           </Typography.Text>
 
           {preview && (
@@ -690,7 +934,7 @@ function AdminDataDesktop() {
                 校验结果：{preview.ok ? '通过' : '未通过（禁止恢复）'}
               </Typography.Text>
               <Table
-                rowKey="item"
+                rowKey={(row) => `${row.table ?? row.item}-${row.item}`}
                 size="small"
                 pagination={false}
                 scroll={{ y: 200 }}
@@ -715,7 +959,7 @@ function AdminDataDesktop() {
                   scroll={{ y: 200 }}
                   dataSource={preview.diff}
                   columns={[
-                    { title: '变化表', dataIndex: 'table' },
+                    { title: '变化表', dataIndex: 'name', render: (_, row) => row.name || '其他数据' },
                     { title: '当前', dataIndex: 'current', width: 90 },
                     { title: '包内', dataIndex: 'incoming', width: 90 },
                     {

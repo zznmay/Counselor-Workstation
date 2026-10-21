@@ -32,9 +32,14 @@ export function getDataBundles(query: BundleQuery): Promise<PageResult<DataBundl
   return request<PageResult<DataBundle>>(`/data/bundles${qs({ ...query })}`);
 }
 
-/** 创建备份 / 迁移包（label 必填） */
+/** 创建备份 / 迁移包（label 必填；迁移包服务端落盘为 ZIP） */
 export function createDataBundle(input: BundleInput): Promise<DataBundle> {
   return request<DataBundle>('/data/bundles', { method: 'POST', body: JSON.stringify(input) });
+}
+
+/** 一键备份：名称由服务端按日期时间自动生成，无需手工输入 */
+export function quickBackup(): Promise<DataBundle> {
+  return request<DataBundle>('/data/bundles/quick', { method: 'POST' });
 }
 
 /** 编辑数据包标签与备注（包体内容不可变） */

@@ -17,6 +17,7 @@ const crypto = require('crypto');
 const zlib = require('zlib');
 
 const dbx = require('./db');
+const zip = require('./zip');
 const { BACKUP_DIR, DATA_DIR, DB_PATH } = require('./config');
 
 /** 数据包结构版本：结构变更（增删表 / 改字段语义）时才递增 */
@@ -26,6 +27,44 @@ const SOURCE = 'counselor-workbench';
 
 /** 数据包类型字典（与前端 src/constants 的 BUNDLE_KINDS 保持一致） */
 const BUNDLE_KINDS = ['手动备份', '自动备份', '恢复前快照', '迁移包', '上传包'];
+
+/** 迁移包类型：落盘为 ZIP（bundle.json + README.txt），其余类型仍为 JSON */
+const MIGRATION_KIND = '迁移包';
+
+/** 数据表中文名（数据总览卡片 / 恢复预检展示用，避免界面出现英文表名） */
+const TABLE_LABELS = {
+  users: '登录账号',
+  roles: '角色权限',
+  userRoles: '账号角色',
+  students: '学生名单',
+  studentCounselors: '学生辅导员',
+  grades: '年级管理',
+  classes: '班级管理',
+  classCounselors: '班级教师',
+  classPendingStaff: '待同步教师',
+  dormitories: '寝室管理',
+  conversations: '谈心谈话',
+  mentalHealth: '心理关注',
+  mentalInterviews: '心理访谈',
+  mentalInterviewTemplates: '访谈模板',
+  mentalLevelLogs: '等级变更记录',
+  warnings: '预警记录',
+  notices: '通知公告',
+  approvals: '请假审批',
+  todos: '待办事项',
+  templateCategories: '模板分类',
+  templateFiles: '模板文件',
+  csScheduler: '值班排班',
+  accessLogs: '访问日志',
+  loginAttempts: '登录尝试',
+};
+
+/** 计算「更新时间」时优先参考的日期列（按顺序 coalesce） */
+const TIME_COLUMNS = [
+  'updatedAt', 'createdAt', 'ts', 'talkTime', 'submittedAt', 'raisedAt',
+  'publishAt', 'interviewDate', 'signedAt', 'uploadedAt', 'handledAt',
+  'approvedAt', 'completedAt', 'dueDate', 'enrollDate', 'lockedUntil',
+];
 
 /** 自动备份间隔可选值（小时）与保留份数区间 */
 const INTERVAL_OPTIONS = [1, 2, 4, 6, 12, 24];
@@ -115,23 +154,85 @@ function buildBundle({ kind, label, note, actor }) {
   return bundle;
 }
 
-/** 原子写盘（tmp + rename），返回落盘信息 */
+/** 迁移包内附的中文说明（解压后可直接阅读） */
+function migrationReadme(bundle) {
+  const total = Object.values(bundle.counts ?? {}).reduce((a, b) => a + b, 0);
+  return [
+    '知行辅导员工作台 · 数据迁移包',
+    '',
+    `标签：${bundle.label ?? '未命名'}`,
+    `导出时间：${bundle.exportedAt ?? '—'}`,
+    `数据包结构版本：${bundle.schemaVersion ?? '—'}`,
+    `业务记录总数：${total} 条`,
+    '',
+    '压缩包内容：',
+    '  bundle.json  全库业务数据（导入时使用此文件或整个 ZIP 包）',
+    '  README.txt   本说明文件',
+    '',
+    '导入方式：',
+    '  1. 登录目标环境的辅导员工作台；',
+    '  2. 进入「数据管理 → 迁移助手」，上传本 ZIP 迁移包；',
+    '  3. 通过恢复预检后输入确认短语「恢复」即可完整导入。',
+    '',
+    '提示：导入前系统会自动生成恢复前快照，误操作可再次恢复该快照回滚。',
+  ].join('\n');
+}
+
+/** 生成迁移 ZIP：bundle.json + README.txt */
+function buildMigrationZip(bundle) {
+  return zip.createZip([
+    { name: 'bundle.json', data: JSON.stringify(bundle, null, 2) },
+    { name: 'README.txt', data: migrationReadme(bundle) },
+  ]);
+}
+
+/** 原子写盘（tmp + rename），迁移包写 ZIP，其余写 JSON，返回落盘信息 */
 function writeBundleFile(bundle) {
   if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
   const safeLabel = String(bundle.label || 'bundle').replace(/[^\w\u4e00-\u9fa5-]+/g, '_').slice(0, 40);
+  const ext = bundle.kind === MIGRATION_KIND ? '.zip' : '.json';
   // 同一秒内连续创建同名包会撞文件名（fileName 唯一），补 4 位随机后缀保证不冲突
   const rand = crypto.randomBytes(2).toString('hex');
-  let fileName = `bundle-${stamp()}-${rand}-${safeLabel}.json`;
+  let fileName = `bundle-${stamp()}-${rand}-${safeLabel}${ext}`;
   while (fs.existsSync(path.join(BACKUP_DIR, fileName))) {
-    fileName = `bundle-${stamp()}-${crypto.randomBytes(3).toString('hex')}-${safeLabel}.json`;
+    fileName = `bundle-${stamp()}-${crypto.randomBytes(3).toString('hex')}-${safeLabel}${ext}`;
   }
   const target = path.join(BACKUP_DIR, fileName);
   const tmp = `${target}.tmp`;
-  const json = JSON.stringify(bundle, null, 2);
-  fs.writeFileSync(tmp, json, 'utf8');
+  const payload = bundle.kind === MIGRATION_KIND
+    ? buildMigrationZip(bundle)
+    : Buffer.from(JSON.stringify(bundle, null, 2), 'utf8');
+  fs.writeFileSync(tmp, payload);
   fs.renameSync(tmp, target);
   const buf = fs.readFileSync(target);
   return { fileName, filePath: target, sizeBytes: buf.length, sha256: sha256(buf) };
+}
+
+/** 解析任意来源的包体：ZIP（bundle.json）/ gzip JSON / 纯 JSON */
+function parseBundleBuffer(raw) {
+  let buf = Buffer.isBuffer(raw) ? raw : Buffer.from(raw ?? '');
+  if (zip.isZip(buf)) {
+    const entries = zip.readZipEntries(buf);
+    const exact = entries.get('bundle.json');
+    const picked = exact ? { name: 'bundle.json', data: exact } : zip.pickEntry(entries, (name) => name.toLowerCase().endsWith('.json'));
+    if (!picked) {
+      const err = new Error('ZIP 迁移包中未找到 bundle.json');
+      err.status = 400;
+      throw err;
+    }
+    buf = picked.data;
+  } else if (buf[0] === 0x1f && buf[1] === 0x8b) {
+    buf = zlib.gunzipSync(buf);
+  }
+  let bundle;
+  try {
+    bundle = JSON.parse(buf.toString('utf8'));
+  } catch {
+    const err = new Error('迁移包内容不是合法 JSON');
+    err.status = 400;
+    throw err;
+  }
+  return bundle;
 }
 
 function registerBundle({ kind, label, note, actor, file, counts }) {
@@ -179,25 +280,27 @@ function verifyBundle(bundle) {
   }
   const manifest = Array.isArray(bundle.manifest) ? bundle.manifest : [];
   checks.push({
-    item: 'schemaVersion',
+    item: '数据包结构版本',
     ok: Number(bundle.schemaVersion) === SCHEMA_VERSION,
     detail: `包内 ${bundle.schemaVersion ?? '未声明'} / 当前 ${SCHEMA_VERSION}`,
   });
   for (const table of EXPORT_TABLES) {
     const rows = bundle.tables[table] ?? [];
+    const label = TABLE_LABELS[table] ?? '未知数据表';
     if (!Array.isArray(rows)) {
-      checks.push({ item: table, ok: false, detail: '内容不是数组' });
+      checks.push({ item: label, table, ok: false, detail: '内容不是数组' });
       continue;
     }
     const declared = manifest.find((m) => m && m.table === table);
     const actualSha = sha256(JSON.stringify(rows));
     const ok = !declared || (declared.count === rows.length && declared.sha256 === actualSha);
     checks.push({
-      item: table,
+      item: label,
+      table,
       ok,
       detail: declared
-        ? `${rows.length} 条 · sha256 ${ok ? '一致' : '不一致'}`
-        : `${rows.length} 条 · 无 manifest 记录（按宽松处理）`,
+        ? `${rows.length} 条 · 内容校验${ok ? '一致' : '不一致'}`
+        : `${rows.length} 条 · 无校验记录（按宽松处理）`,
     });
   }
   return { ok: checks.every((c) => c.ok), checks };
@@ -209,7 +312,9 @@ function diffCounts(bundle) {
   for (const table of EXPORT_TABLES) {
     const incoming = (bundle.tables?.[table] ?? []).length;
     const current = dbx.get(`SELECT COUNT(*) AS c FROM ${assertTable(table)}`).c;
-    if (incoming !== current) diff.push({ table, current, incoming, delta: incoming - current });
+    if (incoming !== current) {
+      diff.push({ table, name: TABLE_LABELS[table] ?? '未知数据表', current, incoming, delta: incoming - current });
+    }
   }
   return diff;
 }
@@ -380,15 +485,7 @@ function bundleFilePath(id) {
 
 function readBundleById(id) {
   const { row, filePath } = bundleFilePath(id);
-  const text = fs.readFileSync(filePath, 'utf8');
-  let bundle;
-  try {
-    bundle = JSON.parse(text);
-  } catch {
-    const err = new Error('数据包内容不是合法 JSON，无法恢复');
-    err.status = 400;
-    throw err;
-  }
+  const bundle = parseBundleBuffer(fs.readFileSync(filePath));
   bundle.label = bundle.label ?? row.label;
   return bundle;
 }
@@ -438,20 +535,7 @@ function saveUploadedBundle({ fileName, contentBase64, actor, label, note }) {
     err.status = 413;
     throw err;
   }
-  let text;
-  if (raw[0] === 0x1f && raw[1] === 0x8b) {
-    text = zlib.gunzipSync(raw).toString('utf8');
-  } else {
-    text = raw.toString('utf8');
-  }
-  let bundle;
-  try {
-    bundle = JSON.parse(text);
-  } catch {
-    const err = new Error('上传内容不是合法 JSON 数据包');
-    err.status = 400;
-    throw err;
-  }
+  const bundle = parseBundleBuffer(raw);
   const verify = verifyBundle(bundle);
   if (!verify.ok) {
     const bad = verify.checks.filter((c) => !c.ok).map((c) => c.item).join('、');
@@ -595,34 +679,88 @@ function dbFileSize() {
   }
 }
 
+function formatMtime(ms) {
+  const d = new Date(ms);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 function dirStats(dir) {
   try {
-    if (!fs.existsSync(dir)) return { files: 0, bytes: 0 };
+    if (!fs.existsSync(dir)) return { files: 0, bytes: 0, updatedAt: null };
     let files = 0;
     let bytes = 0;
+    let latest = 0;
     for (const name of fs.readdirSync(dir)) {
       const st = fs.statSync(path.join(dir, name));
-      if (st.isFile()) { files += 1; bytes += st.size; }
+      if (st.isFile()) {
+        files += 1;
+        bytes += st.size;
+        latest = Math.max(latest, st.mtimeMs);
+      }
     }
-    return { files, bytes };
+    return { files, bytes, updatedAt: latest ? formatMtime(latest) : null };
   } catch {
-    return { files: 0, bytes: 0 };
+    return { files: 0, bytes: 0, updatedAt: null };
   }
 }
 
+let dbstatAvailable = null;
+/** 单表体积：优先 dbstat（页级统计），不可用时回落到 JSON 序列化体积 */
+function tableBytes(table) {
+  if (dbstatAvailable !== false) {
+    try {
+      const row = dbx.get('SELECT COALESCE(SUM(pgsize), 0) AS b FROM dbstat WHERE name = ?', [table]);
+      dbstatAvailable = true;
+      return Number(row?.b) || 0;
+    } catch {
+      dbstatAvailable = false;
+    }
+  }
+  return Buffer.byteLength(JSON.stringify(dbx.all(`SELECT * FROM ${assertTable(table)}`)), 'utf8');
+}
+
+/** 单表最近更新时间：取表内日期列（updatedAt 优先）的最大值 */
+function tableUpdatedAt(table, columns) {
+  const timeCols = TIME_COLUMNS.filter((c) => columns.includes(c));
+  if (timeCols.length === 0) return null;
+  const expr = `${timeCols.map((c) => `NULLIF(${c}, '')`).join(', ')}, NULL`;
+  const row = dbx.get(`SELECT MAX(COALESCE(${expr})) AS t FROM ${assertTable(table)}`);
+  return row?.t ?? null;
+}
+
+/** 数据总览卡片：中文名 + 条数 + 体积 + 更新时间 */
+function tableStats() {
+  return EXPORT_TABLES.map((table) => {
+    const columns = columnsOf(table);
+    const count = dbx.get(`SELECT COUNT(*) AS c FROM ${assertTable(table)}`).c;
+    return {
+      table,
+      name: TABLE_LABELS[table] ?? '未知数据表',
+      count,
+      bytes: count === 0 ? 0 : tableBytes(table),
+      updatedAt: tableUpdatedAt(table, columns),
+    };
+  });
+}
+
 function overview() {
+  const stats = tableStats();
   const counts = {};
-  for (const table of EXPORT_TABLES) counts[table] = dbx.get(`SELECT COUNT(*) AS c FROM ${assertTable(table)}`).c;
+  for (const item of stats) counts[item.table] = item.count;
   const rows = dbx.all('SELECT kind, COUNT(*) AS n, COALESCE(SUM(sizeBytes), 0) AS bytes FROM dataBundles GROUP BY kind');
   const bundles = { total: 0, bytes: 0, byKind: rows };
   for (const r of rows) { bundles.total += r.n; bundles.bytes += r.bytes; }
   const latest = dbx.get('SELECT id, label, kind, createdAt FROM dataBundles ORDER BY id DESC LIMIT 1') ?? null;
+  const settings = dbx.get('SELECT COUNT(*) AS c, MAX(updatedAt) AS t FROM dataSettings');
   return {
     generatedAt: nowStr(),
     schemaVersion: SCHEMA_VERSION,
     appVersion: APP_VERSION,
     tables: EXPORT_TABLES,
     counts,
+    tableStats: stats,
+    settings: { count: settings?.c ?? 0, updatedAt: settings?.t ?? null },
     db: { file: path.basename(DB_PATH), sizeBytes: dbFileSize(), walBytes: (() => { try { return fs.statSync(`${DB_PATH}-wal`).size; } catch { return 0; } })() },
     uploads: dirStats(path.join(DATA_DIR, 'uploads')),
     bundles,
@@ -655,6 +793,8 @@ module.exports = {
   APP_VERSION,
   SOURCE,
   BUNDLE_KINDS,
+  MIGRATION_KIND,
+  TABLE_LABELS,
   INTERVAL_OPTIONS,
   KEEP_MIN,
   KEEP_MAX,
@@ -665,6 +805,8 @@ module.exports = {
   nowStr,
   sha256,
   buildBundle,
+  buildMigrationZip,
+  parseBundleBuffer,
   writeBundleFile,
   verifyBundle,
   diffCounts,
