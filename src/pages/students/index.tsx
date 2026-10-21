@@ -27,7 +27,6 @@ import {
   batchDeleteStudents,
   createStudent,
   deleteStudent,
-  getExistingStudentNos,
   getRoommates,
   getStudentBriefs,
   getStudentMajors,
@@ -53,6 +52,7 @@ import {
 } from '@/constants';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useList } from '@/hooks/useList';
+import { dormOfStudent } from '@/utils/dormitory';
 import {
   downloadStudentTemplate,
   exportImportFailures,
@@ -91,12 +91,14 @@ interface StudentFormValues {
   /** 归属班级（班级管理字典）；className 文本由所选班级派生 */
   classId: number;
   phone: string;
-  dorm?: string;
+  /** 宿舍镜像字段（寝室管理为本源，此处填写后同步回寝室管理） */
+  dorm?: string | null;
+  /** 班主任 / 辅导员为只读派生值，表单不收集、不提交 */
+  headTeacher?: string | null;
+  counselor?: string | null;
   politicalStatus?: string;
   origin?: string;
   status: StudentStatus;
-  headTeacher?: string;
-  counselor?: string;
   fatherName?: string;
   fatherPhone?: string;
   motherName?: string;
@@ -293,6 +295,20 @@ function StudentsDesktop() {
     }));
   }, [classOptions, filterGradeId]);
 
+  /**
+   * 班主任 / 辅导员：只读派生（班级管理 → 教师名单 为唯一来源）。
+   * 编辑弹窗中随所选班级实时带出，提示文案说明不可手改；服务端也会忽略这两项入参。
+   */
+  const derivedTeachers = useMemo(() => {
+    const watchedClassId = Form.useWatch('classId', form) as number | undefined;
+    const cls = classOptions.find((c) => c.id === Number(watchedClassId));
+    if (!cls) return { headTeacher: '', counselor: '' };
+    return {
+      headTeacher: cls.headTeacherNames || '',
+      counselor: cls.counselorNames || '',
+    };
+  }, [classOptions, form]);
+
   /* ---------- 记录谈话（联动谈心谈话模块） ---------- */
   const [talkForm] = Form.useForm<ConversationFormValues>();
   const [talkTarget, setTalkTarget] = useState<Student | null>(null);
@@ -368,7 +384,7 @@ function StudentsDesktop() {
     setImportDone(false);
   };
 
-  /** 解析并校验上传的 Excel（仅本地预检，真正导入时 API 还会按库内数据二次查重） */
+  /** 解析并校验上传的 Excel（仅本地预检，系统内已有学号由服务端按 upsert 处理） */
   const handleImportFile = async (file: File) => {
     try {
       const rows = await parseStudentExcel(file);
@@ -376,12 +392,11 @@ function StudentsDesktop() {
         message.warning('未解析到数据行，请检查文件内容');
         return;
       }
-      const existingNos = await getExistingStudentNos();
       // 班级字典预检：字典已加载时提前拦截不匹配行（服务端导入时仍会兜底校验）
       const classKeys = classOptions.length > 0
         ? new Set(classOptions.map((c) => `${c.gradeName}|${c.name}`))
         : undefined;
-      const { valid, failures } = validateStudentRows(rows, existingNos, classKeys);
+      const { valid, failures } = validateStudentRows(rows, classKeys);
       setParsed({ fileName: file.name, totalRows: rows.length, valid, failures });
       if (valid.length === 0) {
         message.warning('没有可导入的数据行，请根据失败原因修正后重新上传');
@@ -398,7 +413,7 @@ function StudentsDesktop() {
       const result = await importStudents(parsed.valid);
       setImportResult(result);
       setImportDone(true);
-      message.success(`成功导入 ${result.successCount} 名学生`);
+      message.success(`新增 ${result.insertedCount}、更新 ${result.updatedCount}、跳过 ${result.skippedCount} 名学生`);
     } finally {
       setImporting(false);
     }
@@ -594,7 +609,14 @@ function StudentsDesktop() {
     { title: '专业', dataIndex: 'major', width: 150, ellipsis: true },
     { title: '班级', dataIndex: 'className', width: 100 },
     { title: '手机号', dataIndex: 'phone', width: 125 },
-    { title: '宿舍', dataIndex: 'dorm', width: 130, ellipsis: true },
+    {
+      title: '宿舍',
+      key: 'dorm',
+      width: 130,
+      ellipsis: true,
+      /* 直接读取「寝室管理」的宿舍楼 + 房间号合并显示（如 荷园B512），不再读学生表镜像字段 */
+      render: (_, record) => dormOfStudent(record) || '—',
+    },
     {
       title: '学籍状态',
       dataIndex: 'status',
@@ -799,7 +821,7 @@ function StudentsDesktop() {
             <Descriptions.Item label="班级">{detail.className}</Descriptions.Item>
             <Descriptions.Item label="职务">{detail.position ?? '—'}</Descriptions.Item>
             <Descriptions.Item label="手机号">{detail.phone}</Descriptions.Item>
-            <Descriptions.Item label="宿舍">{detail.dorm ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="宿舍">{dormOfStudent(detail) || '—'}</Descriptions.Item>
             <Descriptions.Item label="政治面貌">{detail.politicalStatus ?? '—'}</Descriptions.Item>
             <Descriptions.Item label="生源地">{detail.origin ?? '—'}</Descriptions.Item>
             <Descriptions.Item label="入学时间">{detail.enrollDate}</Descriptions.Item>
@@ -833,7 +855,7 @@ function StudentsDesktop() {
           </div>
           {roommatesFailed ? (
             <Typography.Text type="secondary">同宿舍学生信息加载失败，稍后重试</Typography.Text>
-          ) : !detail.dorm ? (
+          ) : !dormOfStudent(detail) ? (
             <Typography.Text type="secondary">该学生未登记宿舍，暂无同宿舍学生</Typography.Text>
           ) : roommates === null ? (
             <Typography.Text type="secondary">加载中…</Typography.Text>
@@ -891,7 +913,6 @@ function StudentsDesktop() {
             gender: '男',
             status: '在读',
             major: MAJORS[0],
-            counselor: '王老师',
           }}
         >
           <Row gutter={16}>
@@ -971,8 +992,12 @@ function StudentsDesktop() {
               </Form.Item>
             </Col>
             <Col xs={24} sm={12}>
-              <Form.Item name="dorm" label="宿舍">
-                <Input placeholder="如 学生公寓5-602" />
+              <Form.Item
+                name="dorm"
+                label="宿舍"
+                extra="宿舍以「寝室管理」为准，此处修改会同步（如 荷园B512）"
+              >
+                <Input placeholder="如 荷园B512" />
               </Form.Item>
             </Col>
             <Col xs={24} sm={12}>
@@ -1008,13 +1033,13 @@ function StudentsDesktop() {
               <div className="form-section-title">班级与家庭联系</div>
             </Col>
             <Col xs={24} sm={12}>
-              <Form.Item name="headTeacher" label="班主任">
-                <Input placeholder="如 李国强" />
+              <Form.Item label="班主任" extra="由「班级管理 → 教师名单」按班级自动派生，不可手改">
+                <Input value={derivedTeachers.headTeacher || '该班暂无班主任'} disabled />
               </Form.Item>
             </Col>
             <Col xs={24} sm={12}>
-              <Form.Item name="counselor" label="辅导员">
-                <Input />
+              <Form.Item label="辅导员" extra="由「班级管理 → 教师名单」按班级自动派生，不可手改">
+                <Input value={derivedTeachers.counselor || '该班暂无辅导员'} disabled />
               </Form.Item>
             </Col>
             <Col xs={24} sm={12}>
@@ -1122,16 +1147,16 @@ function StudentsDesktop() {
                 type={allFailures.length > 0 ? 'warning' : 'success'}
                 message={
                   importDone
-                    ? `成功导入 ${importResult?.successCount ?? 0} 名学生，名单已追加，现有数据不受影响。`
+                    ? `处理完成：新增 ${importResult?.insertedCount ?? 0}、更新 ${importResult?.updatedCount ?? 0}、跳过 ${importResult?.skippedCount ?? 0} 名学生。`
                     : `文件「${parsed.fileName}」共解析 ${parsed.totalRows} 行：可导入 ${parsed.valid.length} 条，${parsed.failures.length} 条存在问题。`
                 }
                 description={
                   importDone
                     ? allFailures.length > 0
-                      ? '部分数据未通过校验未导入，可导出失败明细修正后重新上传。'
-                      : '全部数据均导入成功。'
+                      ? '部分数据未通过校验未处理，可导出失败明细修正后重新上传。'
+                      : '全部数据处理成功（新增/更新/跳过）。'
                     : allFailures.length > 0
-                      ? '导入采用追加方式，仅写入通过校验的行；可导出失败明细修正后重新上传。'
+                      ? '导入按学号 upsert：学号不存在则新增，已存在则仅更新有变化的字段，完全相同自动跳过；可导出失败明细修正后重新上传。'
                       : undefined
                 }
               />

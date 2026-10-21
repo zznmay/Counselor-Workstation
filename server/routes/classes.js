@@ -5,16 +5,27 @@ const dbx = require('../lib/db');
 const auth = require('../lib/auth');
 const { requirePermission } = require('../lib/permissions');
 const { logAccess, nowStr } = require('../lib/audit');
+const { diffCounselorIds } = require('../lib/studentDiff');
+const { refillStudentsByClass } = require('../lib/teacherSync');
 
 const router = express.Router();
 router.use(auth.authMiddleware);
 
+/**
+ * 班级列表聚合：classCounselors 已升级为「人-班-身份」三维，
+ * 辅导员与班主任分别按 roleType 聚合，姓名按 users.id 升序（与派生回填口径一致，避免假 diff）。
+ */
 const LIST_SELECT = `
   SELECT c.id, c.gradeId, c.name, c.createdAt, g.name AS gradeName,
     (SELECT COUNT(*) FROM students s WHERE s.classId = c.id) AS studentCount,
-    (SELECT COUNT(*) FROM classCounselors cc WHERE cc.classId = c.id) AS counselorCount,
-    (SELECT GROUP_CONCAT(u.displayName, '、') FROM classCounselors cc
-      JOIN users u ON u.id = cc.userId WHERE cc.classId = c.id) AS counselorNames
+    (SELECT COUNT(*) FROM classCounselors cc WHERE cc.classId = c.id AND cc.roleType = 'counselor') AS counselorCount,
+    (SELECT GROUP_CONCAT(t.name, '、') FROM (
+      SELECT u.displayName AS name FROM classCounselors cc JOIN users u ON u.id = cc.userId
+      WHERE cc.classId = c.id AND cc.roleType = 'counselor' ORDER BY u.id) t) AS counselorNames,
+    (SELECT COUNT(*) FROM classCounselors cc WHERE cc.classId = c.id AND cc.roleType = 'headTeacher') AS headTeacherCount,
+    (SELECT GROUP_CONCAT(t.name, '、') FROM (
+      SELECT u.displayName AS name FROM classCounselors cc JOIN users u ON u.id = cc.userId
+      WHERE cc.classId = c.id AND cc.roleType = 'headTeacher' ORDER BY u.id) t) AS headTeacherNames
   FROM classes c JOIN grades g ON g.id = c.gradeId`;
 
 const byId = (id) => dbx.get(`${LIST_SELECT} WHERE c.id = ?`, [id]);
@@ -24,7 +35,13 @@ router.get('/options', (req, res) => {
   const gradeId = Number(req.query.gradeId);
   const hasGrade = Number.isInteger(gradeId) && gradeId > 0;
   const rows = dbx.all(
-    `SELECT c.id, c.name, c.gradeId, g.name AS gradeName
+    `SELECT c.id, c.name, c.gradeId, g.name AS gradeName,
+      (SELECT GROUP_CONCAT(t.name, '、') FROM (
+        SELECT u.displayName AS name FROM classCounselors cc JOIN users u ON u.id = cc.userId
+        WHERE cc.classId = c.id AND cc.roleType = 'counselor' ORDER BY u.id) t) AS counselorNames,
+      (SELECT GROUP_CONCAT(t.name, '、') FROM (
+        SELECT u.displayName AS name FROM classCounselors cc JOIN users u ON u.id = cc.userId
+        WHERE cc.classId = c.id AND cc.roleType = 'headTeacher' ORDER BY u.id) t) AS headTeacherNames
      FROM classes c JOIN grades g ON g.id = c.gradeId ${hasGrade ? 'WHERE c.gradeId = ?' : ''}
      ORDER BY g.name DESC, c.name`,
     hasGrade ? [gradeId] : [],
@@ -126,11 +143,33 @@ router.delete('/:id', (req, res) => {
   res.json({ ok: true });
 });
 
-/** 批量导入班级（前端已完成预检，服务端逐条兜底校验；事务写入保证单次请求原子性） */
+/**
+ * 按姓名匹配在职教师（身份由 roleKey 指定：counselor / headTeacher）。
+ * 教师档案的唯一来源是「班级管理 → 教师名单」，这里只做引用，不创建账号。
+ */
+function findStaffByName(name, roleKey) {
+  return dbx.get(
+    `SELECT u.id, u.displayName FROM users u
+     WHERE u.displayName = ? AND u.disabled = 0
+       AND (u.role = ? OR EXISTS (SELECT 1 FROM userRoles ur WHERE ur.userId = u.id AND ur.roleKey = ?))`,
+    [name, roleKey, roleKey],
+  );
+}
+
+/**
+ * 批量导入班级（upsert 语义）：以「年级+班级名称」为唯一标识——
+ * - 不存在 → 新建班级并分配辅导员 / 班主任；
+ * - 已存在 → 按身份分别比对人员集合，仅增删有变化部分，完全相同跳过；
+ * - 同一批文件内重复 → 判失败（两行数据可能不同，避免互相覆盖）。
+ * 与教师导入（人视角、增量）不同，本通道以班级为准，采用**覆盖**语义：
+ * 文件中该班的辅导员/班主任集合即最终结果。
+ * 前端已完成预检，服务端逐条兜底校验；事务写入保证单次请求原子性。
+ */
 router.post('/import', (req, res) => {
   const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
   const failures = [];
   const pending = []; // 校验通过的待写入项
+  let skippedCount = 0;
 
   // 事务外先完成全部校验（读操作），事务内只做写入
   const fileSeen = new Map(); // grade|name → 本批首次出现的行号
@@ -139,6 +178,8 @@ router.post('/import', (req, res) => {
     const name = String(data?.name ?? '').trim();
     const grade = String(data?.grade ?? '').trim();
     const counselorsRaw = String(data?.counselors ?? '').trim();
+    /* 班主任列（选填）：与辅导员同规则按姓名匹配在职班主任 */
+    const headTeachersRaw = String(data?.headTeachers ?? '').trim();
 
     if (!name) reasons.push('班级名称为必填项');
     else if (name.length > 30) reasons.push('班级名称不可超过 30 个字');
@@ -151,26 +192,33 @@ router.post('/import', (req, res) => {
       else gradeId = g.id;
     }
 
+    let existingClassId = null;
     if (name && gradeId) {
-      if (dbx.get('SELECT id FROM classes WHERE gradeId = ? AND name = ?', [gradeId, name])) {
-        reasons.push('班级已存在于系统中，不可重复导入');
-      } else if (fileSeen.has(`${grade}|${name}`)) {
+      if (fileSeen.has(`${grade}|${name}`)) {
         reasons.push(`班级与本批第 ${fileSeen.get(`${grade}|${name}`)} 行重复`);
       }
       fileSeen.set(`${grade}|${name}`, row);
+      const existingClass = dbx.get('SELECT id FROM classes WHERE gradeId = ? AND name = ?', [gradeId, name]);
+      if (existingClass) existingClassId = existingClass.id;
     }
 
-    // 辅导员可留空；填写时逐个按姓名匹配在职辅导员
+    // 辅导员 / 班主任可留空；填写时逐个按姓名匹配在职教师（未匹配判失败，避免留下空引用）
     const counselorIds = [];
     if (counselorsRaw) {
       const names = [...new Set(counselorsRaw.split(/[、,，/;；]/).map((s) => s.trim()).filter(Boolean))];
       for (const n of names) {
-        const u = dbx.get(
-          "SELECT id, displayName FROM users WHERE displayName = ? AND role = 'counselor' AND disabled = 0",
-          [n],
-        );
-        if (!u) reasons.push(`辅导员「${n}」未匹配到在职辅导员`);
+        const u = findStaffByName(n, 'counselor');
+        if (!u) reasons.push(`辅导员「${n}」未匹配到在职辅导员，请先在「教师名单」导入`);
         else counselorIds.push(u.id);
+      }
+    }
+    const headTeacherIds = [];
+    if (headTeachersRaw) {
+      const names = [...new Set(headTeachersRaw.split(/[、,，/;；]/).map((s) => s.trim()).filter(Boolean))];
+      for (const n of names) {
+        const u = findStaffByName(n, 'headTeacher');
+        if (!u) reasons.push(`班主任「${n}」未匹配到在职班主任，请先在「教师名单」导入`);
+        else headTeacherIds.push(u.id);
       }
     }
 
@@ -178,23 +226,94 @@ router.post('/import', (req, res) => {
       failures.push({ row, name: name || '—', grade: grade || '—', reason: reasons.join('；'), data });
       continue;
     }
-    pending.push({ row, gradeId, name, counselorIds });
+
+    if (existingClassId) {
+      // 班级已存在：按身份分别比对人员集合，均无变化跳过，有变化仅增删差集（覆盖语义）
+      const existingCounselorIds = dbx.all(
+        "SELECT userId FROM classCounselors WHERE classId = ? AND roleType = 'counselor'", [existingClassId],
+      ).map((r) => r.userId);
+      const existingHeadIds = dbx.all(
+        "SELECT userId FROM classCounselors WHERE classId = ? AND roleType = 'headTeacher'", [existingClassId],
+      ).map((r) => r.userId);
+      const cDiff = diffCounselorIds(existingCounselorIds, counselorIds);
+      const hDiff = diffCounselorIds(existingHeadIds, headTeacherIds);
+      if (cDiff.toAdd.length === 0 && cDiff.toRemove.length === 0
+        && hDiff.toAdd.length === 0 && hDiff.toRemove.length === 0) {
+        skippedCount += 1; // 与系统记录完全一致，跳过不导入
+        continue;
+      }
+      pending.push({
+        row,
+        mode: 'update',
+        classId: existingClassId,
+        name,
+        counselor: cDiff,
+        headTeacher: hDiff,
+      });
+    } else {
+      pending.push({ row, mode: 'insert', gradeId, name, counselorIds, headTeacherIds });
+    }
   }
 
   // 事务写入：单次请求内原子生效（中途异常全部回滚，不产生部分导入）
+  let insertedCount = 0;
+  let updatedCount = 0;
   if (pending.length > 0) {
     dbx.db.exec('BEGIN IMMEDIATE');
     try {
+      const touchedClassIds = new Set();
       for (const it of pending) {
-        const info = dbx.run(
-          'INSERT INTO classes (gradeId, name, createdAt) VALUES (?, ?, ?)',
-          [it.gradeId, it.name, nowStr()],
-        );
-        const classId = Number(info.lastInsertRowid);
-        for (const uid of it.counselorIds) {
-          dbx.run('INSERT INTO classCounselors (classId, userId) VALUES (?, ?)', [classId, uid]);
+        if (it.mode === 'insert') {
+          const info = dbx.run(
+            'INSERT INTO classes (gradeId, name, createdAt) VALUES (?, ?, ?)',
+            [it.gradeId, it.name, nowStr()],
+          );
+          const classId = Number(info.lastInsertRowid);
+          for (const uid of it.counselorIds) {
+            dbx.run(
+              "INSERT OR IGNORE INTO classCounselors (classId, userId, roleType, createdAt) VALUES (?, ?, 'counselor', ?)",
+              [classId, uid, nowStr()],
+            );
+          }
+          for (const uid of it.headTeacherIds ?? []) {
+            dbx.run(
+              "INSERT OR IGNORE INTO classCounselors (classId, userId, roleType, createdAt) VALUES (?, ?, 'headTeacher', ?)",
+              [classId, uid, nowStr()],
+            );
+          }
+          touchedClassIds.add(classId);
+          insertedCount += 1;
+        } else {
+          for (const uid of it.counselor.toAdd) {
+            dbx.run(
+              "INSERT OR IGNORE INTO classCounselors (classId, userId, roleType, createdAt) VALUES (?, ?, 'counselor', ?)",
+              [it.classId, uid, nowStr()],
+            );
+          }
+          for (const uid of it.counselor.toRemove) {
+            dbx.run(
+              "DELETE FROM classCounselors WHERE classId = ? AND userId = ? AND roleType = 'counselor'",
+              [it.classId, uid],
+            );
+          }
+          for (const uid of it.headTeacher.toAdd) {
+            dbx.run(
+              "INSERT OR IGNORE INTO classCounselors (classId, userId, roleType, createdAt) VALUES (?, ?, 'headTeacher', ?)",
+              [it.classId, uid, nowStr()],
+            );
+          }
+          for (const uid of it.headTeacher.toRemove) {
+            dbx.run(
+              "DELETE FROM classCounselors WHERE classId = ? AND userId = ? AND roleType = 'headTeacher'",
+              [it.classId, uid],
+            );
+          }
+          touchedClassIds.add(it.classId);
+          updatedCount += 1;
         }
       }
+      // 班级人员变动 → 同步回填学生名册的派生责任人（同事务，保持一致状态）
+      refillStudentsByClass([...touchedClassIds]);
       dbx.db.exec('COMMIT');
     } catch (e) {
       dbx.db.exec('ROLLBACK');
@@ -203,8 +322,15 @@ router.post('/import', (req, res) => {
     }
   }
 
-  logAccess(req, `批量导入班级：成功 ${pending.length} 条，失败 ${failures.length} 条`);
-  res.json({ total: rows.length, successCount: pending.length, failures });
+  logAccess(req, `批量导入班级：新增 ${insertedCount}、更新 ${updatedCount}、跳过 ${skippedCount}，失败 ${failures.length} 条`);
+  res.json({
+    total: rows.length,
+    successCount: insertedCount + updatedCount,
+    insertedCount,
+    updatedCount,
+    skippedCount,
+    failures,
+  });
 });
 
 module.exports = router;

@@ -521,7 +521,7 @@ function AdminUsersDesktop() {
     <div className="page">
       <PageHeader
         title="用户管理"
-        subtitle="开设教师账号、分配角色与班级、删除账号；支持 Excel 批量导入（初始密码自动生成为「Hzpt@用户名」，首次登录需修改）"
+        subtitle="开设教师账号、分配角色与班级、删除账号；辅导员/班主任请到「班级管理 → 教师名单」导入（初始密码自动生成为「Hzpt@工号」，首次登录需修改）"
         extra={
           <Space wrap>
             <Button icon={<UploadOutlined />} onClick={openImport}>
@@ -750,9 +750,14 @@ function AdminUsersDesktop() {
               <li>必填字段：用户名（3-20 位字母/数字/下划线，全局唯一）、姓名（1-20 字）、角色（角色名称或标识）</li>
               <li>选填字段：所辖班级（多个用「、」分隔；同名班级写成「2024级·计应2401」）</li>
               <li>
+                <Typography.Text strong>辅导员 / 班主任请到「班级管理 → 教师名单」导入</Typography.Text>
+                ：教师数据（账号、角色、带班）以班级管理为唯一来源，本通道不再受理这两类角色，
+                填写后该行会被拒绝并提示
+              </li>
+              <li>
                 初始密码由系统自动生成，规则为「{IMPORT_PASSWORD_PREFIX}用户名」（如 zhangsan → {IMPORT_PASSWORD_PREFIX}zhangsan），无需在模板中填写，首次登录需修改
               </li>
-              <li>校验规则：用户名与系统内或本表内重复、角色不存在、班级未匹配字典的行将被拒绝，不影响其他行写入</li>
+              <li>校验规则：用户名与系统内或本表内重复、角色不存在或为教师类角色、班级未匹配字典的行将被拒绝，不影响其他行写入</li>
               <li>导入方式：追加写入、整批事务提交；管理员角色忽略「所辖班级」列</li>
             </ul>
           </div>

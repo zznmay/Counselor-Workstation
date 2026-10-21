@@ -30,7 +30,12 @@ api.use('/users', require('./routes/users'));
 api.use('/roles', require('./routes/roles'));
 api.use('/students', require('./routes/students'));
 api.use('/grades', require('./routes/grades'));
+/* 班级管理 → 教师名单（辅导员/班主任唯一来源）：必须挂在 /classes 之前，
+   否则会被 /classes 的 /:id 路由吞掉 */
+api.use('/classes/teachers', require('./routes/teachers'));
 api.use('/classes', require('./routes/classes'));
+/* 寝室管理：学生宿舍分配（名册「宿舍」列的唯一数据来源） */
+api.use('/dormitories', require('./routes/dormitories'));
 api.use('/conversations', require('./routes/conversations'));
 api.use('/warnings', require('./routes/warnings'));
 api.use('/mental', require('./routes/mental'));

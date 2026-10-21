@@ -16,7 +16,8 @@
     "start:cloud": "npm run build:web && node --experimental-sqlite server/start-cloud.js",
     "start:cloud:prod": "npm run build:web && WORKBENCH_SEED=empty node --experimental-sqlite server/start-cloud.js",
     "verify:import": "node scripts/run-ts-script.cjs scripts/verify-import.ts",
-    "verify:import:fields": "node scripts/run-ts-script.cjs scripts/verify-import-fields.ts"
+    "verify:import:fields": "node scripts/run-ts-script.cjs scripts/verify-import-fields.ts",
+    "test": "node --experimental-sqlite --test tests/**/*.test.js"
   },
   "dependencies": {
     "@ant-design/icons": "^5.4.0",

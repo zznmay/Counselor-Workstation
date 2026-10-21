@@ -201,7 +201,7 @@ function verifyRowValidation(): void {
     }),
   ];
 
-  const { valid, failures } = validateStudentRows(rows, ['2024010101']);
+  const { valid, failures } = validateStudentRows(rows);
 
   assert.strictEqual(valid.length, 5, `应通过 5 行，实际 ${valid.length}`);
   assert.deepStrictEqual(
@@ -302,7 +302,7 @@ async function verifyEndToEnd(): Promise<void> {
   assert.strictEqual(parsedRows[5].data.enrollDate, '2026-09-01', '标准日期解析后保持不变');
   passed += 3;
 
-  const e2e = validateStudentRows(parsedRows, []);
+  const e2e = validateStudentRows(parsedRows);
   assert.strictEqual(e2e.valid.length, 6, `端到端应通过 6 行，实际 ${e2e.valid.length}`);
   assert.deepStrictEqual(
     e2e.valid.map((r) => r.data.enrollDate),

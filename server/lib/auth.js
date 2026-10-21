@@ -1,4 +1,6 @@
-/** 鉴权：JWT 签发/校验、登录失败锁定、路由守卫中间件 */
+/** 鉴权：JWT 签发/校验、路由守卫中间件 */
+/* 登录失败锁定（loginAttempts 表）已移除：连续输错密码不再锁定账号。
+   loginAttempts 表保留不删除 —— 历史数据包仍含该表，恢复老备份需要它（见 lib/datamgmt.js）。 */
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 
@@ -8,38 +10,8 @@ const { isSystemAdmin } = require('./permissions');
 
 const JWT_SECRET = ensureJwtSecret();
 const TOKEN_EXPIRES = '8h';
-const MAX_FAILS = 5;
-const LOCK_MINUTES = 15;
 // JWT 形态预校验：三段式 base64url，先行拦截畸形输入
 const JWT_SHAPE = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
-
-/** 登录失败锁定（loginAttempts 表持久化，重启不清零） */
-function isLocked(username) {
-  const row = dbx.get('SELECT fails, lockedUntil FROM loginAttempts WHERE username = ?', [username]);
-  if (!row || !row.lockedUntil) return null;
-  if (new Date(row.lockedUntil).getTime() > Date.now()) return row.lockedUntil;
-  dbx.run('UPDATE loginAttempts SET fails = 0, lockedUntil = NULL WHERE username = ?', [username]);
-  return null;
-}
-
-function getFailCount(username) {
-  return dbx.get('SELECT fails FROM loginAttempts WHERE username = ?', [username])?.fails ?? 0;
-}
-
-function recordFail(username) {
-  const fails = getFailCount(username) + 1;
-  const lockedUntil = fails >= MAX_FAILS
-    ? new Date(Date.now() + LOCK_MINUTES * 60 * 1000).toISOString()
-    : null;
-  dbx.run(`INSERT INTO loginAttempts (username, fails, lockedUntil) VALUES (?, ?, ?)
-    ON CONFLICT(username) DO UPDATE SET fails = excluded.fails, lockedUntil = excluded.lockedUntil`,
-    [username, fails, lockedUntil]);
-  return { fails, lockedUntil };
-}
-
-function clearFails(username) {
-  dbx.run('UPDATE loginAttempts SET fails = 0, lockedUntil = NULL WHERE username = ?', [username]);
-}
 
 function verifyPassword(password, hash) {
   return bcrypt.compareSync(password, hash);
@@ -122,9 +94,6 @@ function adminOnly(req, res, next) {
 }
 
 module.exports = {
-  isLocked,
-  recordFail,
-  clearFails,
   verifyPassword,
   hashPassword,
   issueToken,

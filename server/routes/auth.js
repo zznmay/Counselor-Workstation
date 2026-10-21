@@ -5,7 +5,7 @@ const dbx = require('../lib/db');
 const auth = require('../lib/auth');
 const { classIdsOfUser } = require('../lib/scope');
 const { permissionsOfUser, ownerModulesOfUser, isSystemAdmin, roleKeysOfUserId } = require('../lib/permissions');
-const { logAccess, clientIp } = require('../lib/audit');
+const { logAccess } = require('../lib/audit');
 
 const router = express.Router();
 
@@ -32,33 +32,22 @@ const withSession = (row) => {
 router.post('/login', (req, res) => {
   const username = String(req.body?.username ?? '').trim();
   const password = String(req.body?.password ?? '');
-  const ip = clientIp(req);
 
   if (!username || !password) {
     return res.status(400).json({ message: '请输入用户名和密码' });
   }
 
-  const locked = auth.isLocked(username);
-  if (locked) {
-    logAccess(req, `登录（账号锁定中，解锁时间 ${locked.slice(0, 16)}）`, '拒绝');
-    return res.status(423).json({ message: `失败次数过多，账号已锁定，请 ${locked.slice(11, 16)} 后再试` });
-  }
-
   const row = dbx.get('SELECT * FROM users WHERE username = ?', [username]);
   if (!row || !auth.verifyPassword(password, row.passwordHash)) {
-    const { fails } = auth.recordFail(username);
-    logAccess(req, `登录失败（第 ${fails} 次）`, '失败');
-    const remain = Math.max(0, 5 - fails);
-    return res.status(401).json({
-      message: fails >= 5 ? '失败次数过多，账号已锁定 15 分钟' : `用户名或密码错误（再错 ${remain} 次将锁定）`,
-    });
+    // 不再记录失败次数、不再锁定账号：连续输错仅返回统一的 401（审计日志仍逐次留痕）
+    logAccess(req, '登录失败', '失败');
+    return res.status(401).json({ message: '用户名或密码错误' });
   }
   if (row.disabled) {
     logAccess(req, '登录（账号已停用）', '拒绝');
     return res.status(403).json({ message: '账号已停用，请联系管理员' });
   }
 
-  auth.clearFails(username);
   const token = auth.issueToken(row);
   req.user = row;
   logAccess(req, '登录成功');

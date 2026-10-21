@@ -50,8 +50,11 @@ function rosterScope(user, alias = 's') {
 /** 会话下发用：用户所辖班级 id 列表（管理员返回空数组） */
 function classIdsOfUser(user) {
   if (!user || isAdmin(user)) return [];
-  return dbx.all('SELECT classId FROM classCounselors WHERE userId = ? ORDER BY classId', [user.id])
-    .map((r) => r.classId);
+  // DISTINCT：同一人可同时以辅导员与班主任身份绑定同一班级，去重避免列表与前端 key 重复
+  return dbx.all(
+    'SELECT DISTINCT classId FROM classCounselors WHERE userId = ? ORDER BY classId',
+    [user.id],
+  ).map((r) => r.classId);
 }
 
 module.exports = { isAdmin, canManageStudent, sensitiveScope, classIdsOfUser, rosterScope };

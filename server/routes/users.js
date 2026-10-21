@@ -17,6 +17,8 @@ router.use(auth.authMiddleware);
 /** 批量导入初始密码规则：统一为「Hzpt@」拼接用户名，模板不再提供密码列，首次登录强制修改 */
 const IMPORT_PASSWORD_PREFIX = 'Hzpt@';
 const USERNAME_RE = /^[a-zA-Z0-9_]{3,20}$/;
+/** 教师类角色：归「班级管理 → 教师名单」管辖，用户管理不再受理（避免双写） */
+const TEACHER_ROLE_KEYS = ['counselor', 'headTeacher'];
 
 /* ---------- 角色集合（userRoles 多对多） ---------- */
 
@@ -62,10 +64,10 @@ function enabledAdminCount() {
 
 /* ---------- 辅导员所辖班级（classCounselors 多对多） ---------- */
 
-/** 所辖班级 ID 列表（系统管理员返回空数组） */
+/** 所辖班级 ID 列表（用户管理口径＝辅导员身份的带班；班主任带班归班级管理维护） */
 function classIdsOf(userId) {
   return dbx.all(
-    'SELECT classId FROM classCounselors WHERE userId = ? ORDER BY classId',
+    "SELECT classId FROM classCounselors WHERE userId = ? AND roleType = 'counselor' ORDER BY classId",
     [userId],
   ).map((r) => r.classId);
 }
@@ -73,7 +75,7 @@ function classIdsOf(userId) {
 /** 所辖班级名称列表 */
 function classNamesOf(userId) {
   return dbx.all(
-    'SELECT c.name FROM classCounselors cc JOIN classes c ON c.id = cc.classId WHERE cc.userId = ? ORDER BY c.name',
+    "SELECT c.name FROM classCounselors cc JOIN classes c ON c.id = cc.classId WHERE cc.userId = ? AND cc.roleType = 'counselor' ORDER BY c.name",
     [userId],
   ).map((r) => r.name);
 }
@@ -89,11 +91,18 @@ function resolveClassIds(raw) {
   return found.length === ids.length ? ids : null;
 }
 
-/** 整体替换用户的所辖班级 */
-function setClassCounselors(userId, classIds) {
-  dbx.run('DELETE FROM classCounselors WHERE userId = ?', [userId]);
+/**
+ * 整体替换用户的带班（按身份维度）。
+ * 用户管理侧维护的是「辅导员」身份的带班；班主任带班由班级管理维护。
+ * @param roleType 'counselor' | 'headTeacher'
+ */
+function setClassCounselors(userId, classIds, roleType = 'counselor') {
+  dbx.run('DELETE FROM classCounselors WHERE userId = ? AND roleType = ?', [userId, roleType]);
   for (const cid of classIds) {
-    dbx.run('INSERT INTO classCounselors (classId, userId) VALUES (?, ?)', [cid, userId]);
+    dbx.run(
+      'INSERT OR IGNORE INTO classCounselors (classId, userId, roleType, createdAt) VALUES (?, ?, ?, ?)',
+      [cid, userId, roleType, nowStr()],
+    );
   }
 }
 
@@ -357,6 +366,11 @@ router.post('/import', (req, res) => {
     const roleRow = roleByKey.get(roleRaw) ?? roleByName.get(roleRaw);
     if (!roleRaw) reasons.push('角色为必填项');
     else if (!roleRow) reasons.push(`角色「${roleRaw}」不存在，请先在「角色管理」中创建`);
+    else if (TEACHER_ROLE_KEYS.includes(roleRow.key)) {
+      // 教师数据唯一来源：辅导员 / 班主任只能由「班级管理 → 教师名单」导入，
+      // 这里放开会与班级管理双写，导致带班关系与账号口径漂移。
+      reasons.push('辅导员 / 班主任请到「班级管理 → 教师名单」导入（教师数据唯一来源）');
+    }
 
     let classIds = [];
     if (classRaw && roleRow && roleRow.key !== 'admin') {

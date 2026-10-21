@@ -44,7 +44,7 @@ const OPLOG_KEEP = 500;
 /** 参与导出/恢复的业务表（顺序 = 导入时的写入顺序；删除时倒序） */
 const EXPORT_TABLES = [
   'users', 'roles', 'userRoles', 'students', 'studentCounselors',
-  'grades', 'classes', 'classCounselors',
+  'grades', 'classes', 'classCounselors', 'dormitories',
   'conversations', 'mentalHealth', 'mentalInterviews', 'mentalInterviewTemplates', 'mentalLevelLogs',
   'warnings', 'notices', 'approvals', 'todos',
   'templateCategories', 'templateFiles', 'csScheduler',
@@ -239,6 +239,15 @@ function applyBundle(bundle) {
   for (const table of EXPORT_TABLES) {
     const rows = bundle.tables?.[table];
     rowsByTable[table] = Array.isArray(rows) ? rows : [];
+  }
+  /**
+   * 旧数据包兼容（教师唯一来源改造前导出的包）：classCounselors 行没有 roleType 列。
+   * 该列 NOT NULL，直接写入会整包失败，故按「历史关联一律视为辅导员」的迁移语义回填默认值。
+   */
+  for (const row of rowsByTable.classCounselors ?? []) {
+    if (row && (row.roleType === undefined || row.roleType === null || row.roleType === '')) {
+      row.roleType = 'counselor';
+    }
   }
   const colsByTable = {};
   for (const table of EXPORT_TABLES) colsByTable[table] = columnsOf(table);

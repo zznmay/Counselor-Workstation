@@ -17,6 +17,7 @@ const MODULES = [
   { key: 'templates', name: '模板汇总库', group: '资料与工具' },
   { key: 'tools', name: '实用工具', group: '资料与工具' },
   { key: 'classes', name: '班级管理', group: '基础数据' },
+  { key: 'dormitories', name: '寝室管理', group: '基础数据' },
 ];
 
 const MODULE_KEYS = MODULES.map((m) => m.key);
@@ -30,6 +31,7 @@ const HEAD_TEACHER_DEFAULT_KEYS = ['mentalHealth', 'mentalInterview'];
 /** 内置「辅导员」角色的默认权限：与角色化改造前的可见范围保持一致（随新模块扩充） */
 const COUNSELOR_DEFAULT_KEYS = [
   'dashboard', 'students', 'conversations', 'warnings', 'mentalHealth', 'todos', 'templates', 'tools',
+  'dormitories',
 ];
 
 /**

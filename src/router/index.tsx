@@ -8,6 +8,7 @@ import Classes from '@/pages/classes';
 import Grades from '@/pages/classes/grades';
 import Conversations from '@/pages/conversations';
 import Dashboard from '@/pages/dashboard';
+import Dormitories from '@/pages/dormitories';
 import Forbidden from '@/pages/forbidden';
 import Login from '@/pages/login';
 import Mental from '@/pages/mental';
@@ -76,6 +77,7 @@ export const router = createBrowserRouter([
       { path: 'tools/:toolKey', element: <RequireModule moduleKey="tools"><ToolRunner /></RequireModule> },
       { path: 'classes', element: <RequireModule moduleKey="classes"><Classes /></RequireModule> },
       { path: 'classes/grades', element: <RequireModule moduleKey="classes"><Grades /></RequireModule> },
+      { path: 'dormitories', element: <RequireModule moduleKey="dormitories"><Dormitories /></RequireModule> },
       { path: 'admin/users', element: <RequireAdmin><AdminUsers /></RequireAdmin> },
       { path: 'admin/roles', element: <RequireAdmin><AdminRoles /></RequireAdmin> },
       { path: 'admin/logs', element: <RequireAdmin><AdminLogs /></RequireAdmin> },

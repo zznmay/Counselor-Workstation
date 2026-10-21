@@ -35,7 +35,7 @@ async function main() {
   assert.strictEqual(parsed[0].data.name, '张三丰');
   assert.strictEqual(parsed[1].row, 3, '第二行示例的 Excel 行号应为 3');
 
-  /* 2. 校验：必填 / 格式 / 文件内重复 / 与系统重复 */
+  /* 2. 校验：必填 / 格式 / 文件内重复（系统内重复不再判失败，由服务端按 upsert 处理） */
   const mk = (row: number, data: Record<string, string>) => ({ row, data: data as never });
   const rows = [
     mk(2, { studentNo: '2026010301', name: '测试一', gender: '男', grade: '2026级', major: '计算机应用技术', className: '计应2601', phone: '13800001001', status: '在读', enrollDate: '2026-09-01' }),
@@ -51,15 +51,15 @@ async function main() {
     mk(12, { studentNo: '2026010309', name: '坏家长电话', gender: '女', grade: '2026级', major: '电子商务', className: '电商2601', phone: '13800001010', status: '在读', enrollDate: '2026-09-01', fatherName: '张父', fatherPhone: '12345', motherName: '李母', motherPhone: '13800001011' }),
     mk(13, { studentNo: '2026010310', name: '无专业', gender: '男', grade: '2026级', major: '', className: '计应2601', phone: '13800001012', status: '在读', enrollDate: '2026-09-01' }),
   ];
-  const existingNos = ['2024010101', '2024010102'];
-  const { valid, failures } = validateStudentRows(rows, existingNos);
+  const { valid, failures } = validateStudentRows(rows);
 
-  assert.strictEqual(valid.length, 4, `应通过 4 行，实际 ${valid.length}`);
-  assert.strictEqual(valid[2].data.enrollDate, '2026-09-01', '斜杠日期应被规范化');
-  assert.strictEqual(valid[2].data.status, '在读', '学籍状态留空应默认在读');
-  assert.strictEqual(failures.length, 8, `应失败 8 行，实际 ${failures.length}`);
+  assert.strictEqual(valid.length, 5, `应通过 5 行（系统内重复学号 2024010101 不再判失败），实际 ${valid.length}`);
+  assert.ok(valid.some((r) => r.data.studentNo === '2024010101'), '与系统重复的学号应通过预检，交由服务端 upsert');
+  assert.strictEqual(valid[3].data.enrollDate, '2026-09-01', '斜杠日期应被规范化');
+  assert.strictEqual(valid[3].data.status, '在读', '学籍状态留空应默认在读');
+  assert.strictEqual(failures.length, 7, `应失败 7 行，实际 ${failures.length}`);
   assert.ok(failures.some((f) => f.reason.includes('学号与本表第 2 行重复')), '应识别文件内重复学号');
-  assert.ok(failures.some((f) => f.reason.includes('学号已存在于系统中')), '应识别与系统重复学号');
+  assert.ok(!failures.some((f) => f.reason.includes('已存在于系统')), '系统内重复学号不应再判失败（由服务端 upsert 处理）');
   assert.ok(failures.some((f) => f.reason.includes('姓名为必填项')), '应校验姓名必填');
   assert.ok(failures.some((f) => f.reason.includes('性别只能填')), '应校验性别枚举');
   assert.ok(failures.some((f) => f.reason.includes('年级格式')), '应校验年级格式');
@@ -71,8 +71,7 @@ async function main() {
   assert.ok(valid.some((r) => r.data.major === ''), '专业留空时应通过校验');
   assert.ok(!failures.some((f) => f.reason.includes('专业')), '失败原因中不应再出现专业相关校验条目');
 
-  /* 3. 导入：追加写入 + 以数据库为准二次查重，绝不覆盖已有数据 */
-  /* 3. 导入：追加写入 + 以数据库为准二次查重，绝不覆盖已有数据
+  /* 3. 导入（upsert）：学号不存在新增；已存在仅更新有变化字段，完全相同跳过
      —— 该段依赖真实服务端（POST /students/import），默认跳过，避免在纯逻辑验证时误报 */
   if (process.env.VERIFY_IMPORT_API !== '1') {
     console.log('⏭  跳过「服务端导入」验证（设置 VERIFY_IMPORT_API=1 且服务已启动时执行）');
@@ -80,19 +79,24 @@ async function main() {
     const { getExistingStudentNos, importStudents } = await import('../src/api/student');
     const nosBefore = await getExistingStudentNos();
 
-    const importRows = [
-      ...valid,
-      mk(99, { studentNo: '2024010101', name: '导入时撞库', gender: '男', grade: '2024级', major: '计算机应用技术', className: '计应2401', phone: '13800001999', status: '在读', enrollDate: '2024-09-12' }),
-    ];
-    const result = await importStudents(importRows);
-    assert.strictEqual(result.successCount, 4, `导入应成功 4 条，实际 ${result.successCount}`);
-    assert.strictEqual(result.failures.length, 1, '导入时撞库号应被驳回');
+    const result = await importStudents(valid);
+    assert.strictEqual(
+      result.insertedCount + result.updatedCount + result.skippedCount,
+      valid.length,
+      '新增 + 更新 + 跳过应等于提交行数',
+    );
     const nosAfter = await getExistingStudentNos();
-    assert.strictEqual(nosAfter.length, nosBefore.length + 4, '学号总数应 +4');
     assert.ok(!nosBefore.includes('2026010301') && nosAfter.includes('2026010301'), '新学号已追加');
     assert.ok(nosAfter.includes('2026010305'), '专业为任意取值的行同样应导入成功');
     assert.ok(nosAfter.includes('2026010310'), '专业留空的行同样应导入成功');
-    console.log(`   - 导入：成功 ${result.successCount} 条，撞库驳回 ${result.failures.length} 条`);
+
+    /* 幂等验证：原样重复导入同一批 → 不新增、不更新，全部跳过 */
+    const again = await importStudents(valid);
+    assert.strictEqual(again.insertedCount, 0, '重复导入不应新增');
+    assert.strictEqual(again.updatedCount, 0, '重复导入不应更新');
+    assert.strictEqual(again.skippedCount, valid.length, `重复导入应全部跳过（${valid.length} 行）`);
+    console.log(`   - 导入：新增 ${result.insertedCount}、更新 ${result.updatedCount}、跳过 ${result.skippedCount} 条`);
+    console.log(`   - 幂等：重复导入全部跳过（${again.skippedCount} 条）`);
   }
 
   /* 4. 失败明细导出（写临时目录验证不抛错） */

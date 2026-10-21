@@ -12,18 +12,20 @@ import {
   updateClass,
   updateGrade,
 } from '@/api/classes';
+import { getTeachers, updateTeacher } from '@/api/teachers';
 import FilterSheet from '@/components/mobile/FilterSheet';
 import { MIcon } from '@/components/mobile/icons';
-import type { Grade, GradeOption, SchoolClass } from '@/types';
+import type { Grade, GradeOption, SchoolClass, Teacher } from '@/types';
 
-type Tab = 'classes' | 'grades';
+type Tab = 'classes' | 'grades' | 'teachers';
 
 const PAGE_SIZE = 20;
 
 /**
- * 移动端班级管理：单页承载「班级 / 年级」两个视图（m-seg 分段切换）。
+ * 移动端班级管理：单页承载「班级 / 年级 / 教师」三个视图（m-seg 分段切换）。
  * - 班级视图：搜索常驻 + 年级筛选抽屉 + 卡片列表 + 新增/编辑/删除
  * - 年级视图：卡片列表 + 新增/编辑/删除（低频配置、数据量小，不分页）
+ * - 教师视图：辅导员/班主任名单（教师数据唯一来源），搜索 + 身份筛选 + 编辑/离职
  * 复用 mobile.css 现有令牌（m-seg / m-card / m-btn / FilterSheet），不新增样式。
  */
 export default function ClassesMobile() {
@@ -45,6 +47,16 @@ export default function ClassesMobile() {
   /* ---------- 年级列表 ---------- */
   const [grades, setGrades] = useState<Grade[]>([]);
 
+  /* ---------- 教师名单 ---------- */
+  const [teacherList, setTeacherList] = useState<Teacher[]>([]);
+  const [teacherLoading, setTeacherLoading] = useState(false);
+  const [teacherKeyword, setTeacherKeyword] = useState('');
+  const [teacherRole, setTeacherRole] = useState<'counselor' | 'headTeacher' | undefined>(undefined);
+  const [teacherFormOpen, setTeacherFormOpen] = useState(false);
+  const [editingTeacher, setEditingTeacher] = useState<Teacher | null>(null);
+  const [teacherForm] = Form.useForm<{ name: string; mobile: string; status: 'active' | 'leave' }>();
+  const [teacherSubmitting, setTeacherSubmitting] = useState(false);
+
   /* ---------- 表单状态 ---------- */
   const [classFormOpen, setClassFormOpen] = useState(false);
   const [editingClass, setEditingClass] = useState<SchoolClass | null>(null);
@@ -53,6 +65,15 @@ export default function ClassesMobile() {
   const [submitting, setSubmitting] = useState(false);
   const [classForm] = Form.useForm<{ gradeId: number; name: string }>();
   const [gradeForm] = Form.useForm<{ name: string }>();
+
+  const loadTeachers = useCallback(async () => {
+    setTeacherLoading(true);
+    try {
+      setTeacherList(await getTeachers({ roleType: teacherRole, keyword: teacherKeyword || undefined }));
+    } finally {
+      setTeacherLoading(false);
+    }
+  }, [teacherRole, teacherKeyword]);
 
   const loadClasses = useCallback(
     async (targetPage: number, kw: string, gid?: number) => {
@@ -89,12 +110,13 @@ export default function ClassesMobile() {
       firstRun.current = false;
       void loadClasses(1, keyword, gradeId);
       void loadGrades();
+      void loadTeachers();
       getGradeOptions().then(setGradeOptions).catch(() => undefined);
       return;
     }
     const timer = setTimeout(() => void loadClasses(1, keyword, gradeId), 300);
     return () => clearTimeout(timer);
-  }, [keyword, gradeId, loadClasses, loadGrades]);
+  }, [keyword, gradeId, loadClasses, loadGrades, loadTeachers]);
 
   const hasMore = classList.length < classTotal;
   const sentinel = useRef<HTMLDivElement | null>(null);
@@ -205,13 +227,56 @@ export default function ClassesMobile() {
     }
   };
 
+  /* ---------- 教师编辑 / 离职 ---------- */
+  const openTeacherForm = (record: Teacher) => {
+    setEditingTeacher(record);
+    teacherForm.setFieldsValue({
+      name: record.name,
+      mobile: record.mobile || '',
+      status: record.disabled ? 'leave' : 'active',
+    });
+    setTeacherFormOpen(true);
+  };
+
+  const handleTeacherSubmit = async () => {
+    if (!editingTeacher) return;
+    let values: { name: string; mobile: string; status: 'active' | 'leave' };
+    try {
+      values = await teacherForm.validateFields();
+    } catch {
+      return;
+    }
+    setTeacherSubmitting(true);
+    try {
+      await updateTeacher(editingTeacher.id, values);
+      message.success('教师信息已更新');
+      setTeacherFormOpen(false);
+      await loadTeachers();
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '保存失败');
+    } finally {
+      setTeacherSubmitting(false);
+    }
+  };
+
+  const handleTeacherToggle = async (record: Teacher) => {
+    try {
+      await updateTeacher(record.id, { status: record.disabled ? 'active' : 'leave' });
+      message.success(record.disabled ? '已复职' : '已办理离职');
+      await loadTeachers();
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '操作失败');
+    }
+  };
+
   return (
     <>
-      {/* 班级 / 年级 分段切换 */}
+      {/* 班级 / 年级 / 教师 分段切换 */}
       <div className="m-seg" style={{ marginBottom: 10 }}>
         <button
           type="button"
           className={`m-seg-btn${tab === 'classes' ? ' on' : ''}`}
+          style={{ flex: '0 0 auto' }}
           onClick={() => setTab('classes')}
         >
           班级
@@ -219,11 +284,119 @@ export default function ClassesMobile() {
         <button
           type="button"
           className={`m-seg-btn${tab === 'grades' ? ' on' : ''}`}
+          style={{ flex: '0 0 auto' }}
           onClick={() => setTab('grades')}
         >
           年级
         </button>
+        <button
+          type="button"
+          className={`m-seg-btn${tab === 'teachers' ? ' on' : ''}`}
+          style={{ flex: '0 0 auto' }}
+          onClick={() => setTab('teachers')}
+        >
+          教师
+        </button>
       </div>
+
+      {tab === 'teachers' && (
+        <>
+          <div className="m-search-row">
+            <div className="m-search-field">
+              <MIcon name="search" size={16} />
+              <input
+                className="m-inp"
+                type="search"
+                value={teacherKeyword}
+                placeholder="搜索工号 / 姓名 / 手机号"
+                aria-label="搜索教师"
+                onChange={(e) => setTeacherKeyword(e.target.value)}
+              />
+            </div>
+            <button
+              type="button"
+              className="m-btn m-btn-ghost"
+              onClick={() => {
+                setTeacherRole((prev) => (prev === 'counselor' ? undefined : 'counselor'));
+              }}
+            >
+              <MIcon name="funnel" size={16} />
+              {teacherRole === 'counselor' ? '辅导员' : teacherRole === 'headTeacher' ? '班主任' : '身份'}
+            </button>
+          </div>
+
+          <div className="m-t4" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            共 {teacherList.length} 名教师
+            {teacherRole ? `（${teacherRole === 'counselor' ? '辅导员' : '班主任'}）` : ''}
+          </div>
+
+          {teacherList.length === 0 && !teacherLoading ? (
+            <div className="m-card empty">
+              <MIcon name="users" size={22} />
+              <div className="m-t3" style={{ marginTop: 6 }}>暂无教师数据</div>
+              <div className="m-t4" style={{ marginTop: 4 }}>
+                请在桌面端「班级管理 → 教师名单」批量导入（工号唯一、upsert）
+              </div>
+            </div>
+          ) : (
+            teacherList.map((t) => (
+              <div className="m-card" key={t.id}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span className="m-ava">{t.name.slice(0, 1)}</span>
+                  <div className="m-row-main" style={{ minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <span className="m-t1">{t.name}</span>
+                      {t.roleLabels.map((label) => (
+                        <span className="m-tag neutral" key={label}>{label}</span>
+                      ))}
+                      {t.disabled && <span className="m-tag danger">离职</span>}
+                    </div>
+                    <div className="m-t3" style={{ marginTop: 3 }}>
+                      {t.employeeNo}
+                      {t.mobile ? ` · ${t.mobile}` : ''}
+                    </div>
+                  </div>
+                </div>
+                <div className="m-t4" style={{ marginTop: 6 }}>
+                  {t.classNames.length ? t.classNames.join('、') : '暂无带班'}
+                </div>
+                <div
+                  style={{
+                    display: 'flex',
+                    gap: 4,
+                    marginTop: 6,
+                    borderTop: '1px solid var(--m-border)',
+                    paddingTop: 4,
+                  }}
+                >
+                  <a
+                    className="m-act"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openTeacherForm(t);
+                    }}
+                    aria-label={`编辑教师 ${t.name}`}
+                  >
+                    <MIcon name="edit" size={18} />
+                    编辑
+                  </a>
+                  <a
+                    className="m-act danger"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void handleTeacherToggle(t);
+                    }}
+                    aria-label={`${t.disabled ? '复职' : '离职'} ${t.name}`}
+                  >
+                    <MIcon name="user" size={18} />
+                    {t.disabled ? '复职' : '离职'}
+                  </a>
+                </div>
+              </div>
+            ))
+          )}
+        </>
+      )}
 
       {tab === 'classes' ? (
         <>
@@ -284,7 +457,10 @@ export default function ClassesMobile() {
                     </div>
                     <div className="m-t3" style={{ marginTop: 3 }}>
                       {c.studentCount ?? 0} 名学生
-                      {c.counselorNames ? ` · ${c.counselorNames}` : ' · 未分配辅导员'}
+                      {c.counselorNames ? ` · 辅导员 ${c.counselorNames}` : ' · 未分配辅导员'}
+                    </div>
+                    <div className="m-t4" style={{ marginTop: 2 }}>
+                      {c.headTeacherNames ? `班主任 ${c.headTeacherNames}` : '未分配班主任'}
                     </div>
                   </div>
                 </div>
@@ -488,8 +664,7 @@ export default function ClassesMobile() {
         onCancel={() => setClassFormOpen(false)}
         okText="保存"
         cancelText="取消"
-      >
-        <Form form={classForm} layout="vertical">
+      >        <Form form={classForm} layout="vertical">
           <Form.Item
             name="gradeId"
             label="所属年级"
@@ -529,6 +704,38 @@ export default function ClassesMobile() {
           >
             <Input placeholder="如 2027级" maxLength={20} />
           </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* 编辑教师（单条维护：姓名 / 手机号 / 在职状态；带班走批量导入） */}
+      <Modal
+        title={editingTeacher ? `编辑教师 · ${editingTeacher.name}` : '编辑教师'}
+        open={teacherFormOpen}
+        width="calc(100vw - 24px)"
+        confirmLoading={teacherSubmitting}
+        onOk={handleTeacherSubmit}
+        onCancel={() => setTeacherFormOpen(false)}
+        okText="保存"
+        cancelText="取消"
+      >
+        <Form form={teacherForm} layout="vertical">
+          <Form.Item name="name" label="姓名" rules={[{ required: true, message: '请输入姓名' }]}>
+            <Input maxLength={20} />
+          </Form.Item>
+          <Form.Item name="mobile" label="手机号">
+            <Input placeholder="11 位手机号" maxLength={11} />
+          </Form.Item>
+          <Form.Item name="status" label="在职状态" rules={[{ required: true }]}>
+            <Select
+              options={[
+                { value: 'active', label: '在职' },
+                { value: 'leave', label: '离职（停用账号并回收带班与角色）' },
+              ]}
+            />
+          </Form.Item>
+          <div className="m-t4">
+            工号不可修改；带班关系请在桌面端「教师名单」批量导入中维护。
+          </div>
         </Form>
       </Modal>
     </>

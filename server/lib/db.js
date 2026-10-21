@@ -25,7 +25,11 @@ const SCHEMA_STATEMENTS = [
     passwordHash TEXT NOT NULL,
     mustChangePassword INTEGER NOT NULL DEFAULT 0,
     disabled INTEGER NOT NULL DEFAULT 0,
-    createdAt TEXT NOT NULL
+    createdAt TEXT NOT NULL,
+    /* 教师唯一来源改造：工号即 username（不再另设 employeeNo）；
+       mobile 为导入模板「手机号」落点，teacherSource 标记档案来源通道（import/manual） */
+    mobile TEXT,
+    teacherSource TEXT
   )`,
   /* 角色：users.role 存 roles.key；permissions 为模块 key 的 JSON 数组；
      ownerModules 为「主负责辅导员」模块 key 的 JSON 数组（该模块最高权限：全院数据 + 全部操作） */
@@ -85,10 +89,29 @@ const SCHEMA_STATEMENTS = [
     createdAt TEXT NOT NULL,
     UNIQUE (gradeId, name)
   )`,
+  /* 班级-人员-身份 三维关联：roleType = counselor（辅导员）| headTeacher（班主任）。
+     教师数据的唯一来源（班级管理 → 教师名单）；历史库由 lib/teacherSourceMigrate.js 升级。 */
   `CREATE TABLE IF NOT EXISTS classCounselors (
     classId INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
     userId INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    PRIMARY KEY (classId, userId)
+    roleType TEXT NOT NULL DEFAULT 'counselor' CHECK (roleType IN ('counselor', 'headTeacher')),
+    createdAt TEXT,
+    PRIMARY KEY (classId, userId, roleType)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_cc_user ON classCounselors(userId, roleType)`,
+  `CREATE INDEX IF NOT EXISTS idx_cc_role ON classCounselors(roleType)`,
+  /* 教师批量导入批次：预览态暂存待确认数据，确认后落结果；clientRequestId 唯一保证重复提交幂等 */
+  `CREATE TABLE IF NOT EXISTS teacherImportBatches (
+    id TEXT PRIMARY KEY,
+    clientRequestId TEXT UNIQUE,
+    operator TEXT,
+    traceId TEXT,
+    status TEXT NOT NULL,
+    rowCount INTEGER NOT NULL DEFAULT 0,
+    payload TEXT NOT NULL,
+    result TEXT,
+    createdAt TEXT NOT NULL,
+    completedAt TEXT
   )`,
   `CREATE TABLE IF NOT EXISTS conversations (
     id TEXT PRIMARY KEY,
@@ -180,6 +203,19 @@ const SCHEMA_STATEMENTS = [
     roleKey TEXT NOT NULL,
     PRIMARY KEY (userId, roleKey)
   )`,
+  /* 寝室管理：学生宿舍分配（学号唯一，一名学生一条分配记录）。
+     宿舍楼与房间号分列存储，「宿舍楼+房间号」为学生名册的唯一展示口径；
+     学生删除时由 routes/students.js 同步清理，避免留下孤儿分配。 */
+  `CREATE TABLE IF NOT EXISTS dormitories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    studentNo TEXT NOT NULL UNIQUE,
+    building TEXT NOT NULL,
+    room TEXT NOT NULL,
+    updatedBy TEXT,
+    updatedAt TEXT NOT NULL,
+    createdAt TEXT NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_dorm_building ON dormitories(building)`,
   `CREATE TABLE IF NOT EXISTS warnings (
     id TEXT PRIMARY KEY,
     studentId TEXT NOT NULL,
@@ -304,6 +340,20 @@ for (const sql of SCHEMA_STATEMENTS) {
   db.prepare(sql).run();
 }
 
+/**
+ * 老库升级：教师唯一来源改造（幂等）——users 补 mobile/teacherSource，
+ * classCounselors 升级为 (classId, userId, roleType) 三维关联，历史行一律视为辅导员。
+ * 失败时向上抛出，启动即中止（宁可不可启动，也不在半迁移状态下写数据）。
+ */
+const teacherSourceMigrate = require('./teacherSourceMigrate');
+const teacherMigration = teacherSourceMigrate.migrate(db);
+if (teacherMigration.usersColumns.length > 0 || teacherMigration.classCounselorsRebuilt) {
+  console.log(
+    `[db] 教师唯一来源改造：users 补列 ${teacherMigration.usersColumns.join('、') || '（无）'}，` +
+    `classCounselors ${teacherMigration.classCounselorsRebuilt ? '已升级为三维关联（历史行＝辅导员）' : '已是三维关联'}。`,
+  );
+}
+
 /** 老库升级：students.classId 列不存在时补加（新库建表语句已含该列，此处幂等跳过） */
 const studentCols = db.prepare('PRAGMA table_info(students)').all().map((c) => c.name);
 if (!studentCols.includes('classId')) {
@@ -393,7 +443,7 @@ function ensureBuiltinRoles() {
     if (untouched) {
       db.prepare("UPDATE roles SET permissions = ?, updatedAt = ? WHERE key = 'counselor'")
         .run(JSON.stringify(COUNSELOR_DEFAULT_KEYS), now());
-      console.log('[db] 已为内置「辅导员」角色补配新增模块（心理健康）权限。');
+      console.log(`[db] 已为内置「辅导员」角色补配新增模块（${COUNSELOR_DEFAULT_KEYS.filter((k) => !COUNSELOR_LEGACY_KEYS.includes(k)).join('、')}）权限。`);
     }
   }
 }
@@ -432,6 +482,37 @@ function ensureStudentClassBackfill() {
     created += 1;
   }
   console.log(`[db] 学生班级归属回填完成：处理 ${created} 组（年级, 班级）组合。`);
+}
+
+/**
+ * 寝室管理数据回填（幂等）：寝室管理上线前 students.dorm 是自由文本（如「荷园B512」），
+ * 上线后以「宿舍楼 + 房间号」两列为准。此处为「有宿舍文本、但无寝室记录」的学生补一条分配：
+ * 首个数字之前的部分为宿舍楼，其后为房间号（荷园B512 → 荷园B / 512；无数字时整串归入宿舍楼）。
+ * 已有寝室记录的行不覆盖 —— 寝室管理是宿舍数据的唯一来源。
+ */
+function ensureDormitoryBackfill() {
+  const now = () => new Date().toISOString().slice(0, 16).replace('T', ' ');
+  const rows = db.prepare(
+    `SELECT s.studentNo, TRIM(s.dorm) AS dorm FROM students s
+     WHERE TRIM(COALESCE(s.dorm, '')) <> ''
+       AND TRIM(COALESCE(s.studentNo, '')) <> ''
+       AND NOT EXISTS (SELECT 1 FROM dormitories d WHERE d.studentNo = s.studentNo)`,
+  ).all();
+  if (rows.length === 0) return;
+
+  const ins = db.prepare(
+    `INSERT OR IGNORE INTO dormitories (studentNo, building, room, updatedBy, updatedAt, createdAt)
+     VALUES (?, ?, ?, '系统', ?, ?)`,
+  );
+  let created = 0;
+  for (const r of rows) {
+    const m = String(r.dorm).match(/^(\D*)(\d.*)$/);
+    const building = (m ? m[1] : String(r.dorm)).trim().slice(0, 20);
+    const room = (m ? m[2] : '').trim().slice(0, 20);
+    ins.run(r.studentNo, building, room, now(), now());
+    created += 1;
+  }
+  console.log(`[db] 寝室管理数据回填完成：${created} 名学生（由历史宿舍文本拆分）。`);
 }
 
 /**
@@ -588,6 +669,7 @@ ensureBuiltinRoles();
 seed();
 ensureBuiltinTemplateLibrary();
 ensureStudentClassBackfill();
+ensureDormitoryBackfill();
 ensureUserRoleBackfill();
 ensureMentalLevelBaselineLogs();
 ensureDefaultInterviewTemplate();

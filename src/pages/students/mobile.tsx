@@ -8,6 +8,7 @@ import FilterSheet from '@/components/mobile/FilterSheet';
 import { MIcon } from '@/components/mobile/icons';
 import { canManageStudentFront, canViewAllStudents, getStoredUser, subscribeSession } from '@/lib/auth';
 import { MAJORS, STUDENT_STATUSES } from '@/constants';
+import { dormOfStudent } from '@/utils/dormitory';
 import type { Student, StudentQuery, StudentStatus, WarningLevel } from '@/types';
 
 const PAGE_SIZE = 10;
@@ -224,6 +225,8 @@ export default function StudentsMobile() {
               <div className="m-t4" style={{ marginTop: 8, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                 <span className="m-nowrap">学号 {s.studentNo}</span>
                 <span className="m-nowrap">{s.grade}</span>
+                {/* 宿舍直接读「寝室管理」数据，按 宿舍楼+房间号 合并显示 */}
+                {dormOfStudent(s) && <span className="m-nowrap">宿舍 {dormOfStudent(s)}</span>}
                 <span className="m-nowrap">电话 {maskPhone(s.phone)}</span>
               </div>
 

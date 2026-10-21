@@ -20,6 +20,10 @@ import {
  * 校验规则与 api.importStudents 共用，浏览器端预览与导入端二次校验保持一致。
  *
  * 单元格清洗与日期/电话规范化统一由 importNormalize.ts 提供（解析与校验共用同一套逻辑）。
+ *
+ * 2026-10-21 教师唯一来源改造：模板已移除「班主任」「辅导员」两列 ——
+ * 这两项数据改由「班级管理 → 教师名单」维护，学生导入时按班级自动派生回填
+ * （见 server/lib/teacherSync.js），不再允许在 Excel 中填写。
  */
 
 /** 模板列，顺序与 Student 字段对应 */
@@ -38,8 +42,6 @@ export const TEMPLATE_HEADERS = [
   '班内职务',
   '备注',
   '入学时间',
-  '班主任',
-  '辅导员',
   '父亲姓名',
   '父亲电话',
   '母亲姓名',
@@ -47,12 +49,12 @@ export const TEMPLATE_HEADERS = [
 ] as const;
 
 const FIELD_GUIDE: [string, string, string][] = [
-  ['学号', '必填', '全校唯一，不可与系统内已有学生或本表其他行重复，如 2026010101'],
+  ['学号', '必填', '全校唯一，如 2026010101；已存在于系统时按更新处理（仅更新有变化的字段，完全相同自动跳过），不可与本表其他行重复'],
   ['姓名', '必填', '学生真实姓名'],
   ['性别', '必填', '只能填：男 或 女'],
   ['年级', '必填', '格式为「YYYY级」，如 2026级'],
   ['专业', '选填', '如 计算机应用技术；不做取值校验，可留空或填写任意专业名称'],
-  ['班级', '必填', '如 计应2601'],
+  ['班级', '必填', '如 计应2601；班主任与辅导员由该班的教师名单自动派生，无需填写'],
   ['手机号', '必填', '11位手机号（以1开头）或带区号的座机号；允许空格、连字符等分隔写法，如 183 1485 0022、183-1485-0022、0571-88886666'],
   ['宿舍', '选填', '如 学生公寓5-602'],
   ['政治面貌', '选填', '如 共青团员、中共预备党员、群众'],
@@ -61,8 +63,6 @@ const FIELD_GUIDE: [string, string, string][] = [
   ['班内职务', '选填', '如 班长、学习委员'],
   ['备注', '选填', '家庭情况、重点关注事项等'],
   ['入学时间', '必填', `多种写法均可，导入时统一转换为 YYYY-MM-DD：${SUPPORTED_DATE_FORMATS.join('；')}；也可直接使用 Excel 日期单元格`],
-  ['班主任', '选填', '学生所在班级的班主任姓名'],
-  ['辅导员', '选填', '留空默认为当前辅导员（王老师）'],
   ['父亲姓名', '选填', '父亲姓名'],
   ['父亲电话', '选填', '11位手机号（以1开头）或带区号的座机号，允许空格/连字符分隔'],
   ['母亲姓名', '选填', '母亲姓名'],
@@ -85,8 +85,6 @@ const EXAMPLE_ROWS: (string | undefined)[][] = [
     '学习委员',
     '示例行：正式导入前请删除本表所有示例行',
     '2026-09-01',
-    '罗海燕',
-    '王老师',
     '张大山',
     '13800001001',
     '李秀芳',
@@ -107,7 +105,6 @@ const EXAMPLE_ROWS: (string | undefined)[][] = [
     '',
     '示例行：选填列可留空，学籍状态留空默认为在读',
     '2026-09-01',
-    '唐志强',
     '',
     '',
     '',
@@ -149,8 +146,8 @@ export function buildStudentTemplateWorkbook(): XLSX.WorkBook {
     ['列名', '是否必填', '填写说明'],
     ...FIELD_GUIDE,
     ['说明', '——', '请勿修改第一行的列标题，也不要增删列；仅「学生名单」工作表会被导入'],
-    ['说明', '——', '导入为追加方式：只新增通过校验的行，不会覆盖或删除系统内已有学生'],
-    ['说明', '——', '学号与系统内已有学生重复、或本表内重复的行将被判为失败；失败明细可导出修正后重新上传'],
+    ['说明', '——', '导入为 upsert 方式：学号不存在则新增；已存在则按更新处理，仅更新有变化的字段，完全相同自动跳过'],
+    ['说明', '——', '本表内学号重复的行将被判为失败；失败明细可导出修正后重新上传'],
   ]);
   guideWs['!cols'] = [{ wch: 11 }, { wch: 9 }, { wch: 90 }];
   XLSX.utils.book_append_sheet(wb, guideWs, '填写说明');
@@ -218,8 +215,7 @@ export async function parseStudentExcel(file: File): Promise<ParsedStudentRow[]>
         // 原样保留（仅清洗空白），日期与号码的规范化统一放到 validateStudentRows，
         // 这样校验失败时仍能回显用户实际填写的原始值
         enrollDate: get('入学时间'),
-        headTeacher: get('班主任') || undefined,
-        counselor: get('辅导员') || undefined,
+        // 「班主任 / 辅导员」已从模板移除：由班级教师名单按 classId 派生，不再读取 Excel
         fatherName: get('父亲姓名') || undefined,
         fatherPhone: get('父亲电话') || undefined,
         motherName: get('母亲姓名') || undefined,
@@ -232,8 +228,9 @@ export async function parseStudentExcel(file: File): Promise<ParsedStudentRow[]>
 
 /**
  * 逐行校验学生数据：
- * 必填项、格式（性别/年级/手机号/日期/学籍状态）、学号在系统与本表内的重复、
+ * 必填项、格式（性别/年级/手机号/日期/学籍状态）、学号在本表内的重复、
  * 班级名与班级管理字典的匹配（classKeys 缺省时跳过该项，由服务端兜底）。
+ * 学号已存在于系统不再判失败：由服务端按 upsert 处理（有变化更新、完全相同跳过）。
  * 「专业」为自由文本列，不参与校验（列可缺省、可留空，也不限制取值范围）。
  *
  * 手机号/家长电话：先清洗空格（含全角空格、制表符）、连字符、括号等分隔字符，再按
@@ -246,10 +243,8 @@ export async function parseStudentExcel(file: File): Promise<ParsedStudentRow[]>
  */
 export function validateStudentRows(
   rows: ParsedStudentRow[],
-  existingNos: Iterable<string>,
   classKeys?: ReadonlySet<string>,
 ): { valid: ParsedStudentRow[]; failures: StudentImportFailure[] } {
-  const existingSet = new Set(existingNos);
   const fileSeenRow = new Map<string, number>(); // 学号 → 本表首次出现的行号
   const valid: ParsedStudentRow[] = [];
   const failures: StudentImportFailure[] = [];
@@ -265,7 +260,6 @@ export function validateStudentRows(
     const data = {
       ...rawData,
       status: (rawData.status || '在读') as Student['status'],
-      counselor: rawData.counselor || '王老师',
       // 规范化成功则入库标准化值；失败则原样保留，便于失败明细导出后对照修正
       phone: phone.ok ? formatPhoneNumber(phone) : rawData.phone,
       fatherPhone: fatherPhone.ok ? formatPhoneNumber(fatherPhone) : rawData.fatherPhone,
@@ -277,9 +271,9 @@ export function validateStudentRows(
 
     if (!studentNo) {
       reasons.push('学号为必填项');
-    } else if (existingSet.has(studentNo)) {
-      reasons.push('学号已存在于系统中，不可重复导入');
     } else if (fileSeenRow.has(studentNo)) {
+      // 仅本表内重复判失败（两行数据可能不同，避免互相覆盖）；
+      // 与系统已有学生重复交由服务端 upsert 处理（有变化更新、完全相同跳过）
       reasons.push(`学号与本表第 ${fileSeenRow.get(studentNo)} 行重复`);
     }
     if (studentNo) fileSeenRow.set(studentNo, row);
@@ -347,8 +341,6 @@ export function exportImportFailures(failures: StudentImportFailure[]): void {
       d.position ?? '',
       d.remark ?? '',
       d.enrollDate ?? '',
-      d.headTeacher ?? '',
-      d.counselor ?? '',
       d.fatherName ?? '',
       d.fatherPhone ?? '',
       d.motherName ?? '',

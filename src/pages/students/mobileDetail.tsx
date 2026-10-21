@@ -6,6 +6,7 @@ import MaskedValue, { maskValue } from '@/components/mobile/MaskedValue';
 import { MIcon } from '@/components/mobile/icons';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { canManageStudentFront, getStoredUser, subscribeSession } from '@/lib/auth';
+import { dormOfStudent } from '@/utils/dormitory';
 import type { Roommate, Student, StudentStatus } from '@/types';
 
 /** 学籍状态 → 语义标签（颜色 + 文字，不引入裸 hex） */
@@ -173,7 +174,7 @@ export default function StudentDetailMobile() {
             在校信息
           </span>
         </div>
-        <KV k="宿舍" v={student.dorm} nowrap />
+        <KV k="宿舍" v={dormOfStudent(student)} nowrap />
         <KV k="班主任" v={student.headTeacher} nowrap />
         <KV k="辅导员" v={student.counselor} nowrap />
         <KV k="班内职务" v={student.position} nowrap />
@@ -194,7 +195,7 @@ export default function StudentDetailMobile() {
             <MIcon name="alertCircle" size={16} style={{ color: 'var(--danger-fg)' }} />
             <span className="m-t4">同宿舍学生信息加载失败，稍后重试</span>
           </div>
-        ) : !student.dorm ? (
+        ) : !dormOfStudent(student) ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 0' }}>
             <MIcon name="users" size={16} style={{ color: 'var(--m-text-2)' }} />
             <span className="m-t4">该学生未登记宿舍，暂无同宿舍学生</span>

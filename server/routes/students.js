@@ -7,9 +7,21 @@ const express = require('express');
 
 const dbx = require('../lib/db');
 const auth = require('../lib/auth');
-const { canManageStudent, isAdmin, rosterScope } = require('../lib/scope');
+const { canManageStudent, rosterScope } = require('../lib/scope');
+const { normalizeTarget, diffStudentFields } = require('../lib/studentDiff');
+const { mirrorStudentDorm, removeDormOfStudent, renameDormStudentNo, syncDormFromText } = require('../lib/dormitory');
+const { derivedTeachersOfClass } = require('../lib/teacherSync');
 const { requirePermission } = require('../lib/permissions');
 const { logAccess, nowStr } = require('../lib/audit');
+
+/**
+ * 学生查询统一 LEFT JOIN 寝室管理：dormBuilding / dormRoom 为名册展示「宿舍」的唯一来源
+ * （展示口径 = 宿舍楼 + 房间号，见 lib/dormitory.js joinDorm）。
+ * students.dorm 仅作镜像保留（同宿舍学生、导出等复用），不再作为名册展示依据。
+ */
+const STUDENT_SELECT = `
+  SELECT s.*, d.building AS dormBuilding, d.room AS dormRoom
+  FROM students s LEFT JOIN dormitories d ON d.studentNo = s.studentNo`;
 
 const router = express.Router();
 router.use(auth.authMiddleware);
@@ -105,7 +117,7 @@ router.get('/', (req, res) => {
     params,
   ).c;
   const rows = dbx.all(
-    `SELECT s.* FROM students s WHERE ${finalWhere} ORDER BY s.studentNo DESC LIMIT ? OFFSET ?`,
+    `${STUDENT_SELECT} WHERE ${finalWhere} ORDER BY s.studentNo DESC LIMIT ? OFFSET ?`,
     [...params, pageSize, (page - 1) * pageSize],
   );
   res.json({ list: rows, total, page, pageSize });
@@ -175,7 +187,7 @@ router.get('/briefs', auth.adminOnly, (req, res) => {
 });
 
 router.get('/:id', (req, res) => {
-  const row = dbx.get('SELECT s.* FROM students s WHERE s.id = ?', [req.params.id]);
+  const row = dbx.get(`${STUDENT_SELECT} WHERE s.id = ?`, [req.params.id]);
   if (!row) return res.status(404).json({ message: '学生不存在' });
   // 与列表同口径：收口用户仅可查看其所带班级的学生（防绕过列表直达详情）
   const scope = rosterScope(req.user);
@@ -240,6 +252,9 @@ router.post('/', (req, res) => {
   const cls = resolveStudentClassId(body);
   if (cls.error) return res.status(400).json({ message: cls.error });
 
+  // 班主任 / 辅导员一律由班级教师名单派生（班级管理为唯一来源，不接受入参）
+  const derived = derivedTeachersOfClass(cls.value);
+
   dbx.run(`INSERT INTO students
     (id, studentNo, name, gender, grade, major, className, classId, phone, dorm, politicalStatus, origin, status,
      headTeacher, counselor, fatherName, fatherPhone, motherName, motherPhone, position, remark, enrollDate,
@@ -247,14 +262,16 @@ router.post('/', (req, res) => {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [id, studentNo, name, body.gender ?? '男', body.grade ?? '', body.major ?? '', body.className ?? '',
       cls.value, body.phone ?? '', body.dorm ?? null, body.politicalStatus ?? null, body.origin ?? null,
-      body.status ?? '在读', body.headTeacher ?? null, body.counselor ?? null, body.fatherName ?? null,
+      body.status ?? '在读', derived.headTeacher, derived.counselor, body.fatherName ?? null,
       body.fatherPhone ?? null, body.motherName ?? null, body.motherPhone ?? null, body.position ?? null,
       body.remark ?? null, body.enrollDate ?? '', ownerId, req.user.id, nowStr(), nowStr()],
   );
   if (Array.isArray(body.coManagerIds)) setCoManagers(id, body.coManagerIds);
+  // 新增时填写的宿舍文本同步进寝室管理（寝室模块为宿舍数据唯一来源，学生表只留镜像）
+  if (String(body.dorm ?? '').trim()) syncDormFromText(studentNo, body.dorm);
 
   logAccess(req, `新增学生 ${name}（${studentNo}）`);
-  const row = dbx.get('SELECT s.* FROM students s WHERE s.id = ?', [id]);
+  const row = dbx.get(`${STUDENT_SELECT} WHERE s.id = ?`, [id]);
   res.json({ ...row, coManagerIds: coManagersOf(id).map((u) => u.id) });
 });
 
@@ -277,12 +294,20 @@ router.put('/:id', (req, res) => {
   const sets = [];
   const params = [];
   for (const field of FIELDS) {
+    // 班主任 / 辅导员不接受入参：统一由班级教师名单派生，避免其他模块另写一份
+    if (field === 'headTeacher' || field === 'counselor') continue;
     if (body[field] !== undefined) { sets.push(`${field} = ?`); params.push(body[field]); }
   }
   const cls = resolveStudentClassId(body, target);
   if (cls.error) return res.status(400).json({ message: cls.error });
   sets.push('classId = ?');
   params.push(cls.value);
+  // 班级归属确定后重算派生责任人（换班 / 教师调整都能即时生效）
+  const derived = derivedTeachersOfClass(cls.value);
+  sets.push('headTeacher = ?');
+  params.push(derived.headTeacher);
+  sets.push('counselor = ?');
+  params.push(derived.counselor);
   if (req.user.role === 'admin' && body.ownerId !== undefined) {
     sets.push('ownerId = ?'); params.push(Number(body.ownerId) || req.user.id);
   }
@@ -291,9 +316,12 @@ router.put('/:id', (req, res) => {
 
   dbx.run(`UPDATE students SET ${sets.join(', ')} WHERE id = ?`, [...params, req.params.id]);
   if (Array.isArray(body.coManagerIds)) setCoManagers(req.params.id, body.coManagerIds);
+  // 学号变更时同步寝室分配的关联键；宿舍文本变更（含清空）同步到寝室管理
+  if (studentNo !== target.studentNo) renameDormStudentNo(target.studentNo, studentNo);
+  if (body.dorm !== undefined) syncDormFromText(studentNo, body.dorm);
 
   logAccess(req, `修改学生 ${target.name}（${target.studentNo}）`);
-  const row = dbx.get('SELECT s.* FROM students s WHERE s.id = ?', [req.params.id]);
+  const row = dbx.get(`${STUDENT_SELECT} WHERE s.id = ?`, [req.params.id]);
   res.json({ ...row, coManagerIds: coManagersOf(req.params.id).map((u) => u.id) });
 });
 
@@ -306,6 +334,8 @@ router.delete('/:id', (req, res) => {
   if (!target) return res.status(404).json({ message: '学生不存在' });
   dbx.run('DELETE FROM studentCounselors WHERE studentId = ?', [req.params.id]);
   dbx.run('DELETE FROM students WHERE id = ?', [req.params.id]);
+  // 学生档案删除后其寝室分配随之清理（避免留下查无此人的孤儿分配）
+  removeDormOfStudent(target.studentNo);
   logAccess(req, `删除学生 ${target.name}（${target.studentNo}）`);
   res.json({ ok: true });
 });
@@ -335,11 +365,12 @@ router.post('/batch-delete', auth.adminOnly, (req, res) => {
 
   dbx.db.exec('BEGIN IMMEDIATE');
   try {
-    for (const id of ids) {
-      dbx.run('DELETE FROM studentCounselors WHERE studentId = ?', [id]);
-      const info = dbx.run('DELETE FROM students WHERE id = ?', [id]);
-      if (Number(info.changes) !== 1) throw new Error(`学生 ${id} 删除失败`);
-    }
+      for (const id of ids) {
+        dbx.run('DELETE FROM studentCounselors WHERE studentId = ?', [id]);
+        const info = dbx.run('DELETE FROM students WHERE id = ?', [id]);
+        if (Number(info.changes) !== 1) throw new Error(`学生 ${id} 删除失败`);
+        removeDormOfStudent(targets.find((t) => t.id === id)?.studentNo);
+      }
     dbx.db.exec('COMMIT');
   } catch (e) {
     dbx.db.exec('ROLLBACK');
@@ -357,25 +388,41 @@ router.post('/batch-delete', auth.adminOnly, (req, res) => {
   });
 });
 
-/** 批量追加导入：逐条校验，班级名须匹配班级管理字典（不匹配跳过并计入失败明细） */
+/**
+ * 批量导入（upsert 语义）：以学号为唯一标识——
+ * - 学号不存在 → 新增；
+ * - 已存在且在编辑权限内（canManageStudent）→ 逐字段比对，仅更新有变化字段，完全相同跳过；
+ * - 已存在但不在编辑权限内（他人所带班级）→ 判失败；
+ * - 同一批文件内学号重复 → 判失败（两行数据可能不同，避免互相覆盖）。
+ * 校验在事务外完成，写入包事务保证单次请求原子性。
+ */
 router.post('/import', (req, res) => {
   const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
-  let successCount = 0;
   const failures = [];
+  const inserts = []; // 新增待写入 { row, studentNo, target }
+  const updates = []; // 更新待写入 { id, target, changedFields }
+  let skippedCount = 0;
 
+  // 空值入库统一为 null（与历史数据一致），比对时 ''/null 等价
+  const opt = (v) => (v === '' ? null : v);
+
+  // 事务外先完成全部校验（读操作），事务内只做写入
+  const fileSeen = new Map(); // studentNo → 本批首次出现的行号
   for (const { row, data } of rows) {
     const reasons = [];
     const studentNo = String(data?.studentNo ?? '').trim();
     const name = String(data?.name ?? '').trim();
     if (!studentNo) reasons.push('学号为必填项');
-    else if (dbx.get('SELECT id FROM students WHERE studentNo = ?', [studentNo])) {
-      reasons.push('学号已存在于系统中，不可重复导入');
-    }
     if (!name) reasons.push('姓名为必填项');
     if (!data?.gender) reasons.push('性别为必填项');
     if (!data?.grade) reasons.push('年级为必填项');
     if (!data?.className) reasons.push('班级为必填项');
     if (!data?.enrollDate) reasons.push('入学时间为必填项');
+
+    if (studentNo && fileSeen.has(studentNo)) {
+      reasons.push(`学号与本批第 ${fileSeen.get(studentNo)} 行重复`);
+    }
+    if (studentNo) fileSeen.set(studentNo, row);
 
     if (reasons.length > 0) {
       failures.push({ row, studentNo: studentNo || '—', name: name || '—', reason: reasons.join('；'), data });
@@ -386,7 +433,7 @@ router.post('/import', (req, res) => {
     const grade = String(data?.grade ?? '').trim();
     const className = String(data?.className ?? '').trim();
     const clsRow = dbx.get(
-      'SELECT c.id FROM classes c JOIN grades g ON g.id = c.gradeId WHERE c.name = ? AND g.name = ?',
+      'SELECT c.id, c.name FROM classes c JOIN grades g ON g.id = c.gradeId WHERE c.name = ? AND g.name = ?',
       [className, grade],
     );
     if (!clsRow) {
@@ -398,24 +445,83 @@ router.post('/import', (req, res) => {
       continue;
     }
 
-    dbx.run(`INSERT INTO students
-      (id, studentNo, name, gender, grade, major, className, classId, phone, dorm, politicalStatus, origin, status,
-       headTeacher, counselor, fatherName, fatherPhone, motherName, motherPhone, position, remark, enrollDate,
-       ownerId, createdBy, createdAt, updatedAt)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [`s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}-${row}`, studentNo, name,
-        data.gender ?? '男', data.grade ?? '', data.major ?? '', data.className ?? '', clsRow.id,
-        data.phone ?? '',
-        data.dorm ?? null, data.politicalStatus ?? null, data.origin ?? null, data.status ?? '在读',
-        data.headTeacher ?? null, data.counselor ?? null, data.fatherName ?? null, data.fatherPhone ?? null,
-        data.motherName ?? null, data.motherPhone ?? null, data.position ?? null, data.remark ?? null,
-        data.enrollDate ?? '', req.user.id, req.user.id, nowStr(), nowStr()],
-    );
-    successCount += 1;
+    // 班主任 / 辅导员由班级教师名单派生后注入（学生模板已移除两列）
+    const target = { ...normalizeTarget(data, clsRow), ...derivedTeachersOfClass(clsRow.id) };
+    const existing = dbx.get('SELECT * FROM students WHERE studentNo = ?', [studentNo]);
+    if (!existing) {
+      inserts.push({ row, studentNo, target });
+      continue;
+    }
+
+    // 学号已存在：更新权限按编辑口径收口（管理员或该学生归属班级在带班范围内）
+    if (!canManageStudent(req.user, existing.id)) {
+      failures.push({
+        row, studentNo, name,
+        reason: `学号 ${studentNo} 已存在且不在您所带班级范围内，无权限更新`,
+        data,
+      });
+      continue;
+    }
+    const changedFields = diffStudentFields(target, existing);
+    if (changedFields.length === 0) {
+      skippedCount += 1; // 与系统记录完全一致，跳过不导入
+      continue;
+    }
+    updates.push({ id: existing.id, target, changedFields });
   }
 
-  logAccess(req, `批量导入学生：成功 ${successCount} 条，失败 ${failures.length} 条`);
-  res.json({ total: rows.length, successCount, failures });
+  // 事务写入：单次请求内原子生效（中途异常全部回滚，不产生部分导入）
+  let insertedCount = 0;
+  let updatedCount = 0;
+  if (inserts.length > 0 || updates.length > 0) {
+    dbx.db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const it of inserts) {
+        const t = it.target;
+        dbx.run(`INSERT INTO students
+          (id, studentNo, name, gender, grade, major, className, classId, phone, dorm, politicalStatus, origin, status,
+           headTeacher, counselor, fatherName, fatherPhone, motherName, motherPhone, position, remark, enrollDate,
+           ownerId, createdBy, createdAt, updatedAt)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [`s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}-${it.row}`, it.studentNo,
+            t.name, t.gender, t.grade, t.major, t.className, t.classId, t.phone,
+            opt(t.dorm), opt(t.politicalStatus), opt(t.origin), t.status,
+            opt(t.headTeacher), opt(t.counselor), opt(t.fatherName), opt(t.fatherPhone),
+            opt(t.motherName), opt(t.motherPhone), opt(t.position), opt(t.remark), t.enrollDate,
+            req.user.id, req.user.id, nowStr(), nowStr()],
+        );
+        // 导入时填写的宿舍同步进寝室管理（空值不处理，避免覆盖已有分配）
+        if (String(it.target.dorm ?? '').trim()) syncDormFromText(it.studentNo, it.target.dorm);
+        insertedCount += 1;
+      }
+      for (const it of updates) {
+        // 仅更新有变化的字段（changedFields 来自 COMPARE_FIELDS 白名单，可安全拼接）
+        const sets = it.changedFields.map((f) => `${f} = ?`);
+        const params = it.changedFields.map((f) => opt(it.target[f]));
+        sets.push('updatedAt = ?');
+        params.push(nowStr(), it.id);
+        dbx.run(`UPDATE students SET ${sets.join(', ')} WHERE id = ?`, params);
+        // 仅宿舍字段有变化才同步（清空表示解除寝室分配）
+        if (it.changedFields.includes('dorm')) syncDormFromText(it.studentNo, it.target.dorm);
+        updatedCount += 1;
+      }
+      dbx.db.exec('COMMIT');
+    } catch (e) {
+      dbx.db.exec('ROLLBACK');
+      console.error('[students/import] 事务回滚：', e.message);
+      return res.status(500).json({ message: '导入失败，已全部回滚，未产生任何数据变更' });
+    }
+  }
+
+  logAccess(req, `批量导入学生：新增 ${insertedCount}、更新 ${updatedCount}、跳过 ${skippedCount}，失败 ${failures.length} 条`);
+  res.json({
+    total: rows.length,
+    successCount: insertedCount + updatedCount,
+    insertedCount,
+    updatedCount,
+    skippedCount,
+    failures,
+  });
 });
 
 module.exports = router;

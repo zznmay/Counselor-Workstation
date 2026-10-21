@@ -23,6 +23,7 @@ export const APP_MODULES: AppModule[] = [
   { key: 'templates', name: '模板汇总库', group: '资料与工具' },
   { key: 'tools', name: '实用工具', group: '资料与工具' },
   { key: 'classes', name: '班级管理', group: '基础数据' },
+  { key: 'dormitories', name: '寝室管理', group: '基础数据' },
 ];
 
 export const MODULE_GROUPS = ['业务办理', '资料与工具', '基础数据'] as const;
@@ -43,6 +44,7 @@ export const MODULE_HOME: Record<string, string> = {
   templates: '/templates',
   tools: '/tools',
   classes: '/classes',
+  dormitories: '/dormitories',
 };
 
 /** 当前路径所属模块；系统管理路由返回 admin.* 标记，用于权限刷新后的即时跳转 */
@@ -56,6 +58,7 @@ export function moduleForPath(pathname: string): string | null {
   if (pathname.startsWith('/templates')) return 'templates';
   if (pathname.startsWith('/tools')) return 'tools';
   if (pathname.startsWith('/classes')) return 'classes';
+  if (pathname.startsWith('/dormitories')) return 'dormitories';
   if (pathname.startsWith('/admin/users')) return 'admin.users';
   if (pathname.startsWith('/admin/roles')) return 'admin.roles';
   if (pathname.startsWith('/admin/logs')) return 'admin.logs';

@@ -42,10 +42,14 @@ export interface SchoolClass {
   gradeName?: string;
   /** 班级学生数 */
   studentCount?: number;
-  /** 所辖辅导员数 */
+  /** 所辖辅导员数（roleType='counselor'） */
   counselorCount?: number;
   /** 所辖辅导员姓名（、分隔） */
   counselorNames?: string;
+  /** 班主任数（roleType='headTeacher'） */
+  headTeacherCount?: number;
+  /** 班主任姓名（、分隔） */
+  headTeacherNames?: string;
   createdAt?: string;
 }
 
@@ -55,6 +59,10 @@ export interface ClassOption {
   name: string;
   gradeId: number;
   gradeName: string;
+  /** 所辖辅导员姓名（、分隔；教师名单派生，用于表单只读展示） */
+  counselorNames?: string;
+  /** 班主任姓名（、分隔；教师名单派生，用于表单只读展示） */
+  headTeacherNames?: string;
 }
 
 /* ==================== 班级名单批量导入 ==================== */
@@ -62,7 +70,7 @@ export interface ClassOption {
 /** Excel 解析出的一行班级数据（row 为含表头的实际行号，从 2 开始） */
 export interface ParsedClassRow {
   row: number;
-  data: { name: string; grade: string; counselors: string };
+  data: { name: string; grade: string; counselors: string; headTeachers?: string };
 }
 
 /** 一条班级导入失败记录（附原始行数据，便于导出明细修正后重传） */
@@ -71,15 +79,210 @@ export interface ClassImportFailure {
   name: string;
   grade: string;
   reason: string;
-  data?: { name: string; grade: string; counselors: string };
+  data?: { name: string; grade: string; counselors: string; headTeachers?: string };
 }
 
 export interface ClassImportResult {
   /** 本次提交的总行数 */
   total: number;
-  /** 成功追加的条数 */
+  /** 成功处理的条数（新增 + 更新） */
   successCount: number;
+  /** 新增班级条数 */
+  insertedCount: number;
+  /** 更新班级条数（仅辅导员分配有变化） */
+  updatedCount: number;
+  /** 与系统记录完全相同而跳过的条数 */
+  skippedCount: number;
   failures: ClassImportFailure[];
+}
+
+/* ==================== 寝室管理 ==================== */
+
+/** 寝室分配记录（姓名/班级/年级/性别 取自学生名册，宿舍楼与房间号由本模块维护） */
+export interface Dormitory {
+  id: number;
+  /** 学号（唯一；寝室分配挂在该学号对应的学生上） */
+  studentNo: string;
+  /** 学生主键（按带班权限判定可维护性用） */
+  studentId: string;
+  name: string;
+  gender: string;
+  grade: string;
+  className: string;
+  classId?: number | null;
+  /** 宿舍楼，如 荷园B */
+  building: string;
+  /** 房间号，如 512 */
+  room: string;
+  /** 合并展示值：宿舍楼 + 房间号（如 荷园B512）；仅详情接口返回 */
+  dorm?: string;
+  updatedBy?: string;
+  updatedAt?: string;
+}
+
+export interface DormitoryQuery extends PageQuery {
+  /** 学号（模糊） */
+  studentNo?: string;
+  /** 姓名（模糊） */
+  name?: string;
+  /** 班级（模糊） */
+  className?: string;
+  /** 宿舍楼（模糊） */
+  building?: string;
+  /** 房间号（模糊） */
+  room?: string;
+  /** 综合关键字：学号 / 姓名 / 房间号 任一命中（移动端单搜索框） */
+  keyword?: string;
+}
+
+/** 新增/编辑入参 */
+export interface DormitoryInput {
+  studentNo: string;
+  building: string;
+  room: string;
+}
+
+/** 筛选下拉选项（取自可见范围内真实数据） */
+export interface DormitoryOptions {
+  buildings: string[];
+  classNames: string[];
+}
+
+/** Excel 解析出的一行寝室数据（row 为含表头的实际行号，从 2 开始） */
+export interface ParsedDormRow {
+  row: number;
+  data: {
+    studentNo: string;
+    name: string;
+    className: string;
+    grade: string;
+    gender: string;
+    building: string;
+    room: string;
+  };
+}
+
+/** 一条寝室导入失败记录（附原始行数据，便于导出明细修正后重传） */
+export interface DormImportFailure {
+  row: number;
+  studentNo: string;
+  name: string;
+  building: string;
+  room: string;
+  reason: string;
+  data?: ParsedDormRow['data'];
+}
+
+export interface DormImportResult {
+  total: number;
+  successCount: number;
+  insertedCount: number;
+  updatedCount: number;
+  skippedCount: number;
+  failures: DormImportFailure[];
+}
+
+/* ==================== 教师名单（班级管理 → 唯一来源） ==================== */
+
+/** 教师身份：辅导员 / 班主任（库内为 counselor / headTeacher） */
+export type TeacherRoleType = 'counselor' | 'headTeacher';
+
+/** 教师名单行（人视角：账号信息 + 全部带班） */
+export interface Teacher {
+  id: number;
+  /** 工号（= 登录账号 username，唯一标识） */
+  employeeNo: string;
+  name: string;
+  mobile: string;
+  /** 该教师实际持有的身份（按带班关系去重） */
+  roleTypes: TeacherRoleType[];
+  /** 身份中文名，如 ['辅导员','班主任'] */
+  roleLabels: string[];
+  classIds: number[];
+  /** 「年级·班级」全限定名 */
+  classNames: string[];
+  disabled: boolean;
+  /** 档案来源通道：import / manual */
+  teacherSource: string;
+  /** 账号的全部角色 key（含教师身份之外的兼职角色） */
+  allRoleKeys: string[];
+}
+
+/** 教师名单筛选条件 */
+export interface TeacherQuery {
+  roleType?: TeacherRoleType;
+  status?: 'active' | 'leave';
+  keyword?: string;
+  classId?: number;
+}
+
+/** 教师导入模板列（顺序即表头顺序） */
+export const TEACHER_HEADERS = ['工号', '姓名', '手机号', '人员类型', '所辖班级', '在职状态'] as const;
+
+/** Excel 解析出的一行教师数据（row 为含表头的实际行号，从 2 开始） */
+export interface ParsedTeacherRow {
+  row: number;
+  data: {
+    employeeNo: string;
+    name: string;
+    mobile: string;
+    /** 模板原文（「辅导员」「辅导员、班主任」） */
+    roleTypes: string;
+    classNames: string;
+    /** 模板原文：「在职」/「离职」/空 */
+    status: string;
+  };
+}
+
+/** 一条教师导入失败记录（行号 + 字段 + 原因，可精确定位） */
+export interface TeacherImportFailure {
+  row: number;
+  /** 出错字段（模板列名），便于前端高亮 */
+  field: string;
+  employeeNo: string;
+  name: string;
+  reason: string;
+  data?: ParsedTeacherRow['data'];
+}
+
+/** 导入时的账号同步汇总（与用户管理联动的可审计计数） */
+export interface TeacherSyncSummary {
+  createdUsers: number;
+  updatedUsers: number;
+  skippedCount: number;
+  disabledUsers: number;
+  grantedRoles: number;
+  revokedRoles: number;
+  linkedClasses: number;
+  unlinkedClasses: number;
+  refilledClasses: number;
+  refilledStudents: number;
+}
+
+export interface TeacherImportResult {
+  batchId: string;
+  traceId: string;
+  /** 同一 clientRequestId 重复提交时为 true（回放首次结果，未重复写入） */
+  idempotentReplay?: boolean;
+  total: number;
+  insertedCount: number;
+  updatedCount: number;
+  skippedCount: number;
+  disabledCount: number;
+  successCount: number;
+  failures: TeacherImportFailure[];
+  warnings: { row: number; employeeNo: string; name: string; message: string }[];
+  syncSummary: TeacherSyncSummary | null;
+}
+
+/** 单条维护入参 */
+export interface TeacherUpdateInput {
+  name?: string;
+  mobile?: string;
+  /** 'active' 复职 | 'leave' 离职 */
+  status?: 'active' | 'leave';
+  /** 覆盖式带班集合：{ classId, roleType }[] */
+  bindings?: { classId: number; roleType: TeacherRoleType }[];
 }
 
 /* ==================== 学生信息 ==================== */
@@ -99,17 +302,30 @@ export interface Student {
   className: string;
   /** 归属班级 ID（班级管理字典外键；历史数据可能为空） */
   classId?: number | null;
+  /** 手机号 */
   phone: string;
-  /** 宿舍，如 学生公寓5-412 */
-  dorm?: string;
+  /**
+   * 宿舍（展示用只读镜像）：由「寝室管理」回写，值为 宿舍楼+房间号 拼接。
+   * 名册页面展示宿舍时一律改用 dormBuilding / dormRoom 现场拼接，不再直接读本字段。
+   */
+  dorm?: string | null;
+  /**
+   * 班主任（只读派生）：由班级教师名单中该班的班主任姓名生成，
+   * 不再由学生导入/编辑写入，仅作导出与历史留档。
+   */
+  headTeacher?: string | null;
+  /**
+   * 辅导员（只读派生）：同上，取该班辅导员姓名，多人按 users.id 升序以「、」连接。
+   */
+  counselor?: string | null;
+  /** 宿舍楼（来自寝室管理，未分配时为 null） */
+  dormBuilding?: string | null;
+  /** 房间号（来自寝室管理，未分配时为 null） */
+  dormRoom?: string | null;
   politicalStatus?: string;
   /** 生源地 */
   origin?: string;
   status: StudentStatus;
-  /** 班主任 */
-  headTeacher?: string;
-  /** 辅导员 */
-  counselor?: string;
   /** 父亲姓名 */
   fatherName?: string;
   /** 父亲电话 */
@@ -275,8 +491,14 @@ export interface StudentImportFailure {
 export interface StudentImportResult {
   /** 本次提交的总行数 */
   total: number;
-  /** 成功追加的条数 */
+  /** 成功处理的条数（新增 + 更新） */
   successCount: number;
+  /** 新增学生条数 */
+  insertedCount: number;
+  /** 更新学生条数（仅字段有变化的记录） */
+  updatedCount: number;
+  /** 与系统记录完全相同而跳过的条数 */
+  skippedCount: number;
   failures: StudentImportFailure[];
 }
 

@@ -11,6 +11,7 @@ import {
   EditOutlined,
   FolderOpenOutlined,
   HeartOutlined,
+  HomeOutlined,
   LogoutOutlined,
   MenuOutlined,
   SafetyCertificateOutlined,
@@ -57,6 +58,7 @@ const TITLES: Record<string, string> = {
   '/tools': '实用工具',
   '/classes': '班级管理',
   '/classes/grades': '年级管理',
+  '/dormitories': '寝室管理',
   '/admin/users': '用户管理',
   '/admin/roles': '角色管理',
   '/admin/logs': '访问日志',
@@ -269,6 +271,9 @@ export default function BasicLayout() {
           { key: '/classes/grades', icon: <TagsOutlined />, label: '年级管理' },
         ],
       });
+    }
+    if (can('dormitories')) {
+      items.push({ key: '/dormitories', icon: <HomeOutlined />, label: '寝室管理' });
     }
     if (isSystemAdmin(authUser)) {
       items.push({
