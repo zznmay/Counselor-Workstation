@@ -298,16 +298,18 @@ function StudentsDesktop() {
   /**
    * 班主任 / 辅导员：只读派生（班级管理 → 教师名单 为唯一来源）。
    * 编辑弹窗中随所选班级实时带出，提示文案说明不可手改；服务端也会忽略这两项入参。
+   * 注意：Form.useWatch 是 hook，必须无条件在组件顶层调用——此前误包进 useMemo 回调，
+   * 依赖未变时回调跳过执行，各次渲染 hook 数量不一致会触发 React error #311（名册页崩溃）。
    */
+  const watchedClassId = Form.useWatch('classId', form) as number | undefined;
   const derivedTeachers = useMemo(() => {
-    const watchedClassId = Form.useWatch('classId', form) as number | undefined;
     const cls = classOptions.find((c) => c.id === Number(watchedClassId));
     if (!cls) return { headTeacher: '', counselor: '' };
     return {
       headTeacher: cls.headTeacherNames || '',
       counselor: cls.counselorNames || '',
     };
-  }, [classOptions, form]);
+  }, [classOptions, watchedClassId]);
 
   /* ---------- 记录谈话（联动谈心谈话模块） ---------- */
   const [talkForm] = Form.useForm<ConversationFormValues>();
