@@ -114,7 +114,7 @@ function ClassesDesktop() {
 
   // hook 纪律：useWatch 必须在组件顶层调用，严禁放进条件分支或回调
   const counselorNos = (Form.useWatch('counselorNos', form) ?? []) as string[];
-  const headTeacherNos = (Form.useWatch('headTeachers', form) ?? []) as string[];
+  const headTeacherNos = (Form.useWatch('headTeacherNos', form) ?? []) as string[];
 
   const unknownCounselors = counselorNos.filter((no) => no && !knownStaff.has(no));
   const unknownHeadTeachers = headTeacherNos.filter((no) => no && !knownStaff.has(no));
@@ -382,6 +382,25 @@ function ClassesDesktop() {
     }
   };
 
+  /** 按班单独同步：只落地该班的待同步人员（建号/绑班 + 补齐身份角色） */
+  const handleSyncClass = async (record: SchoolClass) => {
+    try {
+      const result = await syncPendingStaff(record.id);
+      if (result.total === 0) {
+        message.info(`「${record.name}」没有待同步人员`);
+      } else {
+        message.success(
+          `「${record.name}」同步完成：新建 ${result.createdUsers} 个账号、绑定 ${result.linkedExisting} 个已有账号`
+          + (result.skippedCount > 0 ? `、跳过 ${result.skippedCount} 人次` : ''),
+        );
+      }
+      refresh();
+      loadPendingCount();
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '同步失败');
+    }
+  };
+
   /** 人员列：正式绑定姓名 + 待同步（橙色标记） */
   const renderStaffCell = (bound?: string, pending?: string) => {
     if (!bound && !pending) return '—';
@@ -412,13 +431,24 @@ function ClassesDesktop() {
     {
       title: '操作',
       key: 'action',
-      width: 130,
+      width: 180,
       fixed: 'right',
       render: (_, record) => (
         <Space size={0}>
           <Button type="link" size="small" onClick={() => openEdit(record)}>
             编辑
           </Button>
+          {(record.pendingStaffCount ?? 0) > 0 && (
+            <Popconfirm
+              title="同步该班待同步人员？"
+              description="将按工号为本班待同步的辅导员/班主任创建账号（用户名=工号）并绑定本班；工号已有账号的只绑定本班并补齐身份。"
+              onConfirm={() => void handleSyncClass(record)}
+            >
+              <Button type="link" size="small" icon={<SyncOutlined />}>
+                同步
+              </Button>
+            </Popconfirm>
+          )}
           <Popconfirm
             title="确定删除该班级吗？"
             description="班级与辅导员/班主任的关联及待同步人员将一并移除；班级下仍有学生时无法删除"

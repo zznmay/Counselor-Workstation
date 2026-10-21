@@ -250,6 +250,35 @@ export default function ClassesMobile() {
   /** 待同步展示文本：去掉后缀括号，由橙色标签本身表达「待同步」 */
   const pendingText = (raw?: string) => (raw ? raw.replace(/（待同步）/g, '') : '');
 
+  /** 按班单独同步：只落地该班的待同步人员（建号/绑班 + 补齐身份角色） */
+  const handleSyncClassStaff = (c: SchoolClass) => {
+    Modal.confirm({
+      title: `同步「${c.name}」待同步人员`,
+      content: '将按工号为本班待同步的辅导员/班主任创建账号（用户名=工号、初始密码 Hzpt@工号、首登强制修改）并绑定本班；工号已有账号的只绑定本班并补齐身份。确定同步吗？',
+      okText: '开始同步',
+      cancelText: '取消',
+      onOk: async () => {
+        setSyncing(true);
+        try {
+          const result = await syncPendingStaff(c.id);
+          if (result.total === 0) {
+            message.info(`「${c.name}」没有待同步人员`);
+          } else {
+            message.success(
+              `同步完成：新建 ${result.createdUsers} 个账号、绑定 ${result.linkedExisting} 个已有账号`
+              + (result.skippedCount > 0 ? `、跳过 ${result.skippedCount} 人次` : ''),
+            );
+          }
+          reloadAll();
+        } catch (e) {
+          message.error(e instanceof Error ? e.message : '同步失败');
+        } finally {
+          setSyncing(false);
+        }
+      },
+    });
+  };
+
   return (
     <>
       {/* 班级 / 年级 分段切换 */}
@@ -379,6 +408,19 @@ export default function ClassesMobile() {
                     <MIcon name="edit" size={18} />
                     编辑
                   </a>
+                  {(c.pendingCounselorNames || c.pendingHeadTeacherNames) && (
+                    <a
+                      className="m-act"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleSyncClassStaff(c);
+                      }}
+                      aria-label={`同步班级 ${c.name} 待同步人员`}
+                    >
+                      <MIcon name="refresh" size={18} />
+                      同步人员
+                    </a>
+                  )}
                   <Popconfirm
                     title="确定删除该班级吗？"
                     description="班级与辅导员/班主任的关联及待同步人员将一并移除；班级下仍有学生时无法删除"

@@ -251,13 +251,23 @@ router.get('/pending-staff', (req, res) => {
 
 /**
  * 同步用户管理：把待同步人员落地为正式绑定。
+ * 可选 body.classId：只同步该班的待同步行（按班分次同步）；同工号其他班级的待同步行保留，
+ * 由其所属班级的单独同步或全局同步落地。
  * 按工号分组（同工号跨班/跨身份只建一个账号、绑定多个班级）：
  * - 账号不存在 → 建号（用户名=工号、姓名=待同步姓名、角色按 roleType、初始密码 Hzpt@工号、首登强改）；
- * - 已有在职非管理员账号 → 只绑班（不建号、不改名、不授角色）；
+ * - 已有在职非管理员账号 → 只绑班（不建号、不改名），并补授本次绑定身份对应的角色键
+ *   （按班分次同步时账号可能来自更早一次同步，缺本次身份会造成模块权限与带班身份漂移）；
  * - 停用/管理员账号 → 跳过并提示，待同步行保留（处理后可再次同步）。
  */
 router.post('/pending-staff/sync', (req, res) => {
-  const rows = dbx.all('SELECT * FROM classPendingStaff ORDER BY employeeNo, id');
+  const scopeId = Number(req.body?.classId);
+  const hasScope = Number.isInteger(scopeId) && scopeId > 0;
+  if (hasScope && !dbx.get('SELECT id FROM classes WHERE id = ?', [scopeId])) {
+    return res.status(400).json({ message: '班级不存在（可能已被删除）' });
+  }
+  const rows = hasScope
+    ? dbx.all('SELECT * FROM classPendingStaff WHERE classId = ? ORDER BY employeeNo, id', [scopeId])
+    : dbx.all('SELECT * FROM classPendingStaff ORDER BY employeeNo, id');
   const summary = {
     total: rows.length,
     createdUsers: 0,
@@ -272,7 +282,7 @@ router.post('/pending-staff/sync', (req, res) => {
       const groups = new Map(); // employeeNo → { displayName, items: [{classId, roleType}] }
       for (const r of rows) {
         if (!groups.has(r.employeeNo)) groups.set(r.employeeNo, { displayName: r.displayName, items: [] });
-        groups.get(r.employeeNo).items.push({ classId: Number(r.classId), roleType: r.roleType });
+        groups.get(r.employeeNo).items.push({ id: r.id, classId: Number(r.classId), roleType: r.roleType });
       }
       for (const [employeeNo, grp] of groups) {
         const user = dbx.get('SELECT * FROM users WHERE username = ?', [employeeNo]);
@@ -295,7 +305,7 @@ router.post('/pending-staff/sync', (req, res) => {
             );
             touchedClassIds.add(it.classId);
           }
-          dbx.run('DELETE FROM classPendingStaff WHERE employeeNo = ?', [employeeNo]);
+          dbx.run(`DELETE FROM classPendingStaff WHERE id IN (${grp.items.map(() => '?').join(', ')})`, grp.items.map((it) => it.id));
           summary.createdUsers += 1;
         } else if (
           Number(user.disabled ?? 0) === 0
@@ -309,7 +319,12 @@ router.post('/pending-staff/sync', (req, res) => {
             );
             touchedClassIds.add(it.classId);
           }
-          dbx.run('DELETE FROM classPendingStaff WHERE employeeNo = ?', [employeeNo]);
+          // 补授本次绑定身份的角色键（幂等）：分次按班同步时账号可能缺后同步班级的身份
+          const roleTypes = [...new Set(grp.items.map((i) => i.roleType))];
+          for (const roleKey of roleTypes) {
+            dbx.run('INSERT OR IGNORE INTO userRoles (userId, roleKey) VALUES (?, ?)', [user.id, roleKey]);
+          }
+          dbx.run(`DELETE FROM classPendingStaff WHERE id IN (${grp.items.map(() => '?').join(', ')})`, grp.items.map((it) => it.id));
           summary.linkedExisting += 1;
         } else {
           const reason = Number(user.disabled ?? 0) === 1 ? '账号已停用' : '管理员账号';
@@ -331,7 +346,8 @@ router.post('/pending-staff/sync', (req, res) => {
     summary.refilledStudents = 0;
   }
 
-  logAccess(req, `同步用户管理：新建账号 ${summary.createdUsers}、绑定已有账号 ${summary.linkedExisting}、跳过 ${summary.skippedCount}`);
+  const scopeLabel = hasScope ? `（${dbx.get('SELECT name FROM classes WHERE id = ?', [scopeId])?.name ?? scopeId}）` : '';
+  logAccess(req, `同步用户管理${scopeLabel}：新建账号 ${summary.createdUsers}、绑定已有账号 ${summary.linkedExisting}、跳过 ${summary.skippedCount}`);
   res.json(summary);
 });
 

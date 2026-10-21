@@ -502,4 +502,90 @@ describe('同步用户管理（POST /classes/pending-staff/sync）', () => {
       { t: 0, c: 0, l: 0, s: 0 },
     );
   });
+
+  it('B6 · 按班同步（classId）：只落地该班，他班待同步保留', async () => {
+    const g = dbx.get("SELECT id FROM grades WHERE name = '2029级'");
+    const classA = Number(dbx.run(
+      "INSERT INTO classes (gradeId, name, createdAt) VALUES (?, '单班2901A', '2026-01-01 00:00')", [g.id],
+    ).lastInsertRowid);
+    const classB = Number(dbx.run(
+      "INSERT INTO classes (gradeId, name, createdAt) VALUES (?, '单班2901B', '2026-01-01 00:00')", [g.id],
+    ).lastInsertRowid);
+    seedPendingStaff(classA, 'emp_scope_a', '甲班老师', 'headTeacher');
+    seedPendingStaff(classB, 'emp_scope_b', '乙班老师', 'counselor');
+
+    const res = await postJson(base, '/api/classes/pending-staff/sync', { classId: classA });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.total, 1, '只统计该班的待同步行');
+    assert.equal(res.body.createdUsers, 1);
+
+    const ua = userByUsername('emp_scope_a');
+    assert.ok(ua, '账号应已创建');
+    assert.deepEqual(
+      dbx.all('SELECT classId, roleType FROM classCounselors WHERE userId = ?', [ua.id])
+        .map((r) => ({ classId: Number(r.classId), roleType: r.roleType })),
+      [{ classId: classA, roleType: 'headTeacher' }],
+      '只绑定该班、按该班身份落库',
+    );
+    assert.deepEqual(
+      dbx.all('SELECT roleKey FROM userRoles WHERE userId = ?', [ua.id]).map((r) => r.roleKey),
+      ['headTeacher'],
+      '按班建号只授该班出现的身份',
+    );
+    assert.ok(
+      dbx.get('SELECT 1 AS x FROM classPendingStaff WHERE employeeNo = ?', ['emp_scope_b']),
+      '其他班级的待同步行不受影响',
+    );
+
+    const again = await postJson(base, '/api/classes/pending-staff/sync', { classId: classA });
+    assert.equal(again.status, 200);
+    assert.equal(again.body.total, 0, '同步后该班待同步清空 → 全零摘要');
+  });
+
+  it('B7 · 同工号跨班分次按班同步：绑班时补授身份角色', async () => {
+    const g = dbx.get("SELECT id FROM grades WHERE name = '2029级'");
+    const classA = Number(dbx.run(
+      "INSERT INTO classes (gradeId, name, createdAt) VALUES (?, '分次2901A', '2026-01-01 00:00')", [g.id],
+    ).lastInsertRowid);
+    const classB = Number(dbx.run(
+      "INSERT INTO classes (gradeId, name, createdAt) VALUES (?, '分次2901B', '2026-01-01 00:00')", [g.id],
+    ).lastInsertRowid);
+    seedPendingStaff(classA, 'emp_stage', '分次老师', 'headTeacher');
+    seedPendingStaff(classB, 'emp_stage', '分次老师', 'counselor');
+
+    const first = await postJson(base, '/api/classes/pending-staff/sync', { classId: classA });
+    assert.equal(first.body.createdUsers, 1);
+    const u = userByUsername('emp_stage');
+    assert.deepEqual(
+      dbx.all('SELECT roleKey FROM userRoles WHERE userId = ?', [u.id]).map((r) => r.roleKey),
+      ['headTeacher'],
+      '首次按班同步只授该班身份',
+    );
+
+    const second = await postJson(base, '/api/classes/pending-staff/sync', { classId: classB });
+    assert.equal(second.status, 200);
+    assert.equal(second.body.createdUsers, 0, '不重复建号');
+    assert.equal(second.body.linkedExisting, 1, '命中已有账号只绑班');
+    assert.deepEqual(
+      dbx.all('SELECT roleKey FROM userRoles WHERE userId = ?', [u.id]).map((r) => r.roleKey).sort(),
+      ['counselor', 'headTeacher'],
+      '绑班时补授本次身份的角色键',
+    );
+    assert.deepEqual(
+      dbx.all('SELECT classId, roleType FROM classCounselors WHERE userId = ?', [u.id])
+        .map((r) => [Number(r.classId), r.roleType])
+        .sort((a, b) => a[0] - b[0]),
+      [[classA, 'headTeacher'], [classB, 'counselor']],
+    );
+    assert.equal(
+      dbx.get('SELECT COUNT(*) AS c FROM classPendingStaff WHERE employeeNo = ?', ['emp_stage']).c,
+      0,
+      '两次同步后该工号待同步全部落地',
+    );
+  });
+
+  it('B8 · 按班同步：班级不存在 → 400', async () => {
+    const res = await postJson(base, '/api/classes/pending-staff/sync', { classId: 99999999 });
+    assert.equal(res.status, 400);
+  });
 });

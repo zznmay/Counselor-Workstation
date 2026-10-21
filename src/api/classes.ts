@@ -90,9 +90,12 @@ export function getPendingStaff(): Promise<PendingStaffItem[]> {
   return request<PendingStaffItem[]>('/classes/pending-staff');
 }
 
-/** 同步用户管理：待同步人员一键建号/绑班 */
-export function syncPendingStaff(): Promise<PendingSyncResult> {
-  return request<PendingSyncResult>('/classes/pending-staff/sync', { method: 'POST' });
+/** 同步用户管理：待同步人员一键建号/绑班；传 classId 只同步该班（按班单独同步） */
+export function syncPendingStaff(classId?: number): Promise<PendingSyncResult> {
+  return request<PendingSyncResult>('/classes/pending-staff/sync', {
+    method: 'POST',
+    body: JSON.stringify(classId !== undefined ? { classId } : {}),
+  });
 }
 
 /** 工号批量匹配（表单内联姓名判定/预检用；只认在职非管理员账号） */
