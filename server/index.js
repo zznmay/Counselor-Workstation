@@ -97,13 +97,19 @@ if (fs.existsSync(config.DIST_DIR)) {
     }
   };
   app.use((req, res, next) => {
-    // 根路径与 *.html 走自愈入口（必须在 express.static 之前，否则 / 会被 dist/index.html 抢先命中）
+    // 根路径、*.html 与「无扩展名的前端路由」走自愈入口（必须在 express.static 之前，
+    // 否则 / 会被 dist/index.html 抢先命中）。
     // 例外：dist 中真实存在的静态 HTML（实用工具 /tools/*.html 等）直接放行，
     // 否则 iframe 内嵌工具页会被改写成工作台 SPA 入口，表现为「实用工具内容缺失」。
-    if (req.method === 'GET' && (req.path === '/' || req.path.endsWith('.html'))) {
-      if (isRealDistHtml(req.path)) return next();
-      return sendEntry(res);
-    }
+    //
+    // 无扩展名路径必须在此拦下：/templates、/tools、/tools/counselor-scheduler 这类前端路由
+    // 与 public 下同名静态目录重合，交给 express.static 会被当成目录请求，
+    // 301 重定向到带尾斜杠的地址且 Location 丢弃 sharecode 等查询参数，
+    // 线上表现为「直接访问或刷新实用工具页后返回 403 链接不完整」。
+    // 真实静态资源（js/css/图片/docx）都带扩展名，不受此分支影响。
+    if (req.method !== 'GET' || req.path.startsWith('/api')) return next();
+    if (path.extname(req.path) === '') return sendEntry(res);
+    if (req.path.endsWith('.html') && !isRealDistHtml(req.path)) return sendEntry(res);
     return next();
   });
   app.use(express.static(config.DIST_DIR));
