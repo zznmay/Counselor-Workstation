@@ -10,7 +10,7 @@ import { diffStudentFields, normalizeTarget } from '../server/lib/studentDiff.js
  *
  * 2026-10-21 教师唯一来源改造后：「班主任 / 辅导员」不再从导入行取值
  * （学生模板已移除两列），值由 routes/students.js 在拿到 classId 后按
- * 班级教师名单派生注入 target，故 normalizeTarget 不再产出这两个字段。
+ * 班级人员配置派生注入 target，故 normalizeTarget 不再产出这两个字段。
  */
 
 const clsRow = { id: 12, name: '计应2601' };
@@ -51,7 +51,7 @@ describe('normalizeTarget（新增场景：导入行 → 规范化目标值）',
     assert.strictEqual(target.phone, '13800001111');
     assert.strictEqual(target.dorm, '学生公寓5-603');
     assert.strictEqual(target.status, '在读');
-    // 责任人不再从导入行取值：由班级教师名单派生（见 routes/students.js）
+    // 责任人不再从导入行取值：由班级人员配置派生（见 routes/students.js）
     assert.strictEqual(target.counselor, undefined);
     assert.strictEqual(target.headTeacher, undefined);
     assert.strictEqual(target.enrollDate, '2026-09-01');

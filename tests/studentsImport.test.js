@@ -31,7 +31,7 @@ function studentRow(no, overrides = {}) {
       position: '学习委员',
       remark: '',
       enrollDate: '2026-09-01',
-      // 学生模板已移除「班主任」「辅导员」两列：即便传入也会被忽略，值一律由班级教师名单派生
+      // 学生模板已移除「班主任」「辅导员」两列：即便传入也会被忽略，值一律由班级人员配置派生
       fatherName: '张大',
       fatherPhone: '13800001001',
       motherName: '李芳',
@@ -84,7 +84,7 @@ describe('POST /students/import（学号 upsert）', () => {
     assert.equal(row.name, '学生01');
     assert.equal(row.classId, cls.classId, '班级应按字典回填 classId');
     assert.equal(row.status, '在读');
-    // 班主任/辅导员不再从导入行取值：由班级教师名单派生；本用例班级未绑定教师 → NULL
+    // 班主任/辅导员不再从导入行取值：由班级人员配置派生；本用例班级未绑定教师 → NULL
     assert.equal(row.counselor, null, '责任人应为派生值，且不再有「王老师」硬编码兜底');
     assert.equal(row.headTeacher, null);
     assert.equal(row.remark, null, '空选填列统一以 null 入库');

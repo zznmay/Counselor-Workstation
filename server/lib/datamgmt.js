@@ -20,7 +20,7 @@ const dbx = require('./db');
 const { BACKUP_DIR, DATA_DIR, DB_PATH } = require('./config');
 
 /** 数据包结构版本：结构变更（增删表 / 改字段语义）时才递增 */
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 const APP_VERSION = '1.0';
 const SOURCE = 'counselor-workbench';
 
@@ -44,7 +44,7 @@ const OPLOG_KEEP = 500;
 /** 参与导出/恢复的业务表（顺序 = 导入时的写入顺序；删除时倒序） */
 const EXPORT_TABLES = [
   'users', 'roles', 'userRoles', 'students', 'studentCounselors',
-  'grades', 'classes', 'classCounselors', 'dormitories',
+  'grades', 'classes', 'classCounselors', 'classPendingStaff', 'dormitories',
   'conversations', 'mentalHealth', 'mentalInterviews', 'mentalInterviewTemplates', 'mentalLevelLogs',
   'warnings', 'notices', 'approvals', 'todos',
   'templateCategories', 'templateFiles', 'csScheduler',

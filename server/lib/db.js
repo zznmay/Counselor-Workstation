@@ -90,7 +90,7 @@ const SCHEMA_STATEMENTS = [
     UNIQUE (gradeId, name)
   )`,
   /* 班级-人员-身份 三维关联：roleType = counselor（辅导员）| headTeacher（班主任）。
-     教师数据的唯一来源（班级管理 → 教师名单）；历史库由 lib/teacherSourceMigrate.js 升级。 */
+     教师数据的唯一来源（班级管理录入工号 + 同步用户管理建号）；历史库由 lib/teacherSourceMigrate.js 升级。 */
   `CREATE TABLE IF NOT EXISTS classCounselors (
     classId INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
     userId INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -98,6 +98,20 @@ const SCHEMA_STATEMENTS = [
     createdAt TEXT,
     PRIMARY KEY (classId, userId, roleType)
   )`,
+  /* 班级待同步人员：班级导入/表单录入的工号未匹配到在职账号时先落此表（不授任何权限），
+     「同步用户管理」一键建号并写入 classCounselors 后删除对应行；本表永远只存"尚未落地"的人。 */
+  `CREATE TABLE IF NOT EXISTS classPendingStaff (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    classId INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+    employeeNo TEXT NOT NULL,
+    displayName TEXT NOT NULL,
+    roleType TEXT NOT NULL DEFAULT 'counselor' CHECK (roleType IN ('counselor', 'headTeacher')),
+    source TEXT NOT NULL DEFAULT 'import',
+    createdAt TEXT NOT NULL,
+    UNIQUE (classId, employeeNo, roleType)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_cps_employee ON classPendingStaff(employeeNo)`,
+  `CREATE INDEX IF NOT EXISTS idx_cps_class_role ON classPendingStaff(classId, roleType)`,
   /* 注意：classCounselors 的索引（idx_cc_user / idx_cc_role）不在此处创建。
      老库的该表仍是二维结构（无 roleType 列），若在迁移前建索引会抛
      "no such column: roleType" 导致启动崩溃（云端既有实例已复现）。

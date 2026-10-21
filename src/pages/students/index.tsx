@@ -296,7 +296,7 @@ function StudentsDesktop() {
   }, [classOptions, filterGradeId]);
 
   /**
-   * 班主任 / 辅导员：只读派生（班级管理 → 教师名单 为唯一来源）。
+   * 班主任 / 辅导员：只读派生（班级管理的人员配置为唯一来源）。
    * 编辑弹窗中随所选班级实时带出，提示文案说明不可手改；服务端也会忽略这两项入参。
    * 注意：Form.useWatch 是 hook，必须无条件在组件顶层调用——此前误包进 useMemo 回调，
    * 依赖未变时回调跳过执行，各次渲染 hook 数量不一致会触发 React error #311（名册页崩溃）。
@@ -1035,12 +1035,12 @@ function StudentsDesktop() {
               <div className="form-section-title">班级与家庭联系</div>
             </Col>
             <Col xs={24} sm={12}>
-              <Form.Item label="班主任" extra="由「班级管理 → 教师名单」按班级自动派生，不可手改">
+              <Form.Item label="班主任" extra="由「班级管理」的人员配置按班级自动派生，不可手改">
                 <Input value={derivedTeachers.headTeacher || '该班暂无班主任'} disabled />
               </Form.Item>
             </Col>
             <Col xs={24} sm={12}>
-              <Form.Item label="辅导员" extra="由「班级管理 → 教师名单」按班级自动派生，不可手改">
+              <Form.Item label="辅导员" extra="由「班级管理」的人员配置按班级自动派生，不可手改">
                 <Input value={derivedTeachers.counselor || '该班暂无辅导员'} disabled />
               </Form.Item>
             </Col>

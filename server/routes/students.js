@@ -252,7 +252,7 @@ router.post('/', (req, res) => {
   const cls = resolveStudentClassId(body);
   if (cls.error) return res.status(400).json({ message: cls.error });
 
-  // 班主任 / 辅导员一律由班级教师名单派生（班级管理为唯一来源，不接受入参）
+  // 班主任 / 辅导员一律由班级人员配置派生（班级管理为唯一来源，不接受入参）
   const derived = derivedTeachersOfClass(cls.value);
 
   dbx.run(`INSERT INTO students
@@ -294,7 +294,7 @@ router.put('/:id', (req, res) => {
   const sets = [];
   const params = [];
   for (const field of FIELDS) {
-    // 班主任 / 辅导员不接受入参：统一由班级教师名单派生，避免其他模块另写一份
+    // 班主任 / 辅导员不接受入参：统一由班级人员配置派生，避免其他模块另写一份
     if (field === 'headTeacher' || field === 'counselor') continue;
     if (body[field] !== undefined) { sets.push(`${field} = ?`); params.push(body[field]); }
   }
@@ -445,7 +445,7 @@ router.post('/import', (req, res) => {
       continue;
     }
 
-    // 班主任 / 辅导员由班级教师名单派生后注入（学生模板已移除两列）
+    // 班主任 / 辅导员由班级人员配置派生后注入（学生模板已移除两列）
     const target = { ...normalizeTarget(data, clsRow), ...derivedTeachersOfClass(clsRow.id) };
     const existing = dbx.get('SELECT * FROM students WHERE studentNo = ?', [studentNo]);
     if (!existing) {

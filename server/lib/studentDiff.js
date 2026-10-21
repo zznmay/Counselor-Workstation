@@ -10,7 +10,7 @@
 
 /**
  * 参与比对的学生字段（学号为主键标识不参与；className 与 classId 成对比对）。
- * headTeacher / counselor 保留在比对清单内：其值由班级教师名单派生后注入 target，
+ * headTeacher / counselor 保留在比对清单内：其值由班级人员配置派生后注入 target，
  * 参与比对才能把历史遗留的自由文本纠正为派生值。
  */
 const COMPARE_FIELDS = [
@@ -32,7 +32,7 @@ function sameValue(a, b) {
 /**
  * 导入行数据 → 规范化目标值。
  *
- * 注意：headTeacher / counselor **不再从导入行取值** —— 班级管理（教师名单）是这两类
+ * 注意：headTeacher / counselor **不再从导入行取值** —— 班级管理（工号录入 + 同步建号）是这两类
  * 数据的唯一来源，学生模板已移除两列，值由 routes/students.js 在解析出 classId 后调用
  * teacherSync.derivedTeachersOfClass() 派生回填（写入前注入 target，故仍参与字段比对，
  * 用于纠正历史脏值）。这里刻意不提供默认值（历史硬编码的「王老师」已删除）。

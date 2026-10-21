@@ -26,13 +26,18 @@ process.env.WORKBENCH_SEED = 'empty';
 const serverRequire = createRequire(SERVER_ENTRY);
 const express = serverRequire('express');
 const dbx = serverRequire('./lib/db');
-const { issueToken } = serverRequire('./lib/auth');
+const auth = serverRequire('./lib/auth');
 const studentsRoute = serverRequire('./routes/students');
 const classesRoute = serverRequire('./routes/classes');
-const teachersRoute = serverRequire('./routes/teachers');
 const dormitoriesRoute = serverRequire('./routes/dormitories');
+const usersRoute = serverRequire('./routes/users');
 
-export { dbx, DATA_DIR, studentsRoute, classesRoute, teachersRoute, dormitoriesRoute };
+export { dbx, DATA_DIR, studentsRoute, classesRoute, dormitoriesRoute, usersRoute };
+
+/** 密码校验（bcrypt，与账号体系同口径） */
+export function verifyPassword(password, hash) {
+  return auth.verifyPassword(password, hash);
+}
 
 /** 与服务端 audit.nowStr 同口径的时间串 */
 export function nowStr() {
@@ -61,11 +66,49 @@ export function seedCounselor(username, displayName) {
   return id;
 }
 
+/** 造一名在职班主任（角色 headTeacher），返回 userId */
+export function seedHeadTeacher(username, displayName) {
+  const exist = dbx.get('SELECT id FROM users WHERE username = ?', [username]);
+  if (exist) return exist.id;
+  const id = Number(dbx.run(
+    `INSERT INTO users (username, displayName, role, passwordHash, mustChangePassword, disabled, createdAt)
+     VALUES (?, ?, 'headTeacher', 'not-used-in-import-test', 0, 0, ?)`,
+    [username, displayName, nowStr()],
+  ).lastInsertRowid);
+  dbx.run('INSERT OR IGNORE INTO userRoles (userId, roleKey) VALUES (?, ?)', [id, 'headTeacher']);
+  return id;
+}
+
+/** 造一名停用账号（disabled=1，不授角色），返回 userId */
+export function seedDisabledUser(username, displayName) {
+  const exist = dbx.get('SELECT id FROM users WHERE username = ?', [username]);
+  if (exist) return exist.id;
+  return Number(dbx.run(
+    `INSERT INTO users (username, displayName, role, passwordHash, mustChangePassword, disabled, createdAt)
+     VALUES (?, ?, 'counselor', 'not-used-in-import-test', 0, 1, ?)`,
+    [username, displayName, nowStr()],
+  ).lastInsertRowid);
+}
+
+/** 直插一条待同步人员（幂等），返回行 id */
+export function seedPendingStaff(classId, employeeNo, displayName, roleType = 'counselor', source = 'import') {
+  const exist = dbx.get(
+    'SELECT id FROM classPendingStaff WHERE classId = ? AND employeeNo = ? AND roleType = ?',
+    [classId, employeeNo, roleType],
+  );
+  if (exist) return exist.id;
+  return Number(dbx.run(
+    `INSERT INTO classPendingStaff (classId, employeeNo, displayName, roleType, source, createdAt)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [classId, employeeNo, displayName, roleType, source, nowStr()],
+  ).lastInsertRowid);
+}
+
 /** 管理员请求头（Bearer 之外的自定义头 X-Auth-Token，服务端 authMiddleware 支持） */
 export function adminHeaders() {
   const admin = dbx.get("SELECT * FROM users WHERE username = 'admin'");
   if (!admin) throw new Error('未找到管理员账号，請确认 WORKBENCH_SEED=empty 已生效');
-  return { 'Content-Type': 'application/json', 'X-Auth-Token': issueToken(admin) };
+  return { 'Content-Type': 'application/json', 'X-Auth-Token': auth.issueToken(admin) };
 }
 
 /**

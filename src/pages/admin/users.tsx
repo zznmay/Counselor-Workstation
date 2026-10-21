@@ -521,7 +521,7 @@ function AdminUsersDesktop() {
     <div className="page">
       <PageHeader
         title="用户管理"
-        subtitle="开设教师账号、分配角色与班级、删除账号；辅导员/班主任请到「班级管理 → 教师名单」导入（初始密码自动生成为「Hzpt@工号」，首次登录需修改）"
+        subtitle="开设账号、分配角色与班级、删除账号；辅导员/班主任请在「班级管理」录入工号（未匹配的待同步人员可在「班级管理 → 同步用户管理」一键建号，初始密码自动生成为「Hzpt@工号」，首次登录需修改）"
         extra={
           <Space wrap>
             <Button icon={<UploadOutlined />} onClick={openImport}>
@@ -750,7 +750,7 @@ function AdminUsersDesktop() {
               <li>必填字段：用户名（3-20 位字母/数字/下划线，全局唯一）、姓名（1-20 字）、角色（角色名称或标识）</li>
               <li>选填字段：所辖班级（多个用「、」分隔；同名班级写成「2024级·计应2401」）</li>
               <li>
-                <Typography.Text strong>辅导员 / 班主任请到「班级管理 → 教师名单」导入</Typography.Text>
+                <Typography.Text strong>辅导员 / 班主任请在「班级管理」录入工号（未匹配的待同步人员可在「同步用户管理」一键建号）</Typography.Text>
                 ：教师数据（账号、角色、带班）以班级管理为唯一来源，本通道不再受理这两类角色，
                 填写后该行会被拒绝并提示
               </li>

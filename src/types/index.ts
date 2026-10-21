@@ -44,12 +44,18 @@ export interface SchoolClass {
   studentCount?: number;
   /** 所辖辅导员数（roleType='counselor'） */
   counselorCount?: number;
-  /** 所辖辅导员姓名（、分隔） */
+  /** 所辖辅导员姓名（、分隔，正式绑定） */
   counselorNames?: string;
   /** 班主任数（roleType='headTeacher'） */
   headTeacherCount?: number;
-  /** 班主任姓名（、分隔） */
+  /** 班主任姓名（、分隔，正式绑定） */
   headTeacherNames?: string;
+  /** 待同步辅导员姓名（、分隔，每项自带「（待同步）」后缀） */
+  pendingCounselorNames?: string;
+  /** 待同步班主任姓名（、分隔，每项自带「（待同步）」后缀） */
+  pendingHeadTeacherNames?: string;
+  /** 待同步人员总数（两类身份合计） */
+  pendingStaffCount?: number;
   createdAt?: string;
 }
 
@@ -59,18 +65,77 @@ export interface ClassOption {
   name: string;
   gradeId: number;
   gradeName: string;
-  /** 所辖辅导员姓名（、分隔；教师名单派生，用于表单只读展示） */
+  /** 所辖辅导员姓名（、分隔；班级人员配置派生，用于表单只读展示） */
   counselorNames?: string;
-  /** 班主任姓名（、分隔；教师名单派生，用于表单只读展示） */
+  /** 班主任姓名（、分隔；班级人员配置派生，用于表单只读展示） */
   headTeacherNames?: string;
+}
+
+/* ==================== 班级人员（工号绑定 + 待同步） ==================== */
+
+/** 班级人员条目：工号 + 姓名（工号即 users.username，未匹配账号的条目记待同步） */
+export interface StaffEntry {
+  employeeNo: string;
+  displayName: string;
+}
+
+/** 待同步人员行（「同步用户管理」清单） */
+export interface PendingStaffItem {
+  id: number;
+  classId: number;
+  employeeNo: string;
+  displayName: string;
+  roleType: 'counselor' | 'headTeacher';
+  source: string;
+  createdAt: string;
+  className: string;
+  gradeName: string;
+}
+
+/** 同步用户管理结果 */
+export interface PendingSyncResult {
+  total: number;
+  /** 新建账号数 */
+  createdUsers: number;
+  /** 绑定已有账号数（只绑班不建号） */
+  linkedExisting: number;
+  skippedCount: number;
+  /** 跳过明细（停用/管理员账号），对应待同步行保留 */
+  skipped: { employeeNo: string; displayName: string; reason: string }[];
+  refilledClasses: number;
+  refilledStudents: number;
+}
+
+/** 工号匹配结果（导入预检/表单内联姓名判定用） */
+export interface StaffLookupItem {
+  keyword: string;
+  matched: boolean;
+  userId: number | null;
+  displayName: string | null;
+}
+
+/** 班级人员明细（编辑回填：正式绑定 + 待同步，pending 标志区分） */
+export interface ClassStaffDetail {
+  roleType: 'counselor' | 'headTeacher';
+  employeeNo: string;
+  displayName: string;
+  /** 1 = 待同步（尚无账号） */
+  pending: number;
 }
 
 /* ==================== 班级名单批量导入 ==================== */
 
-/** Excel 解析出的一行班级数据（row 为含表头的实际行号，从 2 开始） */
+/** Excel 解析出的一行班级数据（row 为含表头的实际行号，从 2 开始；工号与姓名按顺序一一对应） */
 export interface ParsedClassRow {
   row: number;
-  data: { name: string; grade: string; counselors: string; headTeachers?: string };
+  data: {
+    name: string;
+    grade: string;
+    counselorNos: string;
+    counselorNames: string;
+    headTeacherNos?: string;
+    headTeacherNames?: string;
+  };
 }
 
 /** 一条班级导入失败记录（附原始行数据，便于导出明细修正后重传） */
@@ -79,7 +144,7 @@ export interface ClassImportFailure {
   name: string;
   grade: string;
   reason: string;
-  data?: { name: string; grade: string; counselors: string; headTeachers?: string };
+  data?: ParsedClassRow['data'];
 }
 
 export interface ClassImportResult {
@@ -89,10 +154,12 @@ export interface ClassImportResult {
   successCount: number;
   /** 新增班级条数 */
   insertedCount: number;
-  /** 更新班级条数（仅辅导员分配有变化） */
+  /** 更新班级条数（人员配置有变化） */
   updatedCount: number;
   /** 与系统记录完全相同而跳过的条数 */
   skippedCount: number;
+  /** 本次写入的待同步人次数（工号未匹配到在职账号） */
+  pendingCount: number;
   failures: ClassImportFailure[];
 }
 
@@ -182,109 +249,6 @@ export interface DormImportResult {
   failures: DormImportFailure[];
 }
 
-/* ==================== 教师名单（班级管理 → 唯一来源） ==================== */
-
-/** 教师身份：辅导员 / 班主任（库内为 counselor / headTeacher） */
-export type TeacherRoleType = 'counselor' | 'headTeacher';
-
-/** 教师名单行（人视角：账号信息 + 全部带班） */
-export interface Teacher {
-  id: number;
-  /** 工号（= 登录账号 username，唯一标识） */
-  employeeNo: string;
-  name: string;
-  mobile: string;
-  /** 该教师实际持有的身份（按带班关系去重） */
-  roleTypes: TeacherRoleType[];
-  /** 身份中文名，如 ['辅导员','班主任'] */
-  roleLabels: string[];
-  classIds: number[];
-  /** 「年级·班级」全限定名 */
-  classNames: string[];
-  disabled: boolean;
-  /** 档案来源通道：import / manual */
-  teacherSource: string;
-  /** 账号的全部角色 key（含教师身份之外的兼职角色） */
-  allRoleKeys: string[];
-}
-
-/** 教师名单筛选条件 */
-export interface TeacherQuery {
-  roleType?: TeacherRoleType;
-  status?: 'active' | 'leave';
-  keyword?: string;
-  classId?: number;
-}
-
-/** 教师导入模板列（顺序即表头顺序） */
-export const TEACHER_HEADERS = ['工号', '姓名', '手机号', '人员类型', '所辖班级', '在职状态'] as const;
-
-/** Excel 解析出的一行教师数据（row 为含表头的实际行号，从 2 开始） */
-export interface ParsedTeacherRow {
-  row: number;
-  data: {
-    employeeNo: string;
-    name: string;
-    mobile: string;
-    /** 模板原文（「辅导员」「辅导员、班主任」） */
-    roleTypes: string;
-    classNames: string;
-    /** 模板原文：「在职」/「离职」/空 */
-    status: string;
-  };
-}
-
-/** 一条教师导入失败记录（行号 + 字段 + 原因，可精确定位） */
-export interface TeacherImportFailure {
-  row: number;
-  /** 出错字段（模板列名），便于前端高亮 */
-  field: string;
-  employeeNo: string;
-  name: string;
-  reason: string;
-  data?: ParsedTeacherRow['data'];
-}
-
-/** 导入时的账号同步汇总（与用户管理联动的可审计计数） */
-export interface TeacherSyncSummary {
-  createdUsers: number;
-  updatedUsers: number;
-  skippedCount: number;
-  disabledUsers: number;
-  grantedRoles: number;
-  revokedRoles: number;
-  linkedClasses: number;
-  unlinkedClasses: number;
-  refilledClasses: number;
-  refilledStudents: number;
-}
-
-export interface TeacherImportResult {
-  batchId: string;
-  traceId: string;
-  /** 同一 clientRequestId 重复提交时为 true（回放首次结果，未重复写入） */
-  idempotentReplay?: boolean;
-  total: number;
-  insertedCount: number;
-  updatedCount: number;
-  skippedCount: number;
-  disabledCount: number;
-  successCount: number;
-  failures: TeacherImportFailure[];
-  warnings: { row: number; employeeNo: string; name: string; message: string }[];
-  syncSummary: TeacherSyncSummary | null;
-}
-
-/** 单条维护入参 */
-export interface TeacherUpdateInput {
-  name?: string;
-  mobile?: string;
-  /** 'active' 复职 | 'leave' 离职 */
-  status?: 'active' | 'leave';
-  /** 覆盖式带班集合：{ classId, roleType }[] */
-  bindings?: { classId: number; roleType: TeacherRoleType }[];
-}
-
 /* ==================== 学生信息 ==================== */
 
 export type Gender = '男' | '女';
@@ -310,7 +274,7 @@ export interface Student {
    */
   dorm?: string | null;
   /**
-   * 班主任（只读派生）：由班级教师名单中该班的班主任姓名生成，
+   * 班主任（只读派生）：由班级人员配置（工号绑定）中该班的班主任姓名生成，
    * 不再由学生导入/编辑写入，仅作导出与历史留档。
    */
   headTeacher?: string | null;

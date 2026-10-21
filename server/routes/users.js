@@ -10,6 +10,8 @@ const dbx = require('../lib/db');
 const auth = require('../lib/auth');
 const { isSystemAdmin, roleKeysOfUserId } = require('../lib/permissions');
 const { logAccess, nowStr } = require('../lib/audit');
+const { ROLE_TYPES, ROLE_TYPE_COUNSELOR } = require('../lib/teacherSourceMigrate');
+const { refillStudentsByClass } = require('../lib/teacherSync');
 
 const router = express.Router();
 router.use(auth.authMiddleware);
@@ -17,8 +19,8 @@ router.use(auth.authMiddleware);
 /** 批量导入初始密码规则：统一为「Hzpt@」拼接用户名，模板不再提供密码列，首次登录强制修改 */
 const IMPORT_PASSWORD_PREFIX = 'Hzpt@';
 const USERNAME_RE = /^[a-zA-Z0-9_]{3,20}$/;
-/** 教师类角色：归「班级管理 → 教师名单」管辖，用户管理不再受理（避免双写） */
-const TEACHER_ROLE_KEYS = ['counselor', 'headTeacher'];
+/** 教师类角色：归「班级管理」管辖（录入工号 + 同步用户管理建号），用户管理不再受理（避免双写） */
+const TEACHER_ROLE_KEYS = ROLE_TYPES;
 
 /* ---------- 角色集合（userRoles 多对多） ---------- */
 
@@ -62,20 +64,25 @@ function enabledAdminCount() {
   ).c;
 }
 
-/* ---------- 辅导员所辖班级（classCounselors 多对多） ---------- */
+/* ---------- 所辖班级（classCounselors 多对多） ---------- */
 
-/** 所辖班级 ID 列表（用户管理口径＝辅导员身份的带班；班主任带班归班级管理维护） */
+/**
+ * 所辖班级 ID 列表：辅导员与班主任两个身份合并去重。
+ * 用户管理是账号视图，班级既可能由本页分配（counselor），也可能来自班级管理同步建号（headTeacher），
+ * 只查 counselor 会把同步建号的班主任误显示为「未分配」。
+ */
 function classIdsOf(userId) {
   return dbx.all(
-    "SELECT classId FROM classCounselors WHERE userId = ? AND roleType = 'counselor' ORDER BY classId",
+    'SELECT DISTINCT classId FROM classCounselors WHERE userId = ? ORDER BY classId',
     [userId],
   ).map((r) => r.classId);
 }
 
-/** 所辖班级名称列表 */
+/** 所辖班级名称列表（两个身份合并去重） */
 function classNamesOf(userId) {
   return dbx.all(
-    "SELECT c.name FROM classCounselors cc JOIN classes c ON c.id = cc.classId WHERE cc.userId = ? AND cc.roleType = 'counselor' ORDER BY c.name",
+    `SELECT DISTINCT c.name FROM classCounselors cc JOIN classes c ON c.id = cc.classId
+     WHERE cc.userId = ? ORDER BY c.name`,
     [userId],
   ).map((r) => r.name);
 }
@@ -91,19 +98,108 @@ function resolveClassIds(raw) {
   return found.length === ids.length ? ids : null;
 }
 
+/** 账号实际持有的教师身份（班主任 / 辅导员），非教师角色返回空数组 */
+function teacherRoleTypesOf(roleKeys) {
+  return ROLE_TYPES.filter((t) => roleKeys.includes(t));
+}
+
+/** 带班写入身份：教师账号按自身角色身份落库；其他角色沿用「辅导员」的既有带班语义 */
+function bindingRoleTypesOf(roleKeys) {
+  const types = teacherRoleTypesOf(roleKeys);
+  return types.length > 0 ? types : [ROLE_TYPE_COUNSELOR];
+}
+
 /**
- * 整体替换用户的带班（按身份维度）。
- * 用户管理侧维护的是「辅导员」身份的带班；班主任带班由班级管理维护。
- * @param roleType 'counselor' | 'headTeacher'
+ * 整体替换用户在指定身份维度下的带班。
+ * @param {number} userId
+ * @param {number[]} classIds
+ * @param {string[]} roleTypes 'counselor' | 'headTeacher'
  */
-function setClassCounselors(userId, classIds, roleType = 'counselor') {
-  dbx.run('DELETE FROM classCounselors WHERE userId = ? AND roleType = ?', [userId, roleType]);
+function setClassCounselors(userId, classIds, roleTypes = [ROLE_TYPE_COUNSELOR]) {
+  const types = [...new Set(roleTypes)].filter((t) => ROLE_TYPES.includes(t));
+  if (types.length === 0) return;
+  dbx.run(
+    `DELETE FROM classCounselors WHERE userId = ? AND roleType IN (${types.map(() => '?').join(', ')})`,
+    [userId, ...types],
+  );
   for (const cid of classIds) {
+    for (const roleType of types) {
+      dbx.run(
+        'INSERT OR IGNORE INTO classCounselors (classId, userId, roleType, createdAt) VALUES (?, ?, ?, ?)',
+        [cid, userId, roleType, nowStr()],
+      );
+    }
+  }
+}
+
+/** 清空账号的全部带班（转系统管理员时两个身份一起解除） */
+function clearClassCounselors(userId) {
+  dbx.run('DELETE FROM classCounselors WHERE userId = ?', [userId]);
+}
+
+/**
+ * 覆盖账号的带班（手动分配场景）：以所选班级为全集，两个身份一起重建。
+ * 同一班级原有且仍属于账号教师身份的记录保留其身份；不再属于账号角色的旧身份被清除，
+ * 避免历史上被错绑为辅导员的班主任在重新分配后仍残留为双身份。
+ */
+function replaceClassBindings(userId, classIds, roleTypes) {
+  const types = [...new Set(roleTypes)].filter((t) => ROLE_TYPES.includes(t));
+  if (types.length === 0) return;
+  const prevByClass = new Map();
+  for (const row of dbx.all('SELECT classId, roleType FROM classCounselors WHERE userId = ?', [userId])) {
+    const cid = Number(row.classId);
+    if (!prevByClass.has(cid)) prevByClass.set(cid, []);
+    prevByClass.get(cid).push(row.roleType);
+  }
+  dbx.run('DELETE FROM classCounselors WHERE userId = ?', [userId]);
+  for (const cid of classIds) {
+    const kept = (prevByClass.get(Number(cid)) ?? []).filter((t) => types.includes(t));
+    const finalTypes = kept.length > 0 ? kept : types;
+    for (const roleType of finalTypes) {
+      dbx.run(
+        'INSERT OR IGNORE INTO classCounselors (classId, userId, roleType, createdAt) VALUES (?, ?, ?, ?)',
+        [cid, userId, roleType, nowStr()],
+      );
+    }
+  }
+}
+
+/**
+ * 建号时自动落地「班级管理」中同工号（= username）的待同步记录：
+ * 只绑定与账号教师身份一致的 roleType，避免建号顺带授予表单未选择的身份。
+ * @returns {number[]} 自动绑定的班级 ID（去重）
+ */
+function linkPendingStaff(userId, username, roleTypes) {
+  if (roleTypes.length === 0) return [];
+  const rows = dbx.all(
+    `SELECT id, classId, roleType FROM classPendingStaff
+     WHERE employeeNo = ? AND roleType IN (${roleTypes.map(() => '?').join(', ')})`,
+    [username, ...roleTypes],
+  );
+  const classIds = [];
+  for (const row of rows) {
     dbx.run(
       'INSERT OR IGNORE INTO classCounselors (classId, userId, roleType, createdAt) VALUES (?, ?, ?, ?)',
-      [cid, userId, roleType, nowStr()],
+      [row.classId, userId, row.roleType, nowStr()],
     );
+    dbx.run('DELETE FROM classPendingStaff WHERE id = ?', [row.id]);
+    classIds.push(Number(row.classId));
   }
+  return [...new Set(classIds)];
+}
+
+/**
+ * 手动分配班级后清理同工号、同班级、同身份的待同步记录，
+ * 避免班级管理同时显示「已绑定」与「待同步」。
+ */
+function clearPendingStaffOf(username, classIds, roleTypes) {
+  if (classIds.length === 0 || roleTypes.length === 0) return;
+  dbx.run(
+    `DELETE FROM classPendingStaff WHERE employeeNo = ?
+       AND roleType IN (${roleTypes.map(() => '?').join(', ')})
+       AND classId IN (${classIds.map(() => '?').join(', ')})`,
+    [username, ...roleTypes, ...classIds],
+  );
 }
 
 /**
@@ -205,14 +301,38 @@ router.post('/', (req, res) => {
     if (classIds === null) return res.status(400).json({ message: '所选班级不存在（可能已被删除）' });
   }
 
-  const info = dbx.run(
-    'INSERT INTO users (username, displayName, role, passwordHash, mustChangePassword, createdAt) VALUES (?, ?, ?, ?, 1, ?)',
-    [username, displayName, primary, auth.hashPassword(password), nowStr()],
+  // 建号与带班绑定必须原子：账号、角色、班级、待同步清理、学生派生回填任一失败都整体回滚
+  const bindingRoleTypes = bindingRoleTypesOf(roleKeys);
+  const passwordHash = auth.hashPassword(password);
+  let uid;
+  let pendingClassIds = [];
+  dbx.db.exec('BEGIN IMMEDIATE');
+  try {
+    const info = dbx.run(
+      'INSERT INTO users (username, displayName, role, passwordHash, mustChangePassword, createdAt) VALUES (?, ?, ?, ?, 1, ?)',
+      [username, displayName, primary, passwordHash, nowStr()],
+    );
+    uid = Number(info.lastInsertRowid);
+    setUserRoles(uid, roleKeys);
+    if (classIds.length > 0) setClassCounselors(uid, classIds, bindingRoleTypes);
+    // 工号命中的待同步记录（班级管理已录入但当时无账号）在建号时直接落地绑定
+    pendingClassIds = roleKeys.includes('admin')
+      ? []
+      : linkPendingStaff(uid, username, teacherRoleTypesOf(roleKeys));
+    const touchedClassIds = [...new Set([...classIds, ...pendingClassIds])];
+    if (touchedClassIds.length > 0) refillStudentsByClass(touchedClassIds);
+    dbx.db.exec('COMMIT');
+  } catch (e) {
+    dbx.db.exec('ROLLBACK');
+    console.error('[users/create] 事务回滚：', e.message);
+    return res.status(500).json({ message: '创建失败，已全部回滚，未产生任何数据变更' });
+  }
+
+  const boundClassIds = [...new Set([...classIds, ...pendingClassIds])];
+  logAccess(
+    req,
+    `新增账号 ${username}（角色：${roleKeys.join('、')}）${boundClassIds.length ? `，分配 ${boundClassIds.length} 个班级` : ''}${pendingClassIds.length ? `，自动关联班级管理待同步 ${pendingClassIds.length} 个班级` : ''}`,
   );
-  const uid = Number(info.lastInsertRowid);
-  setUserRoles(uid, roleKeys);
-  if (classIds.length > 0) setClassCounselors(uid, classIds);
-  logAccess(req, `新增账号 ${username}（角色：${roleKeys.join('、')}）${classIds.length ? `，分配 ${classIds.length} 个班级` : ''}`);
   res.json(toUser(dbx.get(
     'SELECT u.*, r.name AS roleName FROM users u LEFT JOIN roles r ON r.key = u.role WHERE u.id = ?',
     [uid],
@@ -237,6 +357,7 @@ router.put('/:id', (req, res) => {
 
   // 角色集合调整：不能改自己，且系统至少保留一名启用的系统管理员
   let roleKeys = targetRoleKeys.length > 0 ? targetRoleKeys : [target.role];
+  const prevRoleKeys = [...roleKeys];
   if (req.body?.roleKeys !== undefined || req.body?.role !== undefined) {
     const nextKeys = resolveRoleKeys(req.body?.roleKeys ?? [req.body?.role]);
     if (!nextKeys) {
@@ -279,8 +400,23 @@ router.put('/:id', (req, res) => {
     [displayName, primary, disabled, id],
   );
   setUserRoles(id, roleKeys);
-  if (nextIsAdmin) setClassCounselors(id, []);
-  else if (classIds !== undefined) setClassCounselors(id, classIds);
+  const prevClassIds = classIdsOf(id);
+  if (nextIsAdmin) {
+    clearClassCounselors(id);
+    refillStudentsByClass(prevClassIds);
+  } else if (classIds !== undefined) {
+    const bindingRoleTypes = bindingRoleTypesOf(roleKeys);
+    replaceClassBindings(id, classIds, bindingRoleTypes);
+    clearPendingStaffOf(target.username, classIds, bindingRoleTypes);
+    refillStudentsByClass([...new Set([...prevClassIds, ...classIds])]);
+  } else if (
+    prevClassIds.length > 0
+    && teacherRoleTypesOf(prevRoleKeys).join('|') !== teacherRoleTypesOf(roleKeys).join('|')
+  ) {
+    // 教师身份调整（如辅导员改为班主任）时，已有带班按新身份重建，避免身份与班级归属漂移
+    replaceClassBindings(id, prevClassIds, bindingRoleTypesOf(roleKeys));
+    refillStudentsByClass(prevClassIds);
+  }
 
   if (newPassword) {
     dbx.run('UPDATE users SET passwordHash = ?, mustChangePassword = 1 WHERE id = ?', [
@@ -367,9 +503,9 @@ router.post('/import', (req, res) => {
     if (!roleRaw) reasons.push('角色为必填项');
     else if (!roleRow) reasons.push(`角色「${roleRaw}」不存在，请先在「角色管理」中创建`);
     else if (TEACHER_ROLE_KEYS.includes(roleRow.key)) {
-      // 教师数据唯一来源：辅导员 / 班主任只能由「班级管理 → 教师名单」导入，
+      // 教师类账号唯一来源：在「班级管理」录入工号（未匹配的待同步人员可在「班级管理 → 同步用户管理」一键建号），
       // 这里放开会与班级管理双写，导致带班关系与账号口径漂移。
-      reasons.push('辅导员 / 班主任请到「班级管理 → 教师名单」导入（教师数据唯一来源）');
+      reasons.push('辅导员 / 班主任请先在「班级管理」录入工号；工号未匹配的待同步人员可在「班级管理 → 同步用户管理」一键建号');
     }
 
     let classIds = [];
