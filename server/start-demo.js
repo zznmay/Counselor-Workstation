@@ -26,13 +26,11 @@ process.on('unhandledRejection', (err) => {
 
 console.error('[boot] demo node=%s pid=%s PORT=%s cwd=%s', process.version, process.pid, process.env.PORT, process.cwd());
 
-// 一次性重置开关: RESET_DB=1 时清空数据目录, 强制按演示种子重新初始化
-// (演示站日常无需该变量；数据被体验者改乱后重建容器/重置盘即可恢复)
-if (process.env.RESET_DB === '1') {
-  const fs = require('fs');
-  const { DATA_DIR } = require('./lib/config');
-  fs.rmSync(DATA_DIR, { recursive: true, force: true });
-  console.error('[boot] RESET_DB=1 → 已清空数据目录, 将按演示种子重新初始化');
-}
+// 演示站固定重置数据目录：每次容器启动都按演示种子重建（体验数据被改乱后重启即恢复），
+// 同时保证复用旧实例数据盘时不会带入历史真实数据——演示站只允许虚构演示数据存在。
+const fs = require('fs');
+const { DATA_DIR } = require('./lib/config');
+fs.rmSync(DATA_DIR, { recursive: true, force: true });
+console.error('[boot] demo 数据目录已重置，将按演示种子重新初始化');
 
 require('./index.js');
