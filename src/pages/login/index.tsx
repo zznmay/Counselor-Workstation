@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { request } from '@/api/request';
 import RouteFallback from '@/components/RouteFallback';
 import { firstAccessiblePath, setSession } from '@/lib/auth';
+import { tryDemoLogin } from '@/lib/demoLogin';
 import type { AuthUser } from '@/lib/auth';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import './desktop.css';
@@ -349,9 +350,21 @@ function LoginDesktop() {
  * 视口分发：≤768px 走移动端独立渲染层（头图 + 非对称圆角白面板，
  * 见 docs/mobile-redesign/prototype/login.html），桌面端为设计稿等比舞台。
  * 两端共用同一套登录逻辑（/auth/login → 会话写入 → 首次登录改密），仅呈现层不同。
+ *
+ * 演示模式兜底：RequireAuth 已做过自动登录，能到登录页通常是「演示令牌过期被 401
+ * 踢出」或「演示服务恰好不可用」；挂载时再静默尝试一次演示登录，成功即直接进入，
+ * 失败则停留本页（常规部署下 demo-login 404，一次静默请求开销可忽略）。
  */
 export default function Login() {
   const isMobile = useIsMobile();
+  const navigate = useNavigate();
+  useEffect(() => {
+    let cancelled = false;
+    tryDemoLogin().then((user) => {
+      if (!cancelled && user) navigate(firstAccessiblePath(user), { replace: true });
+    });
+    return () => { cancelled = true; };
+  }, [navigate]);
   if (!isMobile) return <LoginDesktop />;
   return (
     <Suspense fallback={<RouteFallback full />}>

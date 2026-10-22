@@ -5,6 +5,7 @@ const bcrypt = require('bcryptjs');
 const { DB_PATH, ensureDirs } = require('./config');
 const { COUNSELOR_DEFAULT_KEYS, COUNSELOR_LEGACY_KEYS, HEAD_TEACHER_DEFAULT_KEYS } = require('./modules');
 const SEED = require('./seed-data');
+const demo = require('./demo');
 
 ensureDirs();
 
@@ -624,9 +625,12 @@ function ensureDormitoryBackfill() {
  *   empty （生产）仅创建管理员 admin 一个账号，不写入任何示例账号与示例业务数据；
  *         其余账号、学生与业务数据一律由管理员在后台按真实情况录入。
  * 取值缺省或非 empty 时一律按 demo 处理，保证既有开发与部署行为完全不变。
+ * 叠加 WORKBENCH_DEMO=1（体验部署）时：demo 种子照常写入，但种子管理员口令随机化并禁用，
+ * 访客仅可通过 /auth/demo-login 进入（见 lib/demo.js）。
  */
 function seedMode() {
-  return String(process.env.WORKBENCH_SEED ?? 'demo').trim().toLowerCase() === 'empty' ? 'empty' : 'demo';
+  const raw = String(process.env.WORKBENCH_SEED ?? 'demo').trim().toLowerCase();
+  return raw === 'empty' ? 'empty' : raw === 'demo' ? 'demo' : 'demo';
 }
 
 /** 首次初始化：管理员 +（demo 模式）示例辅导员账号 +（demo 模式）示例业务数据 */
@@ -646,12 +650,22 @@ function seed() {
     return;
   }
 
+  // 演示模式（WORKBENCH_SEED=demo，仅供体验环境）：写入完整示例数据，
+  // 但种子管理员口令随机化并禁用（体验站对外不可用 admin 登录）。
+  const demoSeed = seedMode() === 'demo' && demo.isDemoMode();
+
   const sampleHash = bcrypt.hashSync('Hzky@123456', 10);
 
   const counselorUserIds = [];
   for (const [username, displayName] of SEED.counselors) {
     const info = insUser.run(username, displayName, 'counselor', sampleHash, 1, now());
     counselorUserIds.push(Number(info.lastInsertRowid));
+  }
+  if (demoSeed) {
+    // 覆盖 admin：随机口令 + 禁用；演示数据对外只保留 demo-login 单一入口
+    db.prepare('UPDATE users SET passwordHash = ?, mustChangePassword = 0, disabled = 1 WHERE username = ?')
+      .run(bcrypt.hashSync(require('crypto').randomBytes(24).toString('hex'), 10), 'admin');
+    console.log('[db] 演示模式：种子管理员口令已随机化并禁用登录。');
   }
 
   const ownerOf = (i) => counselorUserIds[i % counselorUserIds.length];
@@ -782,6 +796,12 @@ ensureDormitoryBackfill();
 ensureUserRoleBackfill();
 ensureMentalLevelBaselineLogs();
 ensureDefaultInterviewTemplate();
+// 演示模式（WORKBENCH_DEMO=1）：建体验账号 + 全班带班 + 派生列兜底（详见 lib/demo.js）
+demo.ensureDemoAccount({
+  get: (sql, params) => db.prepare(sql).get(...(params ?? [])),
+  all: (sql, params) => db.prepare(sql).all(...(params ?? [])),
+  run: (sql, params) => db.prepare(sql).run(...(params ?? [])),
+});
 
 /**
  * 心理访谈记录单默认模板（幂等）：库内没有任何模板时播种内置默认模板

@@ -3,6 +3,7 @@ const express = require('express');
 
 const dbx = require('../lib/db');
 const auth = require('../lib/auth');
+const demo = require('../lib/demo');
 const { classIdsOfUser } = require('../lib/scope');
 const { permissionsOfUser, ownerModulesOfUser, isSystemAdmin, roleKeysOfUserId } = require('../lib/permissions');
 const { logAccess } = require('../lib/audit');
@@ -54,6 +55,26 @@ router.post('/login', (req, res) => {
 
   res.json({ token, user: withSession(row) });
 });
+
+/**
+ * 演示登录（仅 WORKBENCH_DEMO=1 时可用）：免口令发放体验账号令牌，
+ * 访客打开链接即可直接体验全部演示数据。必须注册在 authMiddleware 之前（免鉴权）。
+ * 用 GET：幂等、无副作用（服务端实时读库签发短时会话）。
+ */
+const demoLoginRouter = require('express').Router();
+demoLoginRouter.get('/demo-login', (req, res) => {
+  if (!demo.isDemoMode()) {
+    return res.status(404).json({ message: '演示模式未启用' });
+  }
+  const row = dbx.get('SELECT * FROM users WHERE username = ? AND disabled = 0', [demo.DEMO_USERNAME]);
+  if (!row) {
+    return res.status(503).json({ message: '演示账号未就绪，请稍后刷新重试' });
+  }
+  const token = auth.issueToken(row);
+  logAccess(req, '演示登录');
+  res.json({ token, user: withSession(row) });
+});
+router.use(demoLoginRouter);
 
 // 以下接口需要登录
 router.use(auth.authMiddleware);

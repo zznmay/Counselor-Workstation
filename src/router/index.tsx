@@ -1,9 +1,10 @@
 import { Navigate, createBrowserRouter } from 'react-router-dom';
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 
 import RouteFallback from '@/components/RouteFallback';
 import { canAccessModule, getStoredUser, getToken, isSystemAdmin } from '@/lib/auth';
+import { tryDemoLogin } from '@/lib/demoLogin';
 import RouteError from '@/pages/routeError';
 
 /**
@@ -39,9 +40,24 @@ function page(node: ReactNode) {
   return <Suspense fallback={<RouteFallback />}>{node}</Suspense>;
 }
 
-/** 路由守卫：未登录统一跳转登录页 */
+/**
+ * 路由守卫：未登录时先尝试演示登录（体验部署 WORKBENCH_DEMO=1 下免口令直通），
+ * 失败则跳转常规登录页。演示请求进行中展示整页加载态，避免闪烁跳转。
+ */
 function RequireAuth({ children }: { children: ReactNode }) {
-  if (!getToken()) return <Navigate to="/login" replace />;
+  const [demoReady, setDemoReady] = useState(false);
+  useEffect(() => {
+    if (getToken()) return; // 已有会话：直接渲染，不做任何请求
+    let cancelled = false;
+    tryDemoLogin().finally(() => {
+      if (!cancelled) setDemoReady(true);
+    });
+    return () => { cancelled = true; };
+  }, []);
+  if (!getToken()) {
+    if (!demoReady) return <RouteFallback full />; // 演示登录尝试中
+    return <Navigate to="/login" replace />;
+  }
   return <>{children}</>;
 }
 
