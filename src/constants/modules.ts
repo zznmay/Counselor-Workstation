@@ -20,6 +20,7 @@ export const APP_MODULES: AppModule[] = [
   { key: 'mentalHealth', name: '心理健康', group: '业务办理' },
   { key: 'mentalInterview', name: '心理访谈', group: '业务办理', ownerable: false },
   { key: 'todos', name: '待办提醒', group: '业务办理' },
+  { key: 'funding', name: '资助管理', group: '业务办理' },
   { key: 'templates', name: '模板汇总库', group: '资料与工具' },
   { key: 'tools', name: '实用工具', group: '资料与工具' },
   { key: 'classes', name: '班级管理', group: '基础数据' },
@@ -41,6 +42,7 @@ export const MODULE_HOME: Record<string, string> = {
   mentalHealth: '/mental',
   mentalInterview: '/mental',
   todos: '/todos',
+  funding: '/funding',
   templates: '/templates',
   tools: '/tools',
   classes: '/classes',
@@ -55,6 +57,7 @@ export function moduleForPath(pathname: string): string | null {
   if (pathname.startsWith('/warnings')) return 'warnings';
   if (pathname.startsWith('/mental')) return 'mentalHealth';
   if (pathname.startsWith('/todos')) return 'todos';
+  if (pathname.startsWith('/funding')) return 'funding';
   if (pathname.startsWith('/templates')) return 'templates';
   if (pathname.startsWith('/tools')) return 'tools';
   if (pathname.startsWith('/classes')) return 'classes';

@@ -8,7 +8,7 @@ const express = require('express');
 const dbx = require('../lib/db');
 const auth = require('../lib/auth');
 const { canManageStudent, rosterScope, isAdmin } = require('../lib/scope');
-const { normalizeTarget, diffStudentFields } = require('../lib/studentDiff');
+const { STUDENT_STATUSES, normalizeTarget, diffStudentFields } = require('../lib/studentDiff');
 const { mirrorStudentDorm, removeDormOfStudent, renameDormStudentNo, syncDormFromText } = require('../lib/dormitory');
 const { derivedTeachersOfClass } = require('../lib/teacherSync');
 const { requirePermission } = require('../lib/permissions');
@@ -23,14 +23,84 @@ const STUDENT_SELECT = `
   SELECT s.*, d.building AS dormBuilding, d.room AS dormRoom
   FROM students s LEFT JOIN dormitories d ON d.studentNo = s.studentNo`;
 
+/**
+ * 关注等级（心理健康）与困难等级（资助）为敏感标签，仅回传给「所带班级」的用户：
+ * 管理员全量；其他用户逐生判定归属班级是否在 classCounselors 带班范围内，
+ * 非本班学生的响应中不含这两个字段（数据层面收口，防止越权获取）。
+ * 困难等级取该生最近学年（同年按认定月份）的「已认定」记录。
+ */
+function attachTagLevels(user, rows) {
+  if (rows.length === 0) return;
+  let managed = null; // null = 管理员全量
+  if (!isAdmin(user)) {
+    managed = new Set(
+      dbx.all('SELECT classId FROM classCounselors WHERE userId = ?', [user.id]).map((r) => r.classId),
+    );
+    if (managed.size === 0) return;
+  }
+  const permitted = rows.filter((r) => managed === null || (r.classId != null && managed.has(r.classId)));
+  if (permitted.length === 0) return;
+  const marks = permitted.map(() => '?').join(', ');
+  const ids = permitted.map((r) => r.id);
+
+  const mentalLevels = {};
+  for (const m of dbx.all(`SELECT studentId, level FROM mentalHealth WHERE studentId IN (${marks})`, ids)) {
+    mentalLevels[m.studentId] = m.level;
+  }
+  const fundingLevels = {};
+  const fundingRows = dbx.all(
+    `SELECT studentId, level, academicYear, identifiedAt, rowid AS rid FROM fundingIdentifications
+     WHERE studentId IN (${marks}) AND status = '已认定'
+     ORDER BY academicYear DESC, identifiedAt DESC, rid DESC`,
+    ids,
+  );
+  for (const f of fundingRows) {
+    if (!(f.studentId in fundingLevels)) fundingLevels[f.studentId] = f.level;
+  }
+
+  for (const r of permitted) {
+    if (mentalLevels[r.id]) r.mentalLevel = mentalLevels[r.id];
+    if (fundingLevels[r.id]) r.fundingLevel = fundingLevels[r.id];
+  }
+}
+
 const router = express.Router();
 router.use(auth.authMiddleware);
 
 const FIELDS = [
   'studentNo', 'name', 'gender', 'grade', 'major', 'className', 'phone', 'dorm',
-  'politicalStatus', 'origin', 'status', 'headTeacher', 'counselor',
+  'politicalStatus', 'origin', 'headTeacher', 'counselor',
   'fatherName', 'fatherPhone', 'motherName', 'motherPhone', 'position', 'remark', 'enrollDate',
 ];
+
+function isDateOnly(value) {
+  const s = String(value ?? '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const [year, month, day] = s.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
+}
+
+/** 学籍状态 + 异动办理时间：非在读状态必须填写办理时间，在读状态清空该时间 */
+function resolveStatusFields(body, target = null) {
+  const status = String(body?.status ?? target?.status ?? '在读').trim() || '在读';
+  if (!STUDENT_STATUSES.includes(status)) {
+    return { error: `学籍状态需为：${STUDENT_STATUSES.join('、')}` };
+  }
+  if (status === '在读') return { status, statusChangedAt: null };
+
+  const raw = body?.statusChangedAt !== undefined
+    ? body.statusChangedAt
+    : target?.statusChangedAt;
+  const statusChangedAt = String(raw ?? '').trim();
+  if (!statusChangedAt) {
+    return { error: `学籍状态为「${status}」时必须填写学籍异动办理时间` };
+  }
+  if (!isDateOnly(statusChangedAt)) {
+    return { error: '学籍异动办理时间格式应为 YYYY-MM-DD' };
+  }
+  return { status, statusChangedAt };
+}
 
 /** 共管老师列表 */
 function coManagersOf(studentId) {
@@ -120,6 +190,7 @@ router.get('/', (req, res) => {
     `${STUDENT_SELECT} WHERE ${finalWhere} ORDER BY s.studentNo DESC LIMIT ? OFFSET ?`,
     [...params, pageSize, (page - 1) * pageSize],
   );
+  attachTagLevels(req.user, rows);
   res.json({ list: rows, total, page, pageSize });
 });
 
@@ -293,17 +364,20 @@ router.post('/', (req, res) => {
   const cls = resolveStudentClassId(body);
   if (cls.error) return res.status(400).json({ message: cls.error });
 
+  const statusInfo = resolveStatusFields(body);
+  if (statusInfo.error) return res.status(400).json({ message: statusInfo.error });
+
   // 班主任 / 辅导员一律由班级人员配置派生（班级管理为唯一来源，不接受入参）
   const derived = derivedTeachersOfClass(cls.value);
 
   dbx.run(`INSERT INTO students
-    (id, studentNo, name, gender, grade, major, className, classId, phone, dorm, politicalStatus, origin, status,
+    (id, studentNo, name, gender, grade, major, className, classId, phone, dorm, politicalStatus, origin, status, statusChangedAt,
      headTeacher, counselor, fatherName, fatherPhone, motherName, motherPhone, position, remark, enrollDate,
      ownerId, createdBy, createdAt, updatedAt)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [id, studentNo, name, body.gender ?? '男', body.grade ?? '', body.major ?? '', body.className ?? '',
       cls.value, body.phone ?? '', body.dorm ?? null, body.politicalStatus ?? null, body.origin ?? null,
-      body.status ?? '在读', derived.headTeacher, derived.counselor, body.fatherName ?? null,
+      statusInfo.status, statusInfo.statusChangedAt, derived.headTeacher, derived.counselor, body.fatherName ?? null,
       body.fatherPhone ?? null, body.motherName ?? null, body.motherPhone ?? null, body.position ?? null,
       body.remark ?? null, body.enrollDate ?? '', ownerId, req.user.id, nowStr(), nowStr()],
   );
@@ -332,6 +406,9 @@ router.put('/:id', (req, res) => {
     }
   }
 
+  const statusInfo = resolveStatusFields(body, target);
+  if (statusInfo.error) return res.status(400).json({ message: statusInfo.error });
+
   const sets = [];
   const params = [];
   for (const field of FIELDS) {
@@ -339,6 +416,8 @@ router.put('/:id', (req, res) => {
     if (field === 'headTeacher' || field === 'counselor') continue;
     if (body[field] !== undefined) { sets.push(`${field} = ?`); params.push(body[field]); }
   }
+  sets.push('status = ?', 'statusChangedAt = ?');
+  params.push(statusInfo.status, statusInfo.statusChangedAt);
   const cls = resolveStudentClassId(body, target);
   if (cls.error) return res.status(400).json({ message: cls.error });
   sets.push('classId = ?');
@@ -460,6 +539,16 @@ router.post('/import', (req, res) => {
     if (!data?.className) reasons.push('班级为必填项');
     if (!data?.enrollDate) reasons.push('入学时间为必填项');
 
+    const status = String(data?.status ?? '').trim() || '在读';
+    const statusChangedAtRaw = String(data?.statusChangedAt ?? '').trim();
+    if (!STUDENT_STATUSES.includes(status)) {
+      reasons.push(`学籍状态只能填：${STUDENT_STATUSES.join('、')}`);
+    }
+    if (status !== '在读') {
+      if (!statusChangedAtRaw) reasons.push('学籍状态为非在读时必须填写学籍异动办理时间');
+      else if (!isDateOnly(statusChangedAtRaw)) reasons.push('学籍异动办理时间格式应为 YYYY-MM-DD');
+    }
+
     if (studentNo && fileSeen.has(studentNo)) {
       reasons.push(`学号与本批第 ${fileSeen.get(studentNo)} 行重复`);
     }
@@ -487,7 +576,12 @@ router.post('/import', (req, res) => {
     }
 
     // 班主任 / 辅导员由班级人员配置派生后注入（学生模板已移除两列）
-    const target = { ...normalizeTarget(data, clsRow), ...derivedTeachersOfClass(clsRow.id) };
+    const normalizedData = {
+      ...data,
+      status,
+      statusChangedAt: status === '在读' ? '' : statusChangedAtRaw,
+    };
+    const target = { ...normalizeTarget(normalizedData, clsRow), ...derivedTeachersOfClass(clsRow.id) };
     const existing = dbx.get('SELECT * FROM students WHERE studentNo = ?', [studentNo]);
     if (!existing) {
       inserts.push({ row, studentNo, target });
@@ -520,13 +614,13 @@ router.post('/import', (req, res) => {
       for (const it of inserts) {
         const t = it.target;
         dbx.run(`INSERT INTO students
-          (id, studentNo, name, gender, grade, major, className, classId, phone, dorm, politicalStatus, origin, status,
+          (id, studentNo, name, gender, grade, major, className, classId, phone, dorm, politicalStatus, origin, status, statusChangedAt,
            headTeacher, counselor, fatherName, fatherPhone, motherName, motherPhone, position, remark, enrollDate,
            ownerId, createdBy, createdAt, updatedAt)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [`s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}-${it.row}`, it.studentNo,
             t.name, t.gender, t.grade, t.major, t.className, t.classId, t.phone,
-            opt(t.dorm), opt(t.politicalStatus), opt(t.origin), t.status,
+            opt(t.dorm), opt(t.politicalStatus), opt(t.origin), t.status, opt(t.statusChangedAt),
             opt(t.headTeacher), opt(t.counselor), opt(t.fatherName), opt(t.fatherPhone),
             opt(t.motherName), opt(t.motherPhone), opt(t.position), opt(t.remark), t.enrollDate,
             req.user.id, req.user.id, nowStr(), nowStr()],

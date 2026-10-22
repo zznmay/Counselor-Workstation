@@ -99,6 +99,7 @@ interface StudentFormValues {
   politicalStatus?: string;
   origin?: string;
   status: StudentStatus;
+  statusChangedAt?: Dayjs;
   fatherName?: string;
   fatherPhone?: string;
   motherName?: string;
@@ -302,6 +303,14 @@ function StudentsDesktop() {
    * 依赖未变时回调跳过执行，各次渲染 hook 数量不一致会触发 React error #311（名册页崩溃）。
    */
   const watchedClassId = Form.useWatch('classId', form) as number | undefined;
+  const watchedStatus = Form.useWatch('status', form) as StudentStatus | undefined;
+
+  // 学籍状态回到「在读」时清空异动办理时间，避免隐藏字段残留在提交数据中
+  useEffect(() => {
+    if (watchedStatus === '在读') {
+      form.setFieldValue('statusChangedAt', undefined);
+    }
+  }, [watchedStatus, form]);
   const derivedTeachers = useMemo(() => {
     const cls = classOptions.find((c) => c.id === Number(watchedClassId));
     if (!cls) return { headTeacher: '', counselor: '' };
@@ -433,6 +442,7 @@ function StudentsDesktop() {
         ...editing,
         classId: editing.classId ?? undefined,
         enrollDate: dayjs(editing.enrollDate),
+        statusChangedAt: editing.statusChangedAt ? dayjs(editing.statusChangedAt) : undefined,
       });
     } else {
       form.resetFields();
@@ -464,6 +474,9 @@ function StudentsDesktop() {
         ...values,
         className: classOpt?.name ?? '',
         enrollDate: values.enrollDate.format('YYYY-MM-DD'),
+        statusChangedAt: values.status === '在读'
+          ? null
+          : values.statusChangedAt?.format('YYYY-MM-DD') ?? null,
       };
       if (editing) {
         await updateStudent(editing.id, payload);
@@ -622,7 +635,7 @@ function StudentsDesktop() {
     {
       title: '学籍状态',
       dataIndex: 'status',
-      width: 90,
+      width: 120,
       render: (status: StudentStatus) => <Tag color={STUDENT_STATUS_COLOR[status]}>{status}</Tag>,
     },
     {
@@ -832,6 +845,9 @@ function StudentsDesktop() {
             <Descriptions.Item label="学籍状态">
               <Tag color={STUDENT_STATUS_COLOR[detail.status]}>{detail.status}</Tag>
             </Descriptions.Item>
+            <Descriptions.Item label="学籍异动办理时间">
+              {detail.statusChangedAt ?? '—'}
+            </Descriptions.Item>
             <Descriptions.Item label="班主任">{detail.headTeacher ?? '—'}</Descriptions.Item>
             <Descriptions.Item label="辅导员">{detail.counselor ?? '—'}</Descriptions.Item>
             <Descriptions.Item label="备注" span={2}>
@@ -995,6 +1011,18 @@ function StudentsDesktop() {
                 <Select options={toOptions(STUDENT_STATUSES)} />
               </Form.Item>
             </Col>
+            {watchedStatus !== '在读' && (
+              <Col xs={24} sm={12}>
+                <Form.Item
+                  name="statusChangedAt"
+                  label="学籍异动办理时间"
+                  extra="学籍状态为非在读时必填"
+                  rules={[{ required: true, message: '请选择学籍异动办理时间' }]}
+                >
+                  <DatePicker style={{ width: '100%' }} placeholder="请选择办理时间" />
+                </Form.Item>
+              </Col>
+            )}
             <Col xs={24} sm={12}>
               <Form.Item
                 name="dorm"

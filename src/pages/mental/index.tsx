@@ -613,8 +613,13 @@ function MentalHealthDesktop() {
           current: data.page,
           pageSize: data.pageSize,
           total: data.total,
-          showSizeChanger: false,
+          showSizeChanger: true,
+          pageSizeOptions: [10, 20, 50, 100],
           showTotal: (t) => `共 ${t} 名关注学生`,
+          onChange: (page, pageSize) => patchQuery(
+            { page: pageSize === data.pageSize ? page : 1, pageSize },
+            false,
+          ),
         }}
       />
 

@@ -7,6 +7,9 @@ dist/
 server/data/
 server/backups/
 
+# ===== 发布回滚快照（本地发布流程产物）=====
+backups/
+
 # ===== 证书与密钥（自签证书可由 npm run gen-cert 重新生成）=====
 server/certs/
 *.pem

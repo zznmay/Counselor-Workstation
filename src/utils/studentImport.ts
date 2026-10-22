@@ -40,6 +40,7 @@ export const TEMPLATE_HEADERS = [
   '政治面貌',
   '生源地',
   '学籍状态',
+  '学籍异动办理时间',
   '班内职务',
   '备注',
   '入学时间',
@@ -60,7 +61,8 @@ const FIELD_GUIDE: [string, string, string][] = [
   ['宿舍', '选填', '如 学生公寓5-602'],
   ['政治面貌', '选填', '如 共青团员、中共预备党员、群众'],
   ['生源地', '选填', '如 浙江杭州'],
-  ['学籍状态', '选填', '只能填：在读、休学、退学；留空默认为「在读」'],
+  ['学籍状态', '选填', `只能填：${STUDENT_STATUSES.join('、')}；留空默认为「在读」`],
+  ['学籍异动办理时间', '条件必填', '学籍状态为休学、退学、入伍保留学籍、转专业时必填；格式同入学时间（YYYY-MM-DD 等），状态为在读时无需填写'],
   ['班内职务', '选填', '如 班长、学习委员'],
   ['备注', '选填', '家庭情况、重点关注事项等'],
   ['入学时间', '必填', `多种写法均可，导入时统一转换为 YYYY-MM-DD：${SUPPORTED_DATE_FORMATS.join('；')}；也可直接使用 Excel 日期单元格`],
@@ -83,6 +85,7 @@ const EXAMPLE_ROWS: (string | undefined)[][] = [
     '共青团员',
     '浙江杭州',
     '在读',
+    '',
     '学习委员',
     '示例行：正式导入前请删除本表所有示例行',
     '2026-09-01',
@@ -102,11 +105,11 @@ const EXAMPLE_ROWS: (string | undefined)[][] = [
     '',
     '群众',
     '浙江宁波',
+    '休学',
+    '2026-10-01',
     '',
-    '',
-    '示例行：选填列可留空，学籍状态留空默认为在读',
+    '示例行：休学需填写学籍异动办理时间',
     '2026-09-01',
-    '',
     '',
     '',
     '',
@@ -132,13 +135,12 @@ export async function buildStudentTemplateWorkbook(): Promise<XLSX.WorkBook> {
     { wch: 13 },
     { wch: 11 },
     { wch: 9 },
+    { wch: 16 },
     { wch: 11 },
     { wch: 40 },
     { wch: 13 },
     { wch: 10 },
     { wch: 10 },
-    { wch: 10 },
-    { wch: 13 },
     { wch: 10 },
     { wch: 13 },
   ];
@@ -213,7 +215,9 @@ export async function parseStudentExcel(file: File): Promise<ParsedStudentRow[]>
         dorm: get('宿舍') || undefined,
         politicalStatus: get('政治面貌') || undefined,
         origin: get('生源地') || undefined,
-        status: (STUDENT_STATUSES as readonly string[]).includes(statusRaw) ? statusRaw : '在读',
+        // 保留原始值，交给 validateStudentRows 统一判枚举；留空才默认在读
+        status: (statusRaw || '在读') as Student['status'],
+        statusChangedAt: get('学籍异动办理时间') || undefined,
         position: get('班内职务') || undefined,
         remark: get('备注') || undefined,
         // 原样保留（仅清洗空白），日期与号码的规范化统一放到 validateStudentRows，
@@ -260,15 +264,21 @@ export function validateStudentRows(
     const fatherPhone = normalizePhoneInput(rawData.fatherPhone);
     const motherPhone = normalizePhoneInput(rawData.motherPhone);
     const enrollDate = normalizeDateInput(rawData.enrollDate);
+    const statusChangedAt = normalizeDateInput(rawData.statusChangedAt);
+    const status = (rawData.status || '在读') as Student['status'];
 
     const data = {
       ...rawData,
-      status: (rawData.status || '在读') as Student['status'],
+      status,
       // 规范化成功则入库标准化值；失败则原样保留，便于失败明细导出后对照修正
       phone: phone.ok ? formatPhoneNumber(phone) : rawData.phone,
       fatherPhone: fatherPhone.ok ? formatPhoneNumber(fatherPhone) : rawData.fatherPhone,
       motherPhone: motherPhone.ok ? formatPhoneNumber(motherPhone) : rawData.motherPhone,
       enrollDate: enrollDate.ok ? enrollDate.value : rawData.enrollDate,
+      // 在读状态不保留异动时间；非在读保留规范化后的值或原始值用于报错回显
+      statusChangedAt: status === '在读'
+        ? undefined
+        : (statusChangedAt.ok ? statusChangedAt.value : rawData.statusChangedAt),
     };
     const reasons: string[] = [];
     const { studentNo, name } = data;
@@ -298,8 +308,15 @@ export function validateStudentRows(
     // 手机号：清洗分隔符后判定；错误提示回显原始输入
     if (!phone.ok) reasons.push(describePhoneError(phone, '手机号'));
 
-    if (data.status && !(STUDENT_STATUSES as readonly string[]).includes(data.status)) {
-      reasons.push('学籍状态只能填：在读、休学、退学');
+    if (!(STUDENT_STATUSES as readonly string[]).includes(data.status)) {
+      reasons.push(`学籍状态只能填：${STUDENT_STATUSES.join('、')}`);
+    }
+    if (status !== '在读') {
+      if (!String(rawData.statusChangedAt ?? '').trim()) {
+        reasons.push('学籍状态为非在读时必须填写学籍异动办理时间');
+      } else if (!statusChangedAt.ok) {
+        reasons.push(describeDateError(statusChangedAt, '学籍异动办理时间'));
+      }
     }
 
     // 家长电话为选填：留空不校验，填了则同样清洗后判定
@@ -343,6 +360,7 @@ export async function exportImportFailures(failures: StudentImportFailure[]): Pr
       d.politicalStatus ?? '',
       d.origin ?? '',
       d.status ?? '',
+      d.statusChangedAt ?? '',
       d.position ?? '',
       d.remark ?? '',
       d.enrollDate ?? '',

@@ -58,6 +58,7 @@ const SCHEMA_STATEMENTS = [
     politicalStatus TEXT,
     origin TEXT,
     status TEXT DEFAULT '在读',
+    statusChangedAt TEXT,
     headTeacher TEXT,
     counselor TEXT,
     fatherName TEXT,
@@ -281,6 +282,47 @@ const SCHEMA_STATEMENTS = [
     createdAt TEXT,
     createdBy INTEGER
   )`,
+  /* 资助管理：困难生认定档案。按学年留档，学生逻辑关联（不建外键），
+     同一学生同一学年最多一条「待复核/已认定」有效记录（部分唯一索引见下）。 */
+  `CREATE TABLE IF NOT EXISTS fundingIdentifications (
+    id TEXT PRIMARY KEY,
+    studentId TEXT NOT NULL,
+    academicYear TEXT NOT NULL,
+    level TEXT NOT NULL,
+    difficultyTypes TEXT NOT NULL DEFAULT '[]',
+    status TEXT NOT NULL DEFAULT '已认定',
+    identifiedAt TEXT,
+    validFrom TEXT,
+    validTo TEXT,
+    basis TEXT,
+    familySize INTEGER,
+    annualIncome REAL,
+    perCapitaIncome REAL,
+    remark TEXT,
+    source TEXT NOT NULL DEFAULT 'manual',
+    previousId TEXT,
+    createdBy INTEGER,
+    createdAt TEXT NOT NULL,
+    updatedBy INTEGER,
+    updatedAt TEXT NOT NULL,
+    cancelledAt TEXT,
+    cancelReason TEXT
+  )`,
+  /* 资助管理：认定变更记录（新增、编辑、调级、复核、取消、结转、导入） */
+  `CREATE TABLE IF NOT EXISTS fundingIdentificationLogs (
+    id TEXT PRIMARY KEY,
+    identificationId TEXT NOT NULL,
+    studentId TEXT NOT NULL,
+    action TEXT NOT NULL,
+    fromStatus TEXT,
+    toStatus TEXT,
+    fromLevel TEXT,
+    toLevel TEXT,
+    reason TEXT,
+    operatorId INTEGER,
+    operatorName TEXT,
+    createdAt TEXT NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS templateCategories (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL UNIQUE
@@ -376,6 +418,10 @@ const studentCols = db.prepare('PRAGMA table_info(students)').all().map((c) => c
 if (!studentCols.includes('classId')) {
   db.prepare('ALTER TABLE students ADD COLUMN classId INTEGER').run();
 }
+/** 老库升级：学籍异动办理时间（非在读状态必填） */
+if (!studentCols.includes('statusChangedAt')) {
+  db.prepare('ALTER TABLE students ADD COLUMN statusChangedAt TEXT').run();
+}
 
 /** 老库升级：roles.ownerModules 列不存在时补加（新库建表语句已含该列，此处幂等跳过） */
 const roleCols = db.prepare('PRAGMA table_info(roles)').all().map((c) => c.name);
@@ -438,6 +484,15 @@ const INDEX_STATEMENTS = [
   'CREATE INDEX IF NOT EXISTS idx_appr_status_time ON approvals(status, submittedAt DESC)',
   "CREATE INDEX IF NOT EXISTS idx_appr_pending_time ON approvals(submittedAt DESC) WHERE status = '待审批'",
   'CREATE INDEX IF NOT EXISTS idx_todos_owner_status_due ON todos(createdBy, status, dueDate)',
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_funding_active_unique
+     ON fundingIdentifications(studentId, academicYear)
+     WHERE status IN ('待复核', '已认定')`,
+  'CREATE INDEX IF NOT EXISTS idx_funding_year_status ON fundingIdentifications(academicYear, status)',
+  'CREATE INDEX IF NOT EXISTS idx_funding_year_level ON fundingIdentifications(academicYear, level)',
+  'CREATE INDEX IF NOT EXISTS idx_funding_student ON fundingIdentifications(studentId)',
+  'CREATE INDEX IF NOT EXISTS idx_funding_validto ON fundingIdentifications(validTo)',
+  'CREATE INDEX IF NOT EXISTS idx_funding_log_profile ON fundingIdentificationLogs(identificationId, createdAt DESC)',
+  'CREATE INDEX IF NOT EXISTS idx_funding_log_student ON fundingIdentificationLogs(studentId, createdAt DESC)',
   'CREATE INDEX IF NOT EXISTS idx_tpl_category ON templateFiles(categoryId)',
   'CREATE INDEX IF NOT EXISTS idx_mh_level ON mentalHealth(level)',
   'CREATE INDEX IF NOT EXISTS idx_sc_user ON studentCounselors(userId)',
@@ -602,15 +657,22 @@ function seed() {
   const ownerOf = (i) => counselorUserIds[i % counselorUserIds.length];
 
   const insStudent = db.prepare(`INSERT INTO students
-    (id, studentNo, name, gender, grade, major, className, phone, dorm, politicalStatus, origin, status,
+    (id, studentNo, name, gender, grade, major, className, phone, dorm, politicalStatus, origin, status, statusChangedAt,
      headTeacher, counselor, fatherName, fatherPhone, motherName, motherPhone, position, remark, enrollDate,
      ownerId, createdBy, createdAt, updatedAt)
     VALUES (@id, @studentNo, @name, @gender, @grade, @major, @className, @phone, @dorm, @politicalStatus,
-     @origin, @status, @headTeacher, @counselor, @fatherName, @fatherPhone, @motherName, @motherPhone,
+     @origin, @status, @statusChangedAt, @headTeacher, @counselor, @fatherName, @fatherPhone, @motherName, @motherPhone,
      @position, @remark, @enrollDate, @ownerId, @createdBy, @createdAt, @updatedAt)`);
   SEED.students.forEach((s, i) => {
     const owner = ownerOf(i);
-    insStudent.run({ ...s, ownerId: owner, createdBy: owner, createdAt: now(), updatedAt: now() });
+    insStudent.run({
+      statusChangedAt: null,
+      ...s,
+      ownerId: owner,
+      createdBy: owner,
+      createdAt: now(),
+      updatedAt: now(),
+    });
   });
 
   const insConv = db.prepare(`INSERT INTO conversations

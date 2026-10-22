@@ -2,6 +2,9 @@ import type {
   ApprovalStatus,
   ApprovalType,
   BundleKind,
+  FundingDifficultyType,
+  FundingLevel,
+  FundingStatus,
   Gender,
   NoticeStatus,
   NoticeType,
@@ -53,7 +56,7 @@ export const NOTICE_SCOPES = [
 export const POLITICAL_STATUSES = ['中共党员', '中共预备党员', '共青团员', '群众'] as const;
 
 export const GENDERS: Gender[] = ['男', '女'];
-export const STUDENT_STATUSES: StudentStatus[] = ['在读', '休学', '退学'];
+export const STUDENT_STATUSES: StudentStatus[] = ['在读', '休学', '退学', '入伍保留学籍', '转专业'];
 export const TALK_TYPES: TalkType[] = ['学业指导', '心理疏导', '生活关怀', '就业指导', '违纪教育', '资助帮扶'];
 export const TALK_WAYS: TalkWay[] = ['面对面', '电话', '线上'];
 export const TALK_TYPE_COLOR: Record<TalkType, string> = {
@@ -75,12 +78,22 @@ export const TODO_STATUSES: TodoStatus[] = ['未完成', '已完成'];
 export const APPROVAL_TYPES: ApprovalType[] = ['学生请假', '勤工助学', '奖学金申请', '助学金申请', '活动申请', '其他'];
 export const APPROVAL_STATUSES: ApprovalStatus[] = ['待审批', '已通过', '已驳回'];
 
+/* 资助管理（困难生认定） */
+export const FUNDING_LEVELS: FundingLevel[] = ['特别困难', '困难', '一般困难'];
+export const FUNDING_STATUSES: FundingStatus[] = ['待复核', '已认定', '已取消'];
+export const FUNDING_DISPLAY_STATUSES = ['待复核', '已认定', '已过期', '已取消'] as const;
+export const FUNDING_DIFFICULTY_TYPES: FundingDifficultyType[] = [
+  '低保家庭', '特困供养', '脱贫家庭', '残疾学生', '孤儿', '突发严重困难', '其他',
+];
+
 /* ==================== 颜色映射 ==================== */
 
 export const STUDENT_STATUS_COLOR: Record<StudentStatus, string> = {
   在读: 'blue',
   休学: 'orange',
   退学: 'red',
+  入伍保留学籍: 'gold',
+  转专业: 'purple',
 };
 
 export const WARNING_LEVEL_COLOR: Record<WarningLevel, string> = {
@@ -100,6 +113,19 @@ export const WARNING_STATUS_COLOR: Record<WarningStatus, string> = {
   待处理: 'red',
   处理中: 'blue',
   已解除: 'green',
+};
+
+export const FUNDING_LEVEL_COLOR: Record<FundingLevel, string> = {
+  特别困难: 'red',
+  困难: 'orange',
+  一般困难: 'gold',
+};
+
+export const FUNDING_STATUS_COLOR: Record<string, string> = {
+  待复核: 'blue',
+  已认定: 'green',
+  已过期: 'volcano',
+  已取消: 'default',
 };
 
 export const NOTICE_TYPE_COLOR: Record<NoticeType, string> = {

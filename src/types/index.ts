@@ -204,6 +204,8 @@ export interface DormitoryQuery extends PageQuery {
   room?: string;
   /** 综合关键字：学号 / 姓名 / 房间号 任一命中（移动端单搜索框） */
   keyword?: string;
+  /** 寝室人数：同宿舍楼+房间号的在住人数（1-4） */
+  occupancy?: number;
 }
 
 /** 新增/编辑入参 */
@@ -256,7 +258,7 @@ export interface DormImportResult {
 /* ==================== 学生信息 ==================== */
 
 export type Gender = '男' | '女';
-export type StudentStatus = '在读' | '休学' | '退学';
+export type StudentStatus = '在读' | '休学' | '退学' | '入伍保留学籍' | '转专业';
 
 export interface Student {
   id: Id;
@@ -290,10 +292,19 @@ export interface Student {
   dormBuilding?: string | null;
   /** 房间号（来自寝室管理，未分配时为 null） */
   dormRoom?: string | null;
+  /**
+   * 关注等级（心理健康，敏感）：仅当请求者带该生班级（或管理员）时由服务端回传，
+   * 非本班学生的响应中不含此字段，前端按字段有无渲染标签。
+   */
+  mentalLevel?: string;
+  /** 困难等级（资助，最近学年已认定）：可见性口径同 mentalLevel */
+  fundingLevel?: string;
   politicalStatus?: string;
   /** 生源地 */
   origin?: string;
   status: StudentStatus;
+  /** 学籍异动办理时间（非在读状态必填）YYYY-MM-DD */
+  statusChangedAt?: string | null;
   /** 父亲姓名 */
   fatherName?: string;
   /** 父亲电话 */
@@ -438,6 +449,231 @@ export type WarningInput = Pick<
   Warning,
   'studentId' | 'type' | 'level' | 'reason' | 'status' | 'raisedAt'
 > & { handleNote?: string };
+
+/* ==================== 资助管理（困难生认定） ==================== */
+
+export type FundingLevel = '特别困难' | '困难' | '一般困难';
+export type FundingStatus = '待复核' | '已认定' | '已取消';
+export type FundingDisplayStatus = FundingStatus | '已过期';
+export type FundingDifficultyType =
+  | '低保家庭'
+  | '特困供养'
+  | '脱贫家庭'
+  | '残疾学生'
+  | '孤儿'
+  | '突发严重困难'
+  | '其他';
+
+export interface FundingProfile {
+  id: Id;
+  studentId: Id;
+  studentName: string;
+  studentNo: string;
+  className: string;
+  grade: string;
+  gender?: string;
+  studentStatus?: StudentStatus;
+  origin?: string;
+  phone?: string;
+  academicYear: string;
+  level: FundingLevel;
+  difficultyTypes: FundingDifficultyType[];
+  status: FundingStatus;
+  /** 展示状态：已认定且超过有效期时派生为「已过期」，不落库 */
+  displayStatus: FundingDisplayStatus;
+  /** 认定日期 YYYY-MM */
+  identifiedAt: string;
+  /** 有效期起止 YYYY-MM */
+  validFrom: string;
+  validTo: string;
+  basis?: string;
+  remark?: string;
+  source: 'manual' | 'import' | 'rollover';
+  previousId?: string | null;
+  createdBy?: number;
+  createdAt: string;
+  updatedBy?: number;
+  updatedAt: string;
+  cancelledAt?: string | null;
+  cancelReason?: string | null;
+  /** 学年结转预览标记 */
+  skipped?: boolean;
+}
+
+export interface FundingLog {
+  id: Id;
+  identificationId: Id;
+  studentId: Id;
+  action: 'create' | 'update' | 'level_change' | 'status_change' | 'review' | 'cancel' | 'rollover' | 'import' | 'reidentify';
+  fromStatus?: FundingStatus | null;
+  toStatus?: FundingStatus | null;
+  fromLevel?: FundingLevel | null;
+  toLevel?: FundingLevel | null;
+  reason?: string | null;
+  operatorId?: number | null;
+  operatorName?: string | null;
+  createdAt: string;
+}
+
+export interface FundingRelatedWarning {
+  id: Id;
+  type: string;
+  level: WarningLevel;
+  reason: string;
+  raisedAt: string;
+  status: WarningStatus;
+}
+
+export interface FundingRelatedTalk {
+  id: Id;
+  talkTime: string;
+  way: TalkWay;
+  type: TalkType;
+  content: string;
+}
+
+export interface FundingDetail extends FundingProfile {
+  logs: FundingLog[];
+  warnings: FundingRelatedWarning[];
+  conversations: FundingRelatedTalk[];
+}
+
+export interface FundingQuery extends PageQuery {
+  academicYear?: string;
+  level?: FundingLevel;
+  status?: FundingDisplayStatus;
+  difficultyType?: FundingDifficultyType;
+  /** 逗号分隔的班级 ID */
+  classIds?: string;
+  grade?: string;
+  expiry?: 'soon' | 'expired' | 'valid';
+}
+
+export interface FundingInput {
+  studentId: Id;
+  academicYear: string;
+  level: FundingLevel;
+  difficultyTypes?: FundingDifficultyType[];
+  /** 认定日期 YYYY-MM */
+  identifiedAt?: string;
+  /** 有效期起止 YYYY-MM */
+  validFrom?: string;
+  validTo?: string;
+  basis?: string;
+  remark?: string;
+  /** 重新认定时指向原已取消记录 */
+  previousId?: string | null;
+  reason?: string;
+}
+
+export type FundingUpdateInput = Omit<FundingInput, 'studentId' | 'academicYear'>;
+
+export interface FundingStatsItem {
+  label: string;
+  count: number;
+}
+
+export interface FundingStats {
+  academicYear: string;
+  summary: {
+    total: number;
+    identifiedCount: number;
+    pendingCount: number;
+    cancelledCount: number;
+    expiredCount: number;
+    expiringCount: number;
+    studentCount: number;
+    coverage: number;
+  };
+  byLevel: FundingStatsItem[];
+  byGrade: FundingStatsItem[];
+  byClass: FundingStatsItem[];
+  byType: FundingStatsItem[];
+  byYear: FundingStatsItem[];
+}
+
+export interface FundingImportRow {
+  /** Excel 行号，用于失败明细回显 */
+  row: number;
+  studentNo: string;
+  /** 姓名以学生名册为准，导入预览时回填 */
+  name?: string;
+  /** 以下班级/年级/学籍状态由导入预览从学生名册回填，仅用于预览展示 */
+  className?: string;
+  grade?: string;
+  studentStatus?: StudentStatus;
+  manageable?: boolean;
+  academicYear: string;
+  level: FundingLevel;
+  difficultyTypes?: FundingDifficultyType[];
+  identifiedAt?: string;
+  validFrom?: string;
+  validTo?: string;
+  basis?: string;
+  remark?: string;
+}
+
+export interface FundingStudentLookupItem {
+  id: Id;
+  studentNo: string;
+  name: string;
+  className: string;
+  grade: string;
+  studentStatus: StudentStatus;
+  manageable: boolean;
+}
+
+export interface FundingStudentLookup {
+  students: FundingStudentLookupItem[];
+  notFound: string[];
+}
+
+export interface FundingImportFailure {
+  row: number;
+  studentNo: string;
+  name: string;
+  reason: string;
+}
+
+export interface FundingImportResult {
+  total: number;
+  created: number;
+  updated: number;
+  skipped: number;
+  failureCount: number;
+  failures: FundingImportFailure[];
+}
+
+export interface FundingBatchFailure {
+  id: Id;
+  studentName: string | null;
+  reason: string;
+}
+
+export interface FundingBatchResult {
+  successCount: number;
+  failureCount: number;
+  failures: FundingBatchFailure[];
+}
+
+export interface FundingRolloverCandidate extends FundingProfile {
+  skipped: boolean;
+}
+
+export interface FundingRolloverPreview {
+  fromYear: string;
+  toYear: string;
+  candidates: FundingRolloverCandidate[];
+  total: number;
+  skippedCount: number;
+}
+
+export interface FundingRolloverResult {
+  created: number;
+  skipped: number;
+  failureCount: number;
+  failures: FundingBatchFailure[];
+}
 
 /* ==================== 学生名单批量导入 ==================== */
 
@@ -963,7 +1199,7 @@ export interface DashboardStats {
   monthTalkCount: number;
   /** 未解除预警数（待处理 + 处理中） */
   pendingWarningCount: number;
-  /** 今日及逾期未完成待办数 */
+  /** 未完成待办数（含未到期与逾期） */
   todayTodoCount: number;
   /** 逾期待办数 */
   overdueTodoCount: number;
@@ -975,7 +1211,7 @@ export interface DashboardStats {
   talkByType: { label: string; count: number }[];
   /** 最新未解除预警（最多 6 条） */
   recentWarnings: Warning[];
-  /** 今日及逾期未完成待办（按截止时间排序） */
+  /** 未完成待办（含未到期与逾期，按截止时间排序，最多 6 条） */
   todayTodos: Todo[];
   /** 待处理审批（最多 6 条） */
   pendingApprovals: Approval[];

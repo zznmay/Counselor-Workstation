@@ -115,7 +115,7 @@ export default function DashboardMobile() {
               {greeting}，{shownName}
             </div>
             <div className="m-greet-s">
-              今日 {stats.todayTodoCount} 项待办 · {stats.pendingWarningCount} 名预警学生待关注
+              当前 {stats.todayTodoCount} 项待办 · {stats.pendingWarningCount} 名预警学生待关注
             </div>
           </div>
           <button type="button" className="m-refresh m-greet-x" aria-label="关闭问候条" onClick={() => setGreetOpen(false)}>
@@ -150,7 +150,7 @@ export default function DashboardMobile() {
               {stats.todayTodoCount}
             </div>
             <div className="m-stat-l">
-              今日待办{stats.overdueTodoCount > 0 ? ` · 逾期 ${stats.overdueTodoCount}` : ''}
+              待办事项{stats.overdueTodoCount > 0 ? ` · 逾期 ${stats.overdueTodoCount}` : ''}
             </div>
           </div>
         </div>
@@ -180,12 +180,12 @@ export default function DashboardMobile() {
         )}
       </div>
 
-      {/* 今日待办卡（品牌身份条） */}
+      {/* 待办事项卡（品牌身份条） */}
       <div className="m-card accent">
         <div className="m-sec-head">
           <span className="m-sec-title">
             <MIcon name="checksq" size={16} />
-            今日待办
+            待办事项
           </span>
           <button type="button" className="m-sec-more" onClick={() => navigate('/todos')}>
             全部 {stats.todayTodoCount}
@@ -195,7 +195,7 @@ export default function DashboardMobile() {
         {stats.todayTodos.length === 0 ? (
           <div className="m-card empty" style={{ marginTop: 8 }}>
             <MIcon name="check" size={22} style={{ color: 'var(--success-fg)' }} />
-            <div className="m-t3" style={{ marginTop: 6 }}>今日没有待办，保持节奏</div>
+            <div className="m-t3" style={{ marginTop: 6 }}>暂无未完成待办，保持节奏</div>
           </div>
         ) : (
           stats.todayTodos.map((t) => {

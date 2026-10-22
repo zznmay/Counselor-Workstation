@@ -42,7 +42,8 @@ function pushLike(conds, params, field, value) {
 
 /**
  * 列表筛选口径：学号 / 姓名 / 班级 / 宿舍楼 / 房间号 五项均支持模糊查询，
- * 另提供年级精确筛选、classIds 多班级筛选（逗号分隔字典 ID），
+ * 另提供年级精确筛选、classIds 多班级筛选（逗号分隔字典 ID）、
+ * occupancy 寝室人数筛选（同宿舍楼+房间号的在住人数，1-4），
  * 以及 keyword 综合关键字（学号、姓名、房间号 任一命中）供移动端单搜索框使用。
  */
 function buildFilter(query) {
@@ -67,6 +68,15 @@ function buildFilter(query) {
   if (classIds.length > 0) {
     conds.push(`s.classId IN (${classIds.map(() => '?').join(', ')})`);
     params.push(...classIds);
+  }
+
+  const occ = Number(query.occupancy);
+  if (Number.isInteger(occ) && occ >= 1 && occ <= 4) {
+    // 寝室人数 = 同宿舍楼+房间号的分配条数；非法值忽略（等同全部）
+    conds.push(
+      '(SELECT COUNT(*) FROM dormitories d2 WHERE d2.building = d.building AND d2.room = d.room) = ?',
+    );
+    params.push(occ);
   }
 
   const kw = String(query.keyword ?? '').trim();

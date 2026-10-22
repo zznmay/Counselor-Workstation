@@ -85,7 +85,7 @@ function DashboardDesktop() {
         <Card className="hero-card" bordered={false}>
           <div className="hero-greet">
             <div className="hero-title">
-              {greeting}，{shownName}！今天有 {stats.todayTodoCount} 项待办、
+              {greeting}，{shownName}！当前有 {stats.todayTodoCount} 项待办、
               {stats.pendingWarningCount} 名预警学生需要关注。
             </div>
             <div className="hero-sub">
@@ -147,7 +147,7 @@ function DashboardDesktop() {
             <StatCard
               icon={<CheckSquareOutlined />}
               color="#9db4ff"
-              label="今日待办"
+              label="待办事项"
               value={
                 <Space size={8}>
                   {stats.todayTodoCount}
@@ -227,7 +227,7 @@ function DashboardDesktop() {
           <Card
             title={
               <Space>
-                今日待办
+                待办事项
                 <Tag color="purple">{stats.todayTodoCount} 项</Tag>
               </Space>
             }
@@ -239,6 +239,7 @@ function DashboardDesktop() {
           >
             <List
               dataSource={stats.todayTodos}
+              locale={{ emptyText: '暂无未完成待办' }}
               renderItem={(t) => {
                 const overdue = t.dueDate < todayStr;
                 return (

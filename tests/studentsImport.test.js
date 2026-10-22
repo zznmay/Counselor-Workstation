@@ -177,4 +177,22 @@ describe('POST /students/import（学号 upsert）', () => {
     assert.match(res.body.failures[0].reason, /班级名未匹配到班级字典/);
     assert.equal(load('2026010106'), null);
   });
+
+  it('非在读状态：未填学籍异动办理时间判失败，填写后正常入库', async () => {
+    const missing = await postJson(base, '/api/students/import', {
+      rows: [studentRow('2026010107', { status: '入伍保留学籍' })],
+    });
+    assert.equal(missing.body.insertedCount, 0);
+    assert.equal(missing.body.failures.length, 1);
+    assert.match(missing.body.failures[0].reason, /学籍异动办理时间/);
+    assert.equal(load('2026010107'), null);
+
+    const ok = await postJson(base, '/api/students/import', {
+      rows: [studentRow('2026010107', { status: '入伍保留学籍', statusChangedAt: '2026-10-01' })],
+    });
+    assert.equal(ok.body.insertedCount, 1);
+    const row = load('2026010107');
+    assert.equal(row.status, '入伍保留学籍');
+    assert.equal(row.statusChangedAt, '2026-10-01');
+  });
 });

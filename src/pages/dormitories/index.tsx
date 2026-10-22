@@ -79,9 +79,18 @@ const ROOM_RULES = [
   { max: MAX_ROOM, message: `房间号不可超过 ${MAX_ROOM} 个字` },
 ];
 
+/** 寝室人数筛选项：0 表示「全部」（提交查询时归一为 undefined） */
+const OCCUPANCY_OPTIONS = [
+  { value: 0, label: '全部' },
+  { value: 1, label: '1人' },
+  { value: 2, label: '2人' },
+  { value: 3, label: '3人' },
+  { value: 4, label: '4人' },
+];
+
 /**
  * 寝室管理（桌面端）：宿舍楼 + 房间号 的集中维护。
- * 列表支持 学号 / 姓名 / 班级 / 宿舍楼 / 房间号 五项模糊查询与分页，
+ * 列表支持 学号 / 姓名 / 班级 / 宿舍楼 / 房间号 模糊查询、年级/多班级/寝室人数筛选与分页，
  * 提供新增、编辑、删除、查看与批量导入；姓名/班级/年级/性别一律读取学生名册。
  */
 function DormitoriesDesktop() {
@@ -169,7 +178,7 @@ function DormitoriesDesktop() {
   const classIdsKey = query.classIds?.join(',') ?? '';
   useEffect(() => {
     setSelectedKeys([]);
-  }, [query.studentNo, query.name, query.className, query.grade, classIdsKey, query.building, query.room]);
+  }, [query.studentNo, query.name, query.className, query.grade, classIdsKey, query.building, query.room, query.occupancy]);
 
   /** 文本筛选防抖 400ms：避免逐字请求，同时保证「输入即查」的模糊查询体验 */
   const appliedRef = useRef({ studentNo: '', name: '', room: '' });
@@ -329,6 +338,7 @@ function DormitoriesDesktop() {
     classIds: query.classIds,
     building: query.building,
     room: query.room,
+    occupancy: query.occupancy,
     keyword: query.keyword,
   });
 
@@ -391,6 +401,7 @@ function DormitoriesDesktop() {
       grade: undefined,
       classIds: undefined,
       building: undefined,
+      occupancy: undefined,
     });
   };
 
@@ -500,6 +511,13 @@ function DormitoriesDesktop() {
           options={options.buildings.map((b) => ({ value: b, label: b }))}
           value={query.building}
           onChange={(building) => patchQuery({ building })}
+        />
+        <Select
+          aria-label="按寝室人数筛选"
+          style={{ width: 110 }}
+          options={OCCUPANCY_OPTIONS}
+          value={query.occupancy ?? 0}
+          onChange={(occupancy) => patchQuery({ occupancy: occupancy || undefined })}
         />
         <Input
           allowClear

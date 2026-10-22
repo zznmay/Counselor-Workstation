@@ -21,7 +21,7 @@ const zip = require('./zip');
 const { BACKUP_DIR, DATA_DIR, DB_PATH } = require('./config');
 
 /** 数据包结构版本：结构变更（增删表 / 改字段语义）时才递增 */
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 4;
 const APP_VERSION = '1.0';
 const SOURCE = 'counselor-workbench';
 
@@ -52,6 +52,8 @@ const TABLE_LABELS = {
   notices: '通知公告',
   approvals: '请假审批',
   todos: '待办事项',
+  fundingIdentifications: '困难生认定',
+  fundingIdentificationLogs: '认定变更记录',
   templateCategories: '模板分类',
   templateFiles: '模板文件',
   csScheduler: '值班排班',
@@ -86,6 +88,7 @@ const EXPORT_TABLES = [
   'grades', 'classes', 'classCounselors', 'classPendingStaff', 'dormitories',
   'conversations', 'mentalHealth', 'mentalInterviews', 'mentalInterviewTemplates', 'mentalLevelLogs',
   'warnings', 'notices', 'approvals', 'todos',
+  'fundingIdentifications', 'fundingIdentificationLogs',
   'templateCategories', 'templateFiles', 'csScheduler',
   'accessLogs', 'loginAttempts',
 ];
@@ -279,10 +282,18 @@ function verifyBundle(bundle) {
     return { ok: false, checks: [{ item: 'tables', ok: false, detail: '缺少数据表内容' }] };
   }
   const manifest = Array.isArray(bundle.manifest) ? bundle.manifest : [];
+  // 旧版本包仍可恢复：缺失的新表在 applyBundle 中按空表处理；
+  // 高于当前版本的包（来自更新版本程序）拒绝恢复，避免未知结构丢字段。
+  const version = Number(bundle.schemaVersion);
+  const versionOk = Number.isFinite(version) && version >= 1 && version <= SCHEMA_VERSION;
   checks.push({
     item: '数据包结构版本',
-    ok: Number(bundle.schemaVersion) === SCHEMA_VERSION,
-    detail: `包内 ${bundle.schemaVersion ?? '未声明'} / 当前 ${SCHEMA_VERSION}`,
+    ok: versionOk,
+    detail: version === SCHEMA_VERSION
+      ? `包内 ${version} / 当前 ${SCHEMA_VERSION}`
+      : version > SCHEMA_VERSION
+        ? `包内 ${bundle.schemaVersion} 高于当前 ${SCHEMA_VERSION}，请先升级程序`
+        : `包内 ${bundle.schemaVersion ?? '未声明'} / 当前 ${SCHEMA_VERSION}（旧版本包，缺失的新表按空数据处理）`,
   });
   for (const table of EXPORT_TABLES) {
     const rows = bundle.tables[table] ?? [];

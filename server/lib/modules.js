@@ -14,6 +14,7 @@ const MODULES = [
   /* 心理访谈：功能级权限，不承载菜单/路由（入口在心理健康页行内） */
   { key: 'mentalInterview', name: '心理访谈', group: '业务办理', ownerable: false },
   { key: 'todos', name: '待办提醒', group: '业务办理' },
+  { key: 'funding', name: '资助管理', group: '业务办理' },
   { key: 'templates', name: '模板汇总库', group: '资料与工具' },
   { key: 'tools', name: '实用工具', group: '资料与工具' },
   { key: 'classes', name: '班级管理', group: '基础数据' },
@@ -30,8 +31,8 @@ const HEAD_TEACHER_DEFAULT_KEYS = ['mentalHealth', 'mentalInterview'];
 
 /** 内置「辅导员」角色的默认权限：与角色化改造前的可见范围保持一致（随新模块扩充） */
 const COUNSELOR_DEFAULT_KEYS = [
-  'dashboard', 'students', 'conversations', 'warnings', 'mentalHealth', 'todos', 'templates', 'tools',
-  'dormitories',
+  'dashboard', 'students', 'conversations', 'warnings', 'mentalHealth', 'todos', 'funding',
+  'templates', 'tools', 'dormitories',
 ];
 
 /**

@@ -15,10 +15,13 @@
  */
 const COMPARE_FIELDS = [
   'name', 'gender', 'grade', 'major', 'className', 'classId', 'phone', 'dorm',
-  'politicalStatus', 'origin', 'status', 'position', 'remark',
+  'politicalStatus', 'origin', 'status', 'statusChangedAt', 'position', 'remark',
   'enrollDate', 'headTeacher', 'counselor',
   'fatherName', 'fatherPhone', 'motherName', 'motherPhone',
 ];
+
+/** 学籍状态枚举（与服务端校验、前端 STUDENT_STATUSES 保持一致） */
+const STUDENT_STATUSES = ['在读', '休学', '退学', '入伍保留学籍', '转专业'];
 
 function text(v) {
   return String(v ?? '').trim();
@@ -54,6 +57,7 @@ function normalizeTarget(data, clsRow) {
     politicalStatus: text(data?.politicalStatus),
     origin: text(data?.origin),
     status: text(data?.status) || '在读',
+    statusChangedAt: text(data?.statusChangedAt),
     position: text(data?.position),
     remark: text(data?.remark),
     enrollDate: text(data?.enrollDate),
@@ -81,4 +85,11 @@ function diffCounselorIds(existingIds, incomingIds) {
   return { toAdd, toRemove };
 }
 
-module.exports = { COMPARE_FIELDS, normalizeTarget, diffStudentFields, diffCounselorIds, sameValue };
+module.exports = {
+  COMPARE_FIELDS,
+  STUDENT_STATUSES,
+  normalizeTarget,
+  diffStudentFields,
+  diffCounselorIds,
+  sameValue,
+};

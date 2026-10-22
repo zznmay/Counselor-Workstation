@@ -10,7 +10,7 @@ export type MIconName =
   | 'search' | 'funnel' | 'chevR' | 'chevL' | 'chevD'
   | 'phone' | 'message' | 'comment' | 'bell' | 'x' | 'check' | 'clock'
   | 'refresh' | 'alertTriangle' | 'alertCircle' | 'flag' | 'plus'
-  | 'user' | 'file' | 'tool' | 'shield' | 'edit' | 'logout' | 'spinner' | 'school' | 'heart' | 'trash' | 'extlink' | 'copy' | 'upload' | 'download' | 'home' | 'eye';
+  | 'user' | 'file' | 'tool' | 'shield' | 'edit' | 'logout' | 'spinner' | 'school' | 'heart' | 'trash' | 'extlink' | 'copy' | 'upload' | 'download' | 'home' | 'gift' | 'eye';
 
 const PATHS: Record<MIconName, string> = {
   grid4: 'M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z',
@@ -50,6 +50,7 @@ const PATHS: Record<MIconName, string> = {
   upload: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12',
   download: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3',
   home: 'M3 9.5 12 3l9 6.5V20a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z',
+  gift: 'M20 12v10H4V12M2 7h20v5H2zM12 22V7M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7zM12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z',
   eye: 'M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6',
 };
 

@@ -16,7 +16,7 @@ export type { DormitoryQuery } from '@/types';
 /** 列表：学号 / 姓名 / 年级 / 多班级 / 宿舍楼 / 房间号 筛选 + 分页 */
 export function getDormitories(query: DormitoryQuery): Promise<PageResult<Dormitory>> {
   const params = new URLSearchParams({ page: String(query.page), pageSize: String(query.pageSize) });
-  ['studentNo', 'name', 'className', 'grade', 'building', 'room', 'keyword'].forEach((key) => {
+  ['studentNo', 'name', 'className', 'grade', 'building', 'room', 'keyword', 'occupancy'].forEach((key) => {
     const value = query[key as keyof DormitoryQuery];
     if (value !== undefined && value !== '') params.set(key, String(value));
   });

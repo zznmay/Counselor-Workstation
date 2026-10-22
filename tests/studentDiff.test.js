@@ -51,6 +51,7 @@ describe('normalizeTarget（新增场景：导入行 → 规范化目标值）',
     assert.strictEqual(target.phone, '13800001111');
     assert.strictEqual(target.dorm, '学生公寓5-603');
     assert.strictEqual(target.status, '在读');
+    assert.strictEqual(target.statusChangedAt, '');
     // 责任人不再从导入行取值：由班级人员配置派生（见 routes/students.js）
     assert.strictEqual(target.counselor, undefined);
     assert.strictEqual(target.headTeacher, undefined);
@@ -87,7 +88,8 @@ describe('diffStudentFields（upsert 三场景）', () => {
     assert.ok(fromNull.includes('phone'));
 
     const fromUndefined = diffStudentFields(target, undefined);
-    // COMPARE_FIELDS 19 项，其中 headTeacher/counselor 由派生注入（本 fixture 未注入 → 视为相等）
+    // COMPARE_FIELDS 21 项：headTeacher/counselor 未注入、remark/statusChangedAt 为空，
+    // 空值与 undefined 等价 → 实际报 17 项变化
     assert.strictEqual(fromUndefined.length, 17);
   });
 

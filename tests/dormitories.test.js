@@ -134,6 +134,40 @@ describe('寝室管理（dormitories）', () => {
     assert.equal(paged.body.total, 2);
   });
 
+  it('按寝室人数筛选：同宿舍楼+房间号的在住人数，且可与其他条件组合', async () => {
+    // 0102 调入 荷园B512 与 0101 同住（2人间），0103 分配至 梅园A101（1人间）
+    const rec0102 = dormOf('2026010102');
+    await requestJson(base, 'PUT', `/api/dormitories/${rec0102.id}`, {
+      building: '荷园B', room: '512',
+    });
+    await requestJson(base, 'POST', '/api/dormitories', {
+      studentNo: '2026010103', building: '梅园A', room: '101',
+    });
+
+    const two = await requestJson(base, 'GET', '/api/dormitories?page=1&pageSize=10&occupancy=2');
+    assert.equal(two.status, 200);
+    assert.equal(two.body.total, 2);
+    assert.ok(two.body.list.every((r) => r.building === '荷园B' && r.room === '512'));
+
+    const one = await requestJson(base, 'GET', '/api/dormitories?page=1&pageSize=10&occupancy=1');
+    assert.equal(one.body.total, 1);
+    assert.equal(one.body.list[0].studentNo, '2026010103');
+
+    // 与宿舍楼筛选组合
+    const combined = await requestJson(base, 'GET', `/api/dormitories?page=1&pageSize=10&occupancy=2&building=${encodeURIComponent('荷园')}`);
+    assert.equal(combined.body.total, 2);
+    // 与年级筛选组合（不同年级无数据）
+    const none = await requestJson(base, 'GET', `/api/dormitories?page=1&pageSize=10&occupancy=2&grade=${encodeURIComponent('2025级')}`);
+    assert.equal(none.body.total, 0);
+    // 非法值忽略，等同「全部」
+    const invalid = await requestJson(base, 'GET', '/api/dormitories?page=1&pageSize=10&occupancy=9');
+    assert.equal(invalid.body.total, 3);
+
+    // 清理 0103 的分配，避免影响后续批量导入用例的新增计数
+    const target = dormOf('2026010103');
+    await requestJson(base, 'DELETE', `/api/dormitories/${target.id}`);
+  });
+
   it('编辑：仅调整宿舍楼/房间号，镜像随之更新', async () => {
     const target = dormOf('2026010101');
     const res = await requestJson(base, 'PUT', `/api/dormitories/${target.id}`, {

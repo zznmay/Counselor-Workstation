@@ -25,6 +25,7 @@ const BUSINESS: MoreItem[] = [
   { key: '/warnings', label: '预警管理', icon: 'triangle', badge: 'warnings', module: 'warnings' },
   /* 寝室管理：日常业务操作，2026-10-21 由系统管理分组移入业务办理 */
   { key: '/dormitories', label: '寝室管理', icon: 'home', module: 'dormitories' },
+  { key: '/funding', label: '资助管理', icon: 'gift', module: 'funding' },
 ];
 
 const RESOURCES: MoreItem[] = [

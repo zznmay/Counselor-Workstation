@@ -31,8 +31,10 @@ const studentsRoute = serverRequire('./routes/students');
 const classesRoute = serverRequire('./routes/classes');
 const dormitoriesRoute = serverRequire('./routes/dormitories');
 const usersRoute = serverRequire('./routes/users');
+const fundingRoute = serverRequire('./routes/funding');
+const dashboardRoute = serverRequire('./routes/dashboard');
 
-export { dbx, DATA_DIR, studentsRoute, classesRoute, dormitoriesRoute, usersRoute };
+export { dbx, DATA_DIR, studentsRoute, classesRoute, dormitoriesRoute, usersRoute, fundingRoute, dashboardRoute };
 
 /** 密码校验（bcrypt，与账号体系同口径） */
 export function verifyPassword(password, hash) {
@@ -111,6 +113,13 @@ export function adminHeaders() {
   return { 'Content-Type': 'application/json', 'X-Auth-Token': auth.issueToken(admin) };
 }
 
+/** 以指定用户身份发起请求的请求头（权限口径测试用） */
+export function headersOf(username) {
+  const user = dbx.get('SELECT * FROM users WHERE username = ?', [username]);
+  if (!user) throw new Error(`测试用户不存在：${username}`);
+  return { 'Content-Type': 'application/json', 'X-Auth-Token': auth.issueToken(user) };
+}
+
 /**
  * 构建 Express 应用（路由自带鉴权与模块权限中间件）
  * @param mounts [[挂载路径, 路由]]，缺省挂载学生/班级两条导入路由
@@ -143,6 +152,16 @@ export async function requestJson(base, method, urlPath, body) {
   const res = await fetch(`${base}${urlPath}`, {
     method,
     headers: adminHeaders(),
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  return { status: res.status, body: await res.json() };
+}
+
+/** 以指定用户身份发起 JSON 请求（method 缺省 GET） */
+export async function requestAs(base, method = 'GET', urlPath = '', body = undefined, username = 'admin') {
+  const res = await fetch(`${base}${urlPath}`, {
+    method,
+    headers: headersOf(username),
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   return { status: res.status, body: await res.json() };

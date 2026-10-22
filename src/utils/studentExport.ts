@@ -31,6 +31,7 @@ export const EXPORT_FIELDS: ExportFieldDef[] = [
   { key: 'phone', label: '联系电话', wch: 13, value: (s) => s.phone },
   { key: 'dorm', label: '宿舍', wch: 15, value: (s) => s.dorm },
   { key: 'status', label: '学籍状态', wch: 10, value: (s) => s.status },
+  { key: 'statusChangedAt', label: '学籍异动办理时间', wch: 16, value: (s) => s.statusChangedAt },
   { key: 'enrollDate', label: '入学日期', wch: 12, value: (s) => s.enrollDate },
   { key: 'politicalStatus', label: '政治面貌', wch: 12, value: (s) => s.politicalStatus },
   { key: 'origin', label: '生源地', wch: 12, value: (s) => s.origin },

@@ -14,6 +14,8 @@ const STATUS_TAG: Record<StudentStatus, string> = {
   在读: 'success',
   休学: 'warning',
   退学: 'danger',
+  入伍保留学籍: 'info',
+  转专业: 'neutral',
 };
 
 function KV({ k, v, nowrap }: { k: string; v?: string | null; nowrap?: boolean }) {
@@ -179,6 +181,7 @@ export default function StudentDetailMobile() {
         <KV k="辅导员" v={student.counselor} nowrap />
         <KV k="班内职务" v={student.position} nowrap />
         <KV k="入学时间" v={student.enrollDate} nowrap />
+        <KV k="学籍异动办理时间" v={student.statusChangedAt} nowrap />
       </div>
 
       {/* 同宿舍学生：姓名 + 班级 + 脱敏电话 + 行内拨号；区分「未登记宿舍 / 无室友 / 未登记电话」 */}

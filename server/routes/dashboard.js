@@ -57,20 +57,21 @@ router.get('/', (req, res) => {
     [...wScope.params],
   );
 
-  // 待办按创建人严格隔离：只统计当前用户自己创建的待办（与 todos 列表同口径）
+  // 待办按创建人严格隔离：统计当前用户全部未完成待办（含未到期），逾期单列。
+  // todayTodoCount 保留原字段名兼容前端，语义为“未完成待办总数”。
   const openTodoWhere = "status = '未完成' AND createdBy = ?";
   const todayTodoCount = dbx.get(
-    `SELECT COUNT(*) AS c FROM todos WHERE ${openTodoWhere} AND dueDate <= ?`,
-    [req.user.id, todayStr],
+    `SELECT COUNT(*) AS c FROM todos WHERE ${openTodoWhere}`,
+    [req.user.id],
   ).c;
   const overdueTodoCount = dbx.get(
     `SELECT COUNT(*) AS c FROM todos WHERE ${openTodoWhere} AND dueDate < ?`,
     [req.user.id, todayStr],
   ).c;
   const todayTodos = dbx.all(
-    `SELECT * FROM todos WHERE ${openTodoWhere} AND dueDate <= ?
+    `SELECT * FROM todos WHERE ${openTodoWhere}
      ORDER BY dueDate ASC, COALESCE(dueTime, '23:59') ASC, rowid ASC LIMIT 6`,
-    [req.user.id, todayStr],
+    [req.user.id],
   );
 
   const pendingApprovalCount = dbx.get(

@@ -60,9 +60,11 @@ export default function DormitoriesMobile() {
   const [grade, setGrade] = useState<string | undefined>(undefined);
   const [classIds, setClassIds] = useState<number[]>([]);
   const [building, setBuilding] = useState<string | undefined>(undefined);
+  const [occupancy, setOccupancy] = useState<number | undefined>(undefined);
   const [draftGrade, setDraftGrade] = useState<string | undefined>(undefined);
   const [draftClassIds, setDraftClassIds] = useState<number[]>([]);
   const [draftBuilding, setDraftBuilding] = useState<string | undefined>(undefined);
+  const [draftOccupancy, setDraftOccupancy] = useState<number | undefined>(undefined);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [options, setOptions] = useState<DormitoryOptions>({ buildings: [], classNames: [] });
   const [gradeOptions, setGradeOptions] = useState<GradeOption[]>([]);
@@ -131,7 +133,7 @@ export default function DormitoriesMobile() {
   );
 
   const loadList = useCallback(
-    async (targetPage: number, kw: string, g?: string, cids: number[] = [], bd?: string) => {
+    async (targetPage: number, kw: string, g?: string, cids: number[] = [], bd?: string, occ?: number) => {
       setLoading(true);
       try {
         const res = await getDormitories({
@@ -141,6 +143,7 @@ export default function DormitoriesMobile() {
           grade: g,
           classIds: cids.length > 0 ? cids : undefined,
           building: bd,
+          occupancy: occ,
         });
         setList((prev) => (targetPage === 1 ? res.list : [...prev, ...res.list]));
         setTotal(res.total);
@@ -164,17 +167,17 @@ export default function DormitoriesMobile() {
   useEffect(() => {
     setSelectedIds([]);
     setBatchMode(false);
-  }, [keyword, grade, classIdsKey, building]);
+  }, [keyword, grade, classIdsKey, building, occupancy]);
 
   useEffect(() => {
     if (firstRun.current) {
       firstRun.current = false;
-      void loadList(1, keyword, grade, classIds, building);
+      void loadList(1, keyword, grade, classIds, building, occupancy);
       return;
     }
-    const timer = setTimeout(() => void loadList(1, keyword, grade, classIds, building), 300);
+    const timer = setTimeout(() => void loadList(1, keyword, grade, classIds, building, occupancy), 300);
     return () => clearTimeout(timer);
-  }, [keyword, grade, classIds, building, loadList]);
+  }, [keyword, grade, classIds, building, occupancy, loadList]);
 
   const hasMore = list.length < total;
   const sentinel = useRef<HTMLDivElement | null>(null);
@@ -182,14 +185,14 @@ export default function DormitoriesMobile() {
     const el = sentinel.current;
     if (!el || !hasMore || loading) return undefined;
     const io = new IntersectionObserver((entries) => {
-      if (entries[0]?.isIntersecting) void loadList(page + 1, keyword, grade, classIds, building);
+      if (entries[0]?.isIntersecting) void loadList(page + 1, keyword, grade, classIds, building, occupancy);
     });
     io.observe(el);
     return () => io.disconnect();
-  }, [hasMore, loading, page, keyword, grade, classIds, building, loadList]);
+  }, [hasMore, loading, page, keyword, grade, classIds, building, occupancy, loadList]);
 
   const reloadAll = () => {
-    void loadList(1, keyword, grade, classIds, building);
+    void loadList(1, keyword, grade, classIds, building, occupancy);
     loadOptions();
   };
 
@@ -271,6 +274,7 @@ export default function DormitoriesMobile() {
     grade,
     classIds: classIds.length > 0 ? classIds : undefined,
     building,
+    occupancy,
   });
 
   /** 批量导出：有勾选导出勾选项，否则导出当前筛选条件下的全部数据 */
@@ -380,6 +384,7 @@ export default function DormitoriesMobile() {
             setDraftGrade(grade);
             setDraftClassIds(classIds);
             setDraftBuilding(building);
+            setDraftOccupancy(occupancy);
             setSheetOpen(true);
           }}
         >
@@ -398,6 +403,7 @@ export default function DormitoriesMobile() {
               {grade ? ` · ${grade}` : ''}
               {selectedClassNames.length > 0 ? ` · ${selectedClassNames.join('、')}` : ''}
               {building ? ` · ${building}` : ''}
+              {occupancy ? ` · ${occupancy}人间` : ''}
             </>
           )}
         </span>
@@ -594,7 +600,7 @@ export default function DormitoriesMobile() {
         <button
           type="button"
           className="m-btn m-btn-ghost m-btn-block"
-          onClick={() => void loadList(page + 1, keyword, grade, classIds, building)}
+          onClick={() => void loadList(page + 1, keyword, grade, classIds, building, occupancy)}
         >
           加载更多（还有 {total - list.length} 条）
         </button>
@@ -617,9 +623,11 @@ export default function DormitoriesMobile() {
                 setDraftGrade(undefined);
                 setDraftClassIds([]);
                 setDraftBuilding(undefined);
+                setDraftOccupancy(undefined);
                 setGrade(undefined);
                 setClassIds([]);
                 setBuilding(undefined);
+                setOccupancy(undefined);
                 setSheetOpen(false);
               }}
             >
@@ -632,6 +640,7 @@ export default function DormitoriesMobile() {
                 setGrade(draftGrade);
                 setClassIds(draftClassIds);
                 setBuilding(draftBuilding);
+                setOccupancy(draftOccupancy);
                 setSheetOpen(false);
               }}
             >
@@ -709,6 +718,30 @@ export default function DormitoriesMobile() {
                 onClick={() => setDraftBuilding(b)}
               >
                 {b}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="m-field" style={{ marginTop: 14 }}>
+          <label>寝室人数</label>
+          <div className="m-seg" style={{ flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className={`m-seg-btn${!draftOccupancy ? ' on' : ''}`}
+              style={{ flex: '0 0 auto' }}
+              onClick={() => setDraftOccupancy(undefined)}
+            >
+              全部
+            </button>
+            {[1, 2, 3, 4].map((n) => (
+              <button
+                key={n}
+                type="button"
+                className={`m-seg-btn${draftOccupancy === n ? ' on' : ''}`}
+                style={{ flex: '0 0 auto' }}
+                onClick={() => setDraftOccupancy(n)}
+              >
+                {n}人
               </button>
             ))}
           </div>

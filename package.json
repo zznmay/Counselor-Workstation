@@ -15,6 +15,7 @@
     "preview": "vite preview",
     "start:cloud": "npm run build:web && node --experimental-sqlite server/start-cloud.js",
     "start:cloud:prod": "npm run build:web && WORKBENCH_SEED=empty node --experimental-sqlite server/start-cloud.js",
+    "serve:cloud:prod": "node scripts/ensure-dist.cjs && WORKBENCH_SEED=empty node --experimental-sqlite server/start-cloud.js",
     "verify:import": "node scripts/run-ts-script.cjs scripts/verify-import.ts",
     "verify:import:fields": "node scripts/run-ts-script.cjs scripts/verify-import-fields.ts",
     "test": "node --experimental-sqlite --test tests/**/*.test.js"

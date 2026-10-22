@@ -10,6 +10,7 @@ import {
   DatabaseOutlined,
   EditOutlined,
   FolderOpenOutlined,
+  GiftOutlined,
   HeartOutlined,
   HomeOutlined,
   LogoutOutlined,
@@ -54,6 +55,7 @@ const TITLES: Record<string, string> = {
   '/warnings': '学业与心理预警',
   '/mental': '心理健康',
   '/todos': '待办提醒',
+  '/funding': '资助管理',
   '/templates': '申请表模板汇总库',
   '/tools': '实用工具',
   '/classes': '班级管理',
@@ -220,9 +222,10 @@ export default function BasicLayout() {
       text
     );
 
-  /** 侧边菜单：按当前角色的模块权限过滤；系统管理仅管理员可见 */
+  /** 侧边菜单：按当前角色的模块权限过滤；一级入口 + 三组分类（业务办理 / 资料与工具 / 系统管理） */
   const menuItems: MenuProps['items'] = useMemo(() => {
     const can = (key: string) => canAccessModule(authUser, key);
+    const isAdmin = isSystemAdmin(authUser);
     const items: NonNullable<MenuProps['items']> = [];
 
     if (can('dashboard')) {
@@ -231,24 +234,42 @@ export default function BasicLayout() {
     if (can('students')) {
       items.push({ key: '/students', icon: <TeamOutlined />, label: '学生名册' });
     }
-    if (can('conversations')) {
-      items.push({ key: '/conversations', icon: <CommentOutlined />, label: '谈心谈话' });
-    }
-    if (can('warnings')) {
-      items.push({ key: '/warnings', icon: <AlertOutlined />, label: withBadge('预警管理', badges.warnings) });
-    }
     if (can('mentalHealth')) {
       items.push({ key: '/mental', icon: <HeartOutlined />, label: '心理健康' });
     }
     if (can('todos')) {
       items.push({ key: '/todos', icon: <CheckSquareOutlined />, label: withBadge('待办提醒', badges.todos) });
     }
+
+    const business: NonNullable<MenuProps['items']> = [];
+    if (can('conversations')) {
+      business.push({ key: '/conversations', icon: <CommentOutlined />, label: '谈心谈话' });
+    }
+    if (can('warnings')) {
+      business.push({ key: '/warnings', icon: <AlertOutlined />, label: withBadge('预警管理', badges.warnings) });
+    }
+    if (can('dormitories')) {
+      business.push({ key: '/dormitories', icon: <HomeOutlined />, label: '寝室管理' });
+    }
+    if (can('funding')) {
+      business.push({ key: '/funding', icon: <GiftOutlined />, label: '资助管理' });
+    }
+    if (business.length > 0) {
+      items.push({
+        key: 'group-business',
+        icon: <AppstoreOutlined />,
+        label: '业务办理',
+        children: business,
+      });
+    }
+
+    const resources: NonNullable<MenuProps['items']> = [];
     if (can('templates')) {
-      items.push({ key: '/templates', icon: <FolderOpenOutlined />, label: '模板汇总库' });
+      resources.push({ key: '/templates', icon: <FolderOpenOutlined />, label: '模板汇总库' });
     }
     if (can('tools')) {
-      items.push({
-        key: '/tools',
+      resources.push({
+        key: 'group-tools',
         icon: <ToolOutlined />,
         label: '实用工具',
         children: [
@@ -261,9 +282,22 @@ export default function BasicLayout() {
         ],
       });
     }
-    if (can('classes')) {
+    if (resources.length > 0) {
       items.push({
-        key: '/classes',
+        key: 'group-resources',
+        icon: <FolderOpenOutlined />,
+        label: '资料与工具',
+        children: resources,
+      });
+    }
+
+    const system: NonNullable<MenuProps['items']> = [];
+    if (isAdmin) {
+      system.push({ key: '/admin/users', icon: <TeamOutlined />, label: '用户管理' });
+    }
+    if (can('classes')) {
+      system.push({
+        key: 'group-classes',
         icon: <ApartmentOutlined />,
         label: '班级管理',
         children: [
@@ -272,26 +306,36 @@ export default function BasicLayout() {
         ],
       });
     }
-    if (can('dormitories')) {
-      items.push({ key: '/dormitories', icon: <HomeOutlined />, label: '寝室管理' });
+    if (isAdmin) {
+      system.push(
+        { key: '/admin/roles', icon: <SafetyCertificateOutlined />, label: '角色管理' },
+        { key: '/admin/data', icon: <DatabaseOutlined />, label: '数据管理' },
+        { key: '/admin/logs', icon: <AuditOutlined />, label: '访问日志' },
+      );
     }
-    if (isSystemAdmin(authUser)) {
+    if (system.length > 0) {
       items.push({
-        key: '/admin',
+        key: 'group-system',
         icon: <SettingOutlined />,
         label: '系统管理',
-        children: [
-          { key: '/admin/users', icon: <TeamOutlined />, label: '用户管理' },
-          { key: '/admin/roles', icon: <SafetyCertificateOutlined />, label: '角色管理' },
-          { key: '/admin/logs', icon: <AuditOutlined />, label: '访问日志' },
-          { key: '/admin/data', icon: <DatabaseOutlined />, label: '数据管理' },
-        ],
+        children: system,
       });
     }
 
     return items;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [badges, authUser]);
+
+  /** 首屏展开当前路由所属的分类（含「实用工具」「班级管理」两级子菜单） */
+  const defaultOpenKeys = useMemo(() => {
+    const keys: string[] = [];
+    if (/^\/(conversations|warnings|dormitories|funding)(\/|$)/.test(location.pathname)) keys.push('group-business');
+    if (/^\/(templates|tools)(\/|$)/.test(location.pathname)) keys.push('group-resources');
+    if (/^\/(classes|admin)(\/|$)/.test(location.pathname)) keys.push('group-system');
+    if (/^\/tools(\/|$)/.test(location.pathname)) keys.push('group-tools');
+    if (/^\/classes(\/|$)/.test(location.pathname)) keys.push('group-classes');
+    return keys;
+  }, [location.pathname]);
 
   const handleMenuClick: MenuProps['onClick'] = ({ key }) => {
     navigate(key);
@@ -304,10 +348,7 @@ export default function BasicLayout() {
       mode={mode}
       items={menuItems}
       selectedKeys={[location.pathname]}
-      defaultOpenKeys={
-        ['tools', 'classes', 'admin'].filter((prefix) => location.pathname.startsWith(`/${prefix}`))
-          .map((prefix) => `/${prefix}`)
-      }
+      defaultOpenKeys={defaultOpenKeys}
       onClick={handleMenuClick}
     />
   );

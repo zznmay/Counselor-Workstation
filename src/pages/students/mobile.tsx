@@ -20,6 +20,25 @@ const LEVEL_TAG: Record<WarningLevel, { cls: string; icon: 'alertTriangle' | 'al
   黄色: { cls: 'lv-yellow', icon: 'flag', text: '黄色预警' },
 };
 
+/**
+ * 关注等级 → 标签样式（紧急程度红/橙/黄/蓝/灰递减）。
+ * 字段由服务端按带班权限回传：无权限的学生响应中不含该字段，天然不渲染。
+ */
+const MENTAL_TAG: Record<string, string> = {
+  密切关注: 'lv-red',
+  重点关注: 'lv-orange',
+  日常关注: 'lv-yellow',
+  一般关注: 'info',
+  无需关注: 'neutral',
+};
+
+/** 困难等级 → 标签样式（认定严重程度红/橙/蓝递减），可见性口径同关注等级 */
+const FUNDING_TAG: Record<string, string> = {
+  特别困难: 'danger',
+  困难: 'warning',
+  一般困难: 'info',
+};
+
 /** 手机号脱敏：保留前 3 后 4 */
 function maskPhone(phone: string): string {
   if (!phone) return '—';
@@ -220,6 +239,12 @@ export default function StudentsMobile() {
                         <MIcon name={tag.icon} size={12} />
                         {tag.text}
                       </span>
+                    )}
+                    {s.mentalLevel && MENTAL_TAG[s.mentalLevel] && (
+                      <span className={`m-tag ${MENTAL_TAG[s.mentalLevel]}`}>{s.mentalLevel}</span>
+                    )}
+                    {s.fundingLevel && FUNDING_TAG[s.fundingLevel] && (
+                      <span className={`m-tag ${FUNDING_TAG[s.fundingLevel]}`}>{s.fundingLevel}</span>
                     )}
                     {s.status !== '在读' && <span className="m-tag neutral">{s.status}</span>}
                   </div>

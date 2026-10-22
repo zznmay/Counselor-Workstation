@@ -73,6 +73,8 @@ api.use('/mental', require('./routes/mental'));
 api.use('/notices', require('./routes/notices'));
 api.use('/approvals', require('./routes/approvals'));
 api.use('/todos', require('./routes/todos'));
+/* 资助管理（首版：困难生认定） */
+api.use('/funding', require('./routes/funding'));
 api.use('/templates', require('./routes/templates'));
 api.use('/scheduler', require('./routes/scheduler'));
 api.use('/dashboard', require('./routes/dashboard'));
@@ -163,8 +165,14 @@ if (fs.existsSync(config.DIST_DIR)) {
     },
   }));
   app.use((req, res, next) => {
-    if (req.method === 'GET' && !req.path.startsWith('/api')) return sendEntry(res);
-    return next();
+    if (req.method !== 'GET' || req.path.startsWith('/api')) return next();
+    // 哈希资产缺失必须显式 404：旧 HTML（或旧 chunk）引用已不存在的 assets 时，
+    // 回 SPA 入口会被浏览器当成 JS 解析 → 模块加载失败、页面卡死在加载态。
+    if (req.path.startsWith('/assets/')) {
+      res.status(404).type('text/plain; charset=utf-8').send('Asset not found');
+      return;
+    }
+    return sendEntry(res);
   });
 } else {
   console.warn('[warn] 未找到前端构建目录 dist/，请先在项目根目录执行 npm run build');

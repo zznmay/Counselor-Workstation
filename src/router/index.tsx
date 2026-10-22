@@ -21,6 +21,7 @@ const Conversations = lazy(() => import('@/pages/conversations'));
 const Warnings = lazy(() => import('@/pages/warnings'));
 const Mental = lazy(() => import('@/pages/mental'));
 const TodoList = lazy(() => import('@/pages/todos'));
+const Funding = lazy(() => import('@/pages/funding'));
 const Templates = lazy(() => import('@/pages/templates'));
 const ToolsIndex = lazy(() => import('@/pages/tools'));
 const ToolRunner = lazy(() => import('@/pages/tools/ToolRunner'));
@@ -92,6 +93,7 @@ export const router = createBrowserRouter([
       { path: 'warnings', element: <RequireModule moduleKey="warnings">{page(<Warnings />)}</RequireModule> },
       { path: 'mental', element: <RequireModule moduleKey="mentalHealth">{page(<Mental />)}</RequireModule> },
       { path: 'todos', element: <RequireModule moduleKey="todos">{page(<TodoList />)}</RequireModule> },
+      { path: 'funding', element: <RequireModule moduleKey="funding">{page(<Funding />)}</RequireModule> },
       { path: 'templates', element: <RequireModule moduleKey="templates">{page(<Templates />)}</RequireModule> },
       { path: 'tools', element: <RequireModule moduleKey="tools">{page(<ToolsIndex />)}</RequireModule> },
       { path: 'tools/:toolKey', element: <RequireModule moduleKey="tools">{page(<ToolRunner />)}</RequireModule> },
