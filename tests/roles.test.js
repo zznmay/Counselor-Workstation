@@ -272,4 +272,20 @@ describe('角色与权限体系', () => {
     assert.equal(dataScopesOfUser(enriched).students, 'managed');
     assert.equal(dataScopesOfUser(enriched).conversations, 'managed');
   });
+
+  it('M2 · roleKeysOfUserId 按用户过滤（防丢参回归：漏传 userId 会把所有会话角色清空）', async () => {
+    const { createRequire } = await import('node:module');
+    const { fileURLToPath } = await import('node:url');
+    const req = createRequire(fileURLToPath(new URL('../server/index.js', import.meta.url)));
+    const { roleKeysOfUserId } = req('./lib/permissions');
+    const tester = dbx.get("SELECT * FROM users WHERE username = 'role_tester'");
+    const testerKeys = roleKeysOfUserId(tester.id);
+    assert.ok(testerKeys.length > 0, '该用户已绑角色，roleKeys 不应为空');
+    assert.ok(testerKeys.includes('counselor') || testerKeys.length > 0);
+    // 不同用户互不串扰：admin 的角色集合不应混入测试用户的角色
+    const admin = dbx.get("SELECT * FROM users WHERE username = 'admin'");
+    const adminKeys = roleKeysOfUserId(admin.id);
+    assert.deepEqual(adminKeys, ['admin']);
+    assert.ok(!adminKeys.includes(testerKeys[0]) || testerKeys[0] === 'admin');
+  });
 });

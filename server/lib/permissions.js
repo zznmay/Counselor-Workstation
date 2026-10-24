@@ -69,7 +69,7 @@ function roleKeysOfUser(user) {
 
 /** 按 userId 查角色集合（登录会话/列表输出用） */
 function roleKeysOfUserId(userId) {
-  return dbx.all('SELECT roleKey FROM userRoles WHERE userId = ?').map((r) => r.roleKey);
+  return dbx.all('SELECT roleKey FROM userRoles WHERE userId = ?', [userId]).map((r) => r.roleKey);
 }
 
 /** 系统管理员判定：主角色为 admin，或角色集合包含 admin */
