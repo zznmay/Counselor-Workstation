@@ -40,7 +40,7 @@ import type { DormitoryQuery } from '@/api/dormitory';
 import { getClassOptions, getGradeOptions } from '@/api/classes';
 import PageHeader from '@/components/PageHeader';
 import { useStudentOptions } from '@/hooks/useStudentOptions';
-import { canManageStudentFront, getStoredUser, isModuleOwner, subscribeSession } from '@/lib/auth';
+import { canAction, canManageStudentFront, getStoredUser, isModuleOwner, subscribeSession } from '@/lib/auth';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useList } from '@/hooks/useList';
 import { exportDormitories, fetchAllDormitories } from '@/utils/dormExport';
@@ -436,12 +436,12 @@ function DormitoriesDesktop() {
             <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => setDetail(record)}>
               查看
             </Button>
-            {canManage && (
+            {canManage && canAction(authUser, 'dormitories', 'edit') && (
               <Button type="link" size="small" onClick={() => openEdit(record)}>
                 编辑
               </Button>
             )}
-            {canManage && (
+            {canManage && canAction(authUser, 'dormitories', 'delete') && (
               <Popconfirm
                 title="确定删除该寝室分配吗？"
                 description="删除后学生名册的「宿舍」将显示为未分配"
@@ -530,34 +530,40 @@ function DormitoriesDesktop() {
           重置
         </Button>
         <div className="toolbar-spacer" />
-        <Button
-          icon={<DownloadOutlined />}
-          loading={exporting}
-          disabled={data.total === 0 && selectedKeys.length === 0}
-          onClick={() => void handleBatchExport()}
-        >
-          批量导出{selectedKeys.length > 0 ? `（${selectedKeys.length}）` : ''}
-        </Button>
-        <Button
-          danger
-          icon={<DeleteOutlined />}
-          disabled={selectedKeys.length === 0}
-          onClick={handleBatchDelete}
-        >
-          批量删除{selectedKeys.length > 0 ? `（${selectedKeys.length}）` : ''}
-        </Button>
-        {isDormOwner && (
+        {canAction(authUser, 'dormitories', 'export') && (
+          <Button
+            icon={<DownloadOutlined />}
+            loading={exporting}
+            disabled={data.total === 0 && selectedKeys.length === 0}
+            onClick={() => void handleBatchExport()}
+          >
+            批量导出{selectedKeys.length > 0 ? `（${selectedKeys.length}）` : ''}
+          </Button>
+        )}
+        {canAction(authUser, 'dormitories', 'delete') && (
+          <Button
+            danger
+            icon={<DeleteOutlined />}
+            disabled={selectedKeys.length === 0}
+            onClick={handleBatchDelete}
+          >
+            批量删除{selectedKeys.length > 0 ? `（${selectedKeys.length}）` : ''}
+          </Button>
+        )}
+        {isDormOwner && canAction(authUser, 'dormitories', 'create') && (
           <Button icon={<UploadOutlined />} onClick={openImport}>
             批量导入
           </Button>
         )}
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={openCreate}
-        >
-          新增分配
-        </Button>
+        {canAction(authUser, 'dormitories', 'create') && (
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={openCreate}
+          >
+            新增分配
+          </Button>
+        )}
       </div>
 
       <Table

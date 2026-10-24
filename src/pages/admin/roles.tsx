@@ -1,47 +1,66 @@
-import { PlusOutlined } from '@ant-design/icons';
+import { KeyOutlined, PlusOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import {
   Alert,
   App,
   Button,
-  Checkbox,
   Form,
   Input,
   Modal,
   Popconfirm,
   Space,
+  Switch,
   Table,
   Tag,
   Typography,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 import { createRole, deleteRole, getRoles, updateRole } from '@/api/roles';
 import PageHeader from '@/components/PageHeader';
-import { APP_MODULES, MODULE_GROUPS } from '@/constants/modules';
+import { ACTIONS_OF_MODULE, APP_MODULES } from '@/constants/modules';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import type { Role } from '@/types';
 import AdminRolesMobile from './rolesMobile';
 
 interface RoleFormValues {
   name: string;
+  key?: string;
   description?: string;
-  permissions: string[];
-  ownerModules: string[];
+  disabled?: boolean;
 }
 
-/** 系统管理：角色维护与模块权限配置（桌面端，仅管理员） */
+/** 角色操作权限统计：通配模块按注册表全部操作计（显示「全部」口径） */
+function actionCountOf(role: Role): number {
+  const wildcards = new Set(
+    role.actions.filter((a) => a.endsWith(':*')).map((a) => a.slice(0, a.indexOf(':'))),
+  );
+  let count = 0;
+  for (const key of wildcards) count += ACTIONS_OF_MODULE[key]?.length ?? 0;
+  count += role.actions.filter((a) => !a.endsWith(':*')).length;
+  return count;
+}
+
+/** 权限概览摘要：模块数 + 数据范围 + 操作数（admin 特判全部） */
+export function permissionSummary(role: Role): { modules: number; all: number; managed: number; actions: number } {
+  const modules = role.permissions.includes('*') ? APP_MODULES.length : role.permissions.length;
+  const scopeable = APP_MODULES.filter((m) => m.scopeable === true && role.permissions.includes(m.key));
+  const all = scopeable.filter((m) => (role.dataScopes?.[m.key] ?? 'managed') === 'all').length;
+  return { modules, all, managed: scopeable.length - all, actions: actionCountOf(role) };
+}
+
+/** 系统管理：角色维护（桌面端，仅管理员）；权限配置在 /admin/roles/:id/permissions 独立页面 */
 function AdminRolesDesktop() {
   const isMobile = useIsMobile();
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
+  const navigate = useNavigate();
   const [roles, setRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(true);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Role | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [form] = Form.useForm<RoleFormValues>();
-  /** 已勾选的可访问模块（主负责 Checkbox 的禁用依据） */
-  const perms = Form.useWatch('permissions', form) ?? [];
 
   const reload = async () => {
     setLoading(true);
@@ -62,7 +81,7 @@ function AdminRolesDesktop() {
   const openCreate = () => {
     setEditing(null);
     form.resetFields();
-    form.setFieldsValue({ permissions: [], ownerModules: [] });
+    form.setFieldsValue({ disabled: false });
     setFormOpen(true);
   };
 
@@ -70,9 +89,9 @@ function AdminRolesDesktop() {
     setEditing(role);
     form.setFieldsValue({
       name: role.name,
+      key: role.key,
       description: role.description,
-      permissions: role.permissions.includes('*') ? [] : role.permissions,
-      ownerModules: role.ownerModules ?? [],
+      disabled: !!role.disabled,
     });
     setFormOpen(true);
   };
@@ -88,12 +107,19 @@ function AdminRolesDesktop() {
     try {
       if (editing) {
         await updateRole(editing.id, values);
-        message.success(`角色「${values.name}」已更新，权限已实时生效`);
+        message.success(`角色「${values.name}」已更新，权限实时生效`);
+        setFormOpen(false);
       } else {
-        await createRole(values);
-        message.success(`角色「${values.name}」已创建`);
+        const created = await createRole({ ...values, key: values.key?.trim() || undefined });
+        setFormOpen(false);
+        modal.confirm({
+          title: `角色「${values.name}」已创建`,
+          content: '新角色尚未配置任何模块权限，是否立即进入权限配置？',
+          okText: '去配置权限',
+          cancelText: '稍后',
+          onOk: () => navigate(`/admin/roles/${created.id}/permissions`),
+        });
       }
-      setFormOpen(false);
       void reload();
     } catch (e) {
       message.error(e instanceof Error ? e.message : '保存失败');
@@ -112,20 +138,51 @@ function AdminRolesDesktop() {
     }
   };
 
-  /** 权限标签：admin 显示全部；普通角色展示模块名 + 紫色「主负责」标识 */
-  const permissionTags = (role: Role) => {
-    if (role.permissions.includes('*')) return <Tag color="gold">全部模块</Tag>;
-    if (role.permissions.length === 0) return <Typography.Text type="secondary">未分配模块</Typography.Text>;
-    const owners = role.ownerModules ?? [];
+  /** 启用/停用：停用即时收回该角色授予的全部权限（服务端每请求实时解析，无需重新登录） */
+  const toggleDisabled = (role: Role) => {
+    const nextDisabled = !role.disabled;
+    modal.confirm({
+      title: nextDisabled ? `停用角色「${role.name}」？` : `启用角色「${role.name}」？`,
+      content: nextDisabled
+        ? role.userCount > 0
+          ? `该角色下有 ${role.userCount} 名用户，停用后这些用户将从下一次请求起失去该角色授予的全部权限（不会删除分配关系，重新启用即恢复）。`
+          : '停用后该角色不再授予任何权限；重新启用即恢复。'
+        : '启用后该角色授予的权限立即恢复生效。',
+      okText: nextDisabled ? '停用' : '启用',
+      okButtonProps: nextDisabled ? { danger: true } : undefined,
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await updateRole(role.id, { disabled: nextDisabled });
+          message.success(`角色「${role.name}」已${nextDisabled ? '停用' : '启用'}，实时生效`);
+          void reload();
+        } catch (e) {
+          message.error(e instanceof Error ? e.message : '操作失败');
+        }
+      },
+    });
+  };
+
+  /** 权限概览列：模块数 + 数据范围 + 操作数摘要（admin 显示全部） */
+  const overviewTag = (role: Role) => {
+    if (role.permissions.includes('*')) {
+      return <Tag color="gold">全部模块 · 全部操作 · 全量数据</Tag>;
+    }
+    if (role.permissions.length === 0) {
+      return <Typography.Text type="secondary">未分配模块</Typography.Text>;
+    }
+    const s = permissionSummary(role);
     return (
       <Space size={[4, 4]} wrap>
-        {APP_MODULES.filter((m) => role.permissions.includes(m.key)).map((m) => (
-          <Tag key={m.key} color="blue">{m.name}</Tag>
-        ))}
-        {owners.map((key) => {
-          const m = APP_MODULES.find((x) => x.key === key);
-          return m ? <Tag key={`owner-${key}`} color="purple">{m.name}·主负责</Tag> : null;
-        })}
+        <Tag color="blue">{s.modules} 个模块</Tag>
+        {s.all > 0 && <Tag color="green">全量 {s.all}</Tag>}
+        {s.managed > 0 && <Tag>带班 {s.managed}</Tag>}
+        {role.ownerModules.length > 0 && (
+          <Tag color="purple">主负责 {role.ownerModules.length}</Tag>
+        )}
+        <Tag color={s.actions > 0 ? 'geekblue' : 'default'}>
+          {s.actions > 0 ? `操作 ${s.actions} 项` : '只读'}
+        </Tag>
       </Space>
     );
   };
@@ -145,7 +202,7 @@ function AdminRolesDesktop() {
     {
       title: '角色标识',
       dataIndex: 'key',
-      width: 155,
+      width: 150,
       render: (key: string) => (
         <Typography.Text code style={{ fontSize: 12 }}>{key}</Typography.Text>
       ),
@@ -153,15 +210,23 @@ function AdminRolesDesktop() {
     {
       title: '说明',
       dataIndex: 'description',
-      width: 200,
+      width: 180,
       ellipsis: true,
       render: (v?: string) => v || '—',
     },
     {
-      title: '可访问模块',
+      title: '状态',
+      dataIndex: 'disabled',
+      width: 86,
+      render: (disabled?: boolean) => (
+        <Tag color={disabled ? 'default' : 'blue'}>{disabled ? '已停用' : '启用'}</Tag>
+      ),
+    },
+    {
+      title: '权限概览',
       dataIndex: 'permissions',
-      width: 340,
-      render: (_, record) => permissionTags(record),
+      width: 330,
+      render: (_, record) => overviewTag(record),
     },
     {
       title: '用户数',
@@ -169,72 +234,69 @@ function AdminRolesDesktop() {
       width: 80,
       render: (count: number) => (count > 0 ? `${count} 人` : '—'),
     },
-    { title: '更新时间', dataIndex: 'updatedAt', width: 155 },
+    { title: '更新时间', dataIndex: 'updatedAt', width: 150 },
     {
       title: '操作',
       key: 'action',
-      width: 110,
+      width: 250,
       fixed: 'right',
-      render: (_, record) => (
-        <Space size={4} wrap={false}>
-          <Button
-            type="link"
-            size="small"
-            disabled={record.key === 'admin'}
-            onClick={() => openEdit(record)}
-          >
-            编辑
-          </Button>
-          <Popconfirm
-            title={`删除角色「${record.name}」？`}
-            description={
-              record.isSystem
-                ? '内置角色不可删除'
-                : record.userCount > 0
-                  ? `该角色下仍有 ${record.userCount} 名用户，需先调整用户角色`
-                  : '删除后不可恢复'
-            }
-            disabled={record.isSystem || record.userCount > 0}
-            onConfirm={() => handleDelete(record)}
-            okText="删除"
-            cancelText="取消"
-          >
+      render: (_, record) => {
+        const locked = record.key === 'admin';
+        return (
+          <Space size={4} wrap={false}>
             <Button
               type="link"
               size="small"
-              danger
-              disabled={record.isSystem || record.userCount > 0}
+              icon={<SafetyCertificateOutlined />}
+              onClick={() => navigate(`/admin/roles/${record.id}/permissions`)}
             >
-              删除
+              配置权限
             </Button>
-          </Popconfirm>
-        </Space>
-      ),
+            <Button type="link" size="small" disabled={locked} onClick={() => openEdit(record)}>
+              编辑
+            </Button>
+            <Button
+              type="link"
+              size="small"
+              disabled={locked}
+              onClick={() => toggleDisabled(record)}
+            >
+              {record.disabled ? '启用' : '停用'}
+            </Button>
+            <Popconfirm
+              title={`删除角色「${record.name}」？`}
+              description={
+                record.isSystem
+                  ? '内置角色不可删除'
+                  : record.userCount > 0
+                    ? `该角色下仍有 ${record.userCount} 名用户，需先调整用户角色`
+                    : '删除后不可恢复'
+              }
+              disabled={record.isSystem || record.userCount > 0}
+              onConfirm={() => handleDelete(record)}
+              okText="删除"
+              cancelText="取消"
+            >
+              <Button
+                type="link"
+                size="small"
+                danger
+                disabled={record.isSystem || record.userCount > 0}
+              >
+                删除
+              </Button>
+            </Popconfirm>
+          </Space>
+        );
+      },
     },
   ];
-
-  const groupedModules = useMemo(
-    () => MODULE_GROUPS.map((group) => ({
-      group,
-      items: APP_MODULES.filter((m) => m.group === group),
-    })).filter((g) => g.items.length > 0),
-    [],
-  );
-
-  /** 主负责模块仅展示 ownerable 模块；功能级权限（如心理访谈）不参与主负责配置 */
-  const groupedOwnerModules = useMemo(
-    () => MODULE_GROUPS.map((group) => ({
-      group,
-      items: APP_MODULES.filter((m) => m.group === group && m.ownerable !== false),
-    })).filter((g) => g.items.length > 0),
-    [],
-  );
 
   return (
     <div className="page">
       <PageHeader
         title="角色管理"
-        subtitle="维护角色、可访问模块与主负责模块；权限调整对同角色用户实时生效（无需重新登录）"
+        subtitle="维护角色与基础信息；在「配置权限」中按 模块—页面—操作 调整权限与数据范围，实时生效（无需重新登录）"
         extra={
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
             新增角色
@@ -245,7 +307,7 @@ function AdminRolesDesktop() {
       <Alert
         type="info"
         showIcon
-        message="内置「系统管理员」始终拥有全部权限且不可修改；可为角色按模块指定「主负责辅导员」（该模块最高权限，本期「心理健康」已启用）；用户与角色/日志等系统管理模块仅管理员可访问。"
+        message="内置「系统管理员」始终拥有全部权限且不可修改或停用；用户/角色/日志/数据管理等系统管理模块仅系统管理员可访问。停用角色会即时收回其授予的全部权限，但不删除用户的角色分配。"
       />
 
       <Table
@@ -253,8 +315,9 @@ function AdminRolesDesktop() {
         columns={columns}
         dataSource={roles}
         loading={loading}
-        scroll={{ x: 1190 }}
+        scroll={{ x: 1240 }}
         pagination={false}
+        rowClassName={(record) => (record.disabled ? 'row-disabled' : '')}
       />
 
       <Modal
@@ -265,7 +328,7 @@ function AdminRolesDesktop() {
         onCancel={() => setFormOpen(false)}
         okText="保存"
         cancelText="取消"
-        width={isMobile ? 'calc(100vw - 24px)' : 620}
+        width={isMobile ? 'calc(100vw - 24px)' : 520}
       >
         <Form form={form} layout="vertical">
           <Form.Item
@@ -279,86 +342,39 @@ function AdminRolesDesktop() {
             <Input placeholder="如 院系负责人 / 资助专员" />
           </Form.Item>
           <Form.Item
+            name="key"
+            label={
+              <Space size={4}>
+                <KeyOutlined />
+                角色标识
+              </Space>
+            }
+            extra={editing
+              ? '标识创建后不可修改（用户的角色分配按标识引用）。'
+              : '2-30 位小写字母/数字/下划线，字母开头；留空自动生成。创建后不可修改。'}
+            rules={[
+              { pattern: /^[a-z][a-z0-9_]{1,29}$/, message: '2-30 位小写字母、数字或下划线，且以字母开头' },
+            ]}
+          >
+            <Input placeholder="如 gradeDirector（选填）" disabled={!!editing} />
+          </Form.Item>
+          <Form.Item
             name="description"
             label="角色说明"
             rules={[{ max: 100, message: '不可超过 100 个字' }]}
           >
             <Input.TextArea rows={2} placeholder="该角色的职责范围（选填）" />
           </Form.Item>
-
-          <Form.Item label="可访问模块" required>
-            <div className="role-perm-box">
-              <div className="role-perm-actions">
-                <Button
-                  size="small"
-                  type="link"
-                  onClick={() => form.setFieldValue('permissions', APP_MODULES.map((m) => m.key))}
-                >
-                  全选
-                </Button>
-                <Button
-                  size="small"
-                  type="link"
-                  onClick={() => form.setFieldsValue({ permissions: [], ownerModules: [] })}
-                >
-                  清空
-                </Button>
-              </div>
-              <Form.Item name="permissions" noStyle>
-                <Checkbox.Group
-                  style={{ width: '100%' }}
-                  onChange={(next) => {
-                    // 取消某模块可访问时，同步收回其主负责（与后端子集校验/静默 prune 同口径）
-                    form.setFieldValue(
-                      'ownerModules',
-                      (form.getFieldValue('ownerModules') ?? []).filter((k: string) => next.includes(k)),
-                    );
-                  }}
-                >
-                  <Space direction="vertical" size={12} style={{ width: '100%' }}>
-                    {groupedModules.map(({ group, items }) => (
-                      <div key={group}>
-                        <div className="role-perm-group">{group}</div>
-                        <Space size={[16, 8]} wrap>
-                          {items.map((m) => (
-                            <Checkbox key={m.key} value={m.key}>{m.name}</Checkbox>
-                          ))}
-                        </Space>
-                      </div>
-                    ))}
-                  </Space>
-                </Checkbox.Group>
-              </Form.Item>
-            </div>
-          </Form.Item>
-
-          <Form.Item label="主负责模块（该模块最高权限）">
-            <div className="role-perm-box">
-              <Form.Item name="ownerModules" noStyle>
-                <Checkbox.Group style={{ width: '100%' }}>
-                  <Space direction="vertical" size={12} style={{ width: '100%' }}>
-                    {groupedOwnerModules.map(({ group, items }) => (
-                      <div key={group}>
-                        <div className="role-perm-group">{group}</div>
-                        <Space size={[16, 8]} wrap>
-                          {items.map((m) => (
-                            <Checkbox key={m.key} value={m.key} disabled={!perms.includes(m.key)}>
-                              {m.name}
-                            </Checkbox>
-                          ))}
-                        </Space>
-                      </div>
-                    ))}
-                  </Space>
-                </Checkbox.Group>
-              </Form.Item>
-            </div>
+          <Form.Item name="disabled" label="状态" valuePropName="checked" initialValue={false}>
+            <Switch
+              checkedChildren="启用"
+              unCheckedChildren="停用"
+              disabled={editing?.key === 'admin'}
+            />
           </Form.Item>
           <Typography.Text type="secondary">
-            未勾选的模块不会出现在该角色用户的侧边菜单中，服务端接口也会同步拒绝访问。
-            主负责角色在该模块拥有最高权限（查看全院学生数据 + 全部操作），须先勾选对应「可访问模块」；
-            同一模块可由多个角色共同主负责。本期「心理健康」模块已启用该能力。
-            「心理访谈」为功能级权限（不承载菜单），入口在心理健康页「一般关注」学生行内。
+            模块访问、操作权限与数据范围请在保存后进入「配置权限」页调整；
+            停用的角色不授予任何权限，重新启用即恢复。
           </Typography.Text>
         </Form>
       </Modal>
@@ -371,8 +387,8 @@ function AdminRolesDesktop() {
 }
 
 /**
- * 视口分发：≤768px 走移动端独立渲染层（角色卡片化 + 全屏面板表单），
- * 修复桌面表格在手机上「角色标识被裁切、操作列占满屏幕」的问题；桌面端零改动。
+ * 视口分发：≤768px 走移动端独立渲染层（角色卡片化 + 基础信息表单 + 只读权限概览），
+ * 桌面端零改动。
  */
 export default function AdminRoles() {
   const isMobile = useIsMobile();

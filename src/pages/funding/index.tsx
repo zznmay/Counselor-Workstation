@@ -63,9 +63,10 @@ import {
   toOptions,
 } from '@/constants';
 import { useIsMobile } from '@/hooks/useIsMobile';
+import { useAuthUser } from '@/hooks/useAuthUser';
 import { useList } from '@/hooks/useList';
 import { useStudentOptions } from '@/hooks/useStudentOptions';
-import { getStoredUser } from '@/lib/auth';
+import { canAction, getStoredUser } from '@/lib/auth';
 import type {
   ClassOption,
   FundingDetail,
@@ -170,6 +171,7 @@ function MiniBars({ items, color }: { items: { label: string; count: number }[];
 function FundingDesktop() {
   const navigate = useNavigate();
   const { message } = App.useApp();
+  const authUser = useAuthUser();
   const [form] = Form.useForm<FundingFormValues>();
   const [gradeOptions, setGradeOptions] = useState<GradeOption[]>([]);
   const [classOptions, setClassOptions] = useState<ClassOption[]>([]);
@@ -744,13 +746,18 @@ function FundingDesktop() {
           <Button type="link" size="small" onClick={() => openDetail(record)}>详情</Button>
           {record.status !== '已取消' && (
             <>
-              <Button type="link" size="small" onClick={() => openEdit(record)}>编辑</Button>
-              <Button type="link" size="small" onClick={() => openStatus(record, record.status === '待复核' ? 'confirm' : 'cancel')}>
-                {record.status === '待复核' ? '确认' : '取消'}
-              </Button>
+              {canAction(authUser, 'funding', 'edit') && (
+                <Button type="link" size="small" onClick={() => openEdit(record)}>编辑</Button>
+              )}
+              {record.status === '待复核' && canAction(authUser, 'funding', 'confirm') && (
+                <Button type="link" size="small" onClick={() => openStatus(record, 'confirm')}>确认</Button>
+              )}
+              {record.status !== '待复核' && canAction(authUser, 'funding', 'cancel') && (
+                <Button type="link" size="small" onClick={() => openStatus(record, 'cancel')}>取消</Button>
+              )}
             </>
           )}
-          {record.status === '已取消' && (
+          {record.status === '已取消' && canAction(authUser, 'funding', 'redo') && (
             <Button type="link" size="small" onClick={() => openReidentify(record)}>重新认定</Button>
           )}
         </Space>
@@ -773,20 +780,28 @@ function FundingDesktop() {
               options={buildAcademicYearOptions(5, 1)}
               onChange={(academicYear) => patchQuery({ academicYear })}
             />
-            <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>新增认定</Button>
-            <Button icon={<UploadOutlined />} onClick={openImport}>批量导入</Button>
-            <Button icon={<SwapOutlined />} onClick={openRollover}>学年结转</Button>
-            <Dropdown
-              menu={{
-                items: [
-                  { key: 'roster', label: '导出认定名册' },
-                  { key: 'summary', label: '导出汇总报表' },
-                ],
-                onClick: ({ key }) => void handleExport(key as 'roster' | 'summary'),
-              }}
-            >
-              <Button icon={<DownloadOutlined />} loading={exporting}>导出</Button>
-            </Dropdown>
+            {canAction(authUser, 'funding', 'create') && (
+              <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>新增认定</Button>
+            )}
+            {canAction(authUser, 'funding', 'import') && (
+              <Button icon={<UploadOutlined />} onClick={openImport}>批量导入</Button>
+            )}
+            {canAction(authUser, 'funding', 'rollover') && (
+              <Button icon={<SwapOutlined />} onClick={openRollover}>学年结转</Button>
+            )}
+            {canAction(authUser, 'funding', 'export') && (
+              <Dropdown
+                menu={{
+                  items: [
+                    { key: 'roster', label: '导出认定名册' },
+                    { key: 'summary', label: '导出汇总报表' },
+                  ],
+                  onClick: ({ key }) => void handleExport(key as 'roster' | 'summary'),
+                }}
+              >
+                <Button icon={<DownloadOutlined />} loading={exporting}>导出</Button>
+              </Dropdown>
+            )}
           </Space>
         )}
       />
@@ -935,10 +950,14 @@ function FundingDesktop() {
       {selectedIds.length > 0 && (
         <div className="toolbar" style={{ marginBottom: 12 }}>
           <span style={{ fontSize: 13 }}>已选 <b>{selectedIds.length}</b> 条</span>
-          <Button size="small" onClick={() => openBatch('changeLevel')}>批量调级</Button>
-          <Button size="small" onClick={() => openBatch('renew')}>批量续期</Button>
-          <Button size="small" onClick={() => openBatch('confirm')}>批量确认复核</Button>
-          <Button size="small" danger onClick={() => openBatch('cancel')}>批量取消</Button>
+          {canAction(authUser, 'funding', 'batch') && (
+            <>
+              <Button size="small" onClick={() => openBatch('changeLevel')}>批量调级</Button>
+              <Button size="small" onClick={() => openBatch('renew')}>批量续期</Button>
+              <Button size="small" onClick={() => openBatch('confirm')}>批量确认复核</Button>
+              <Button size="small" danger onClick={() => openBatch('cancel')}>批量取消</Button>
+            </>
+          )}
           <div className="toolbar-spacer" />
           <Button size="small" type="link" onClick={() => setSelectedIds([])}>清空选择</Button>
         </div>

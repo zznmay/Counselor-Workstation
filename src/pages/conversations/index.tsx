@@ -47,6 +47,8 @@ import type { ConversationFormValues } from '@/components/ConversationFormFields
 import PageHeader from '@/components/PageHeader';
 import { TALK_TYPES, TALK_TYPE_COLOR, TALK_WAYS, toOptions } from '@/constants';
 import { useIsMobile } from '@/hooks/useIsMobile';
+import { useAuthUser } from '@/hooks/useAuthUser';
+import { canAction } from '@/lib/auth';
 import { useList } from '@/hooks/useList';
 import type {
   Conversation,
@@ -72,6 +74,7 @@ const toBool = (v?: string): boolean | undefined => (v === undefined ? undefined
 function ConversationsDesktop() {
   const isMobile = useIsMobile();
   const { message } = App.useApp();
+  const authUser = useAuthUser();
   const [form] = Form.useForm<ConversationFormValues & { studentId: string }>();
 
   const [view, setView] = useState<'list' | 'timeline'>('list');
@@ -292,14 +295,18 @@ function ConversationsDesktop() {
           <Button type="link" size="small" onClick={() => setDetail(record)}>
             详情
           </Button>
-          <Button type="link" size="small" onClick={() => openEdit(record)}>
-            编辑
-          </Button>
-          <Popconfirm title="确定删除该条谈话记录吗？" onConfirm={() => handleDelete(record.id)}>
-            <Button type="link" size="small" danger>
-              删除
+          {canAction(authUser, 'conversations', 'edit') && (
+            <Button type="link" size="small" onClick={() => openEdit(record)}>
+              编辑
             </Button>
-          </Popconfirm>
+          )}
+          {canAction(authUser, 'conversations', 'delete') && (
+            <Popconfirm title="确定删除该条谈话记录吗？" onConfirm={() => handleDelete(record.id)}>
+              <Button type="link" size="small" danger>
+                删除
+              </Button>
+            </Popconfirm>
+          )}
         </Space>
       ),
     },
@@ -373,9 +380,11 @@ function ConversationsDesktop() {
               重置
             </Button>
             <div className="toolbar-spacer" />
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => openCreate()}>
-              新增谈话记录
-            </Button>
+            {canAction(authUser, 'conversations', 'create') && (
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => openCreate()}>
+                新增谈话记录
+              </Button>
+            )}
           </div>
 
           <Table
@@ -425,6 +434,7 @@ function ConversationsDesktop() {
               type="primary"
               icon={<PlusOutlined />}
               disabled={!timelineStudentId}
+              hidden={!canAction(authUser, 'conversations', 'create')}
               onClick={() => openCreate(timelineStudentId)}
             >
               记录谈话
@@ -469,17 +479,21 @@ function ConversationsDesktop() {
                       <Tag>{c.way}</Tag>
                       {c.needFollowUp && <Tag color="orange">需跟进</Tag>}
                       <span className="tl-actions">
-                        <Button type="link" size="small" onClick={() => openEdit(c)}>
-                          编辑
-                        </Button>
-                        <Popconfirm
-                          title="确定删除该条谈话记录吗？"
-                          onConfirm={() => handleDelete(c.id)}
-                        >
-                          <Button type="link" size="small" danger>
-                            删除
+                        {canAction(authUser, 'conversations', 'edit') && (
+                          <Button type="link" size="small" onClick={() => openEdit(c)}>
+                            编辑
                           </Button>
-                        </Popconfirm>
+                        )}
+                        {canAction(authUser, 'conversations', 'delete') && (
+                          <Popconfirm
+                            title="确定删除该条谈话记录吗？"
+                            onConfirm={() => handleDelete(c.id)}
+                          >
+                            <Button type="link" size="small" danger>
+                              删除
+                            </Button>
+                          </Popconfirm>
+                        )}
                       </span>
                     </div>
                     <div className="detail-pre tl-content">{c.content}</div>

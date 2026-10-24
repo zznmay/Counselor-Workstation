@@ -6,7 +6,7 @@ const path = require('path');
 
 const dbx = require('../lib/db');
 const auth = require('../lib/auth');
-const { requirePermission } = require('../lib/permissions');
+const { requirePermission, requireAction } = require('../lib/permissions');
 const { UPLOAD_DIR } = require('../lib/config');
 const { logAccess, nowStr } = require('../lib/audit');
 
@@ -113,7 +113,7 @@ router.get('/:id', (req, res) => {
 });
 
 /** 上传：类型/大小校验 + 重名校验，文件落盘 uploads/ */
-router.post('/', upload.single('file'), (req, res) => {
+router.post('/', requireAction('templates', 'upload'), upload.single('file'), (req, res) => {
   const name = String(req.body?.name ?? '').trim();
   const categoryId = String(req.body?.categoryId ?? '');
   if (!name) return res.status(400).json({ message: '请输入模板名称' });
@@ -138,7 +138,7 @@ router.post('/', upload.single('file'), (req, res) => {
   res.json(toClient(row));
 });
 
-router.put('/:id/rename', (req, res) => {
+router.put('/:id/rename', requireAction('templates', 'rename'), (req, res) => {
   const target = dbx.get('SELECT * FROM templateFiles WHERE id = ?', [req.params.id]);
   if (!target) return res.status(404).json({ message: '模板不存在' });
   if (req.user.role !== 'admin' && target.uploader !== req.user.displayName) {
@@ -154,7 +154,7 @@ router.put('/:id/rename', (req, res) => {
   res.json({ ok: true });
 });
 
-router.put('/:id/description', (req, res) => {
+router.put('/:id/description', requireAction('templates', 'rename'), (req, res) => {
   const target = dbx.get('SELECT * FROM templateFiles WHERE id = ?', [req.params.id]);
   if (!target) return res.status(404).json({ message: '模板不存在' });
   if (req.user.role !== 'admin' && target.uploader !== req.user.displayName) {
@@ -167,7 +167,7 @@ router.put('/:id/description', (req, res) => {
   res.json({ ok: true });
 });
 
-router.delete('/:id', (req, res) => {
+router.delete('/:id', requireAction('templates', 'delete'), (req, res) => {
   const target = dbx.get('SELECT * FROM templateFiles WHERE id = ?', [req.params.id]);
   if (!target) return res.status(404).json({ message: '模板不存在' });
   if (req.user.role !== 'admin' && target.uploader !== req.user.displayName) {
@@ -182,7 +182,7 @@ router.delete('/:id', (req, res) => {
 });
 
 /** 下载：鉴权后回放上传的原文件 */
-router.get('/:id/download', (req, res) => {
+router.get('/:id/download', requireAction('templates', 'download'), (req, res) => {
   const row = dbx.get('SELECT * FROM templateFiles WHERE id = ?', [req.params.id]);
   if (!row) return res.status(404).json({ message: '模板不存在' });
   if (!row.uploaded || !row.storedName) {

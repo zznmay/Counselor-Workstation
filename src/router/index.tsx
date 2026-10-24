@@ -3,7 +3,7 @@ import { lazy, Suspense, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 
 import RouteFallback from '@/components/RouteFallback';
-import { canAccessModule, getStoredUser, getToken, isSystemAdmin } from '@/lib/auth';
+import { canAccessModule, canAccessPage, getStoredUser, getToken, isSystemAdmin } from '@/lib/auth';
 import { tryDemoLogin } from '@/lib/demoLogin';
 import RouteError from '@/pages/routeError';
 
@@ -31,6 +31,7 @@ const Grades = lazy(() => import('@/pages/classes/grades'));
 const Dormitories = lazy(() => import('@/pages/dormitories'));
 const AdminUsers = lazy(() => import('@/pages/admin/users'));
 const AdminRoles = lazy(() => import('@/pages/admin/roles'));
+const RolePermissions = lazy(() => import('@/pages/admin/rolePermissions'));
 const AdminLogs = lazy(() => import('@/pages/admin/logs'));
 const AdminData = lazy(() => import('@/pages/admin/data'));
 const Forbidden = lazy(() => import('@/pages/forbidden'));
@@ -67,6 +68,12 @@ function RequireAuth({ children }: { children: ReactNode }) {
  */
 function RequireModule({ moduleKey, children }: { moduleKey: string; children: ReactNode }) {
   if (!canAccessModule(getStoredUser(), moduleKey)) return <Navigate to="/forbidden" replace />;
+  return <>{children}</>;
+}
+
+/** gated 页面守卫：模块可访问 + 页面独立授权（如班级管理下的年级管理页），与服务端 requirePage 同口径 */
+function RequirePage({ moduleKey, pageKey, children }: { moduleKey: string; pageKey: string; children: ReactNode }) {
+  if (!canAccessPage(getStoredUser(), moduleKey, pageKey)) return <Navigate to="/forbidden" replace />;
   return <>{children}</>;
 }
 
@@ -114,10 +121,13 @@ export const router = createBrowserRouter([
       { path: 'tools', element: <RequireModule moduleKey="tools">{page(<ToolsIndex />)}</RequireModule> },
       { path: 'tools/:toolKey', element: <RequireModule moduleKey="tools">{page(<ToolRunner />)}</RequireModule> },
       { path: 'classes', element: <RequireModule moduleKey="classes">{page(<Classes />)}</RequireModule> },
-      { path: 'classes/grades', element: <RequireModule moduleKey="classes">{page(<Grades />)}</RequireModule> },
+      /* 年级管理为 gated 页面：需班级模块 + 页面独立授权（classes:page-grades） */
+      { path: 'classes/grades', element: <RequirePage moduleKey="classes" pageKey="grades">{page(<Grades />)}</RequirePage> },
       { path: 'dormitories', element: <RequireModule moduleKey="dormitories">{page(<Dormitories />)}</RequireModule> },
       { path: 'admin/users', element: <RequireAdmin>{page(<AdminUsers />)}</RequireAdmin> },
       { path: 'admin/roles', element: <RequireAdmin>{page(<AdminRoles />)}</RequireAdmin> },
+      /* 角色权限配置（模块—页面—操作 + 数据范围） */
+      { path: 'admin/roles/:id/permissions', element: <RequireAdmin>{page(<RolePermissions />)}</RequireAdmin> },
       { path: 'admin/logs', element: <RequireAdmin>{page(<AdminLogs />)}</RequireAdmin> },
       { path: 'admin/data', element: <RequireAdmin>{page(<AdminData />)}</RequireAdmin> },
       { path: 'forbidden', element: page(<Forbidden />) },

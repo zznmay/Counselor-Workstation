@@ -13,7 +13,7 @@ const dbx = require('../lib/db');
 const auth = require('../lib/auth');
 const { logAccess, nowStr } = require('../lib/audit');
 const { isAdmin, canManageStudent, classIdsOfUser } = require('../lib/scope');
-const { requirePermission, isModuleOwner, hasPermission } = require('../lib/permissions');
+const { requirePermission, requireAction, isModuleOwner, hasPermission, hasAction, dataScopeOfUser } = require('../lib/permissions');
 const { currentSemester } = require('../lib/semester');
 const {
   REQUIRED_COUNT,
@@ -36,9 +36,10 @@ router.use(requirePermission('mentalHealth'));
  *  与模版适用等级、访谈评估选项同源（lib/interviewTemplate.js）。 */
 const LEVELS = tpl.LEVELS;
 
-/** 可见范围条件：管理员或心理健康主负责 1=1（全院）；其他角色 s.classId 必须命中所辖班级（别名固定为 s） */
+/** 可见范围条件：心理健康模块（mentalHealth）数据范围为全量（管理员/主负责/角色配置）→ 1=1（全院）；
+ *  其他角色 s.classId 必须命中所辖班级（别名固定为 s）。写操作口径见文件头注释。 */
 function classScopeSql(user) {
-  if (isAdmin(user) || isModuleOwner(user, 'mentalHealth')) return { sql: '1 = 1', params: [] };
+  if (dataScopeOfUser(user, 'mentalHealth') === 'all') return { sql: '1 = 1', params: [] };
   return {
     sql: 's.classId IN (SELECT classId FROM classCounselors WHERE userId = ?)',
     params: [user.id],
@@ -342,10 +343,7 @@ router.get('/interviews', (req, res) => {
 });
 
 /* ---------- 心理访谈：新增（幂等 + 等级联动） ---------- */
-router.post('/interviews', (req, res) => {
-  if (!hasPermission(req.user, 'mentalInterview')) {
-    return res.status(403).json({ message: '当前角色无权填写心理访谈' });
-  }
+router.post('/interviews', requireAction('mentalInterview', 'create'), (req, res) => {
   try {
     const out = createInterview(req.user, req.body ?? {});
     logAccess(req, `填写心理访谈：${out.studentName}（第 ${out.done} 次，评估 ${out.levelAfter}）`);
@@ -356,7 +354,7 @@ router.post('/interviews', (req, res) => {
 });
 
 /* ---------- 心理访谈：编辑（仅作者/管理员，限本学期） ---------- */
-router.put('/interviews/:id', (req, res) => {
+router.put('/interviews/:id', requireAction('mentalInterview', 'edit'), (req, res) => {
   try {
     const out = updateInterview(req.user, req.params.id, req.body ?? {});
     logAccess(req, `修订心理访谈记录：${out.studentName}`);
@@ -367,7 +365,7 @@ router.put('/interviews/:id', (req, res) => {
 });
 
 /* ---------- 心理访谈：软删（计数回退，不回滚等级） ---------- */
-router.delete('/interviews/:id', (req, res) => {
+router.delete('/interviews/:id', requireAction('mentalInterview', 'void'), (req, res) => {
   try {
     const out = deleteInterview(req.user, req.params.id);
     logAccess(req, `作废心理访谈记录：${out.studentName}（本学期剩余 ${out.done} 次）`);

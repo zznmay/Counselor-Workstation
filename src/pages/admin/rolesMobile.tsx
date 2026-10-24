@@ -1,48 +1,42 @@
-import { App, Popconfirm } from 'antd';
-import { useEffect, useMemo, useState } from 'react';
+import { Popconfirm } from 'antd';
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 import { createRole, deleteRole, getRoles, updateRole } from '@/api/roles';
 import FilterSheet from '@/components/mobile/FilterSheet';
 import { MIcon } from '@/components/mobile/icons';
-import { APP_MODULES, MODULE_GROUPS } from '@/constants/modules';
+import { ACTIONS_OF_MODULE, APP_MODULES } from '@/constants/modules';
 import type { Role } from '@/types';
 
 interface RoleDraft {
   name: string;
+  key: string;
   description: string;
-  permissions: string[];
-  ownerModules: string[];
+  disabled: boolean;
 }
 
-const emptyDraft = (): RoleDraft => ({ name: '', description: '', permissions: [], ownerModules: [] });
+const emptyDraft = (): RoleDraft => ({ name: '', key: '', description: '', disabled: false });
 
-/** 复选行：m-cbx 隐藏原生框 + m-box 视觉框 + 文字，整行点击可切换 */
-function CbxRow(props: { label: string; checked: boolean; disabled?: boolean; onChange: (next: boolean) => void }) {
-  return (
-    <label className="m-cbx-row" style={props.disabled ? { opacity: 0.45, pointerEvents: 'none' } : undefined}>
-      <input
-        type="checkbox"
-        className="m-cbx"
-        checked={props.checked}
-        onChange={(e) => props.onChange(e.target.checked)}
-      />
-      <span className="m-box">
-        <svg className="m-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-          <path d="M20 6 9 17l-5-5" />
-        </svg>
-      </span>
-      <span className="m-t3" style={{ flex: 1, minWidth: 0 }}>{props.label}</span>
-    </label>
-  );
+/** 权限概览摘要（与桌面同口径）：模块数 / 全量 / 带班 / 主负责 / 操作数 */
+function summaryOf(r: Role) {
+  if (r.permissions.includes('*')) return { adminWide: true, modules: APP_MODULES.length, all: 0, managed: 0, owners: 0, actions: 0 };
+  const scopeable = APP_MODULES.filter((m) => m.scopeable === true && r.permissions.includes(m.key));
+  const all = scopeable.filter((m) => (r.ownerModules.includes(m.key) ? 'all' : r.dataScopes?.[m.key] ?? 'managed') === 'all').length;
+  const wildcards = new Set((r.actions ?? []).filter((a) => a.endsWith(':*')).map((a) => a.slice(0, a.indexOf(':'))));
+  let actions = 0;
+  for (const key of wildcards) actions += ACTIONS_OF_MODULE[key]?.length ?? 0;
+  actions += (r.actions ?? []).filter((a) => !a.endsWith(':*')).length;
+  return { adminWide: false, modules: r.permissions.length, all, managed: scopeable.length - all, owners: r.ownerModules.length, actions };
 }
 
 /**
- * 移动端角色管理：角色卡片化（名称/标识/说明/权限标签/用户数），
- * 表单走全屏 FilterSheet（原生输入 + 分组复选行），护栏与桌面完全同口径：
- * admin 内置角色不可编辑；内置角色或仍有用户的角色不可删除。
+ * 移动端角色管理：角色卡片化（名称/标识/状态/权限概览/用户数），
+ * 表单仅维护基础信息（名称/标识/说明/状态），权限调整引导至桌面端「配置权限」页；
+ * 移动端可查看只读权限概览。护栏与桌面完全同口径：
+ * admin 内置角色不可编辑/停用；内置角色或仍有用户的角色不可删除。
  */
 export default function AdminRolesMobile() {
-  const { message } = App.useApp();
+  const navigate = useNavigate();
   const [roles, setRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState('');
@@ -53,7 +47,7 @@ export default function AdminRolesMobile() {
     role: null,
   });
   const [draft, setDraft] = useState<RoleDraft>(emptyDraft);
-  const [errors, setErrors] = useState<{ name?: string; permissions?: string }>({});
+  const [errors, setErrors] = useState<{ name?: string; key?: string }>({});
   const [saving, setSaving] = useState(false);
 
   const showToast = (msg: string) => {
@@ -77,25 +71,6 @@ export default function AdminRolesMobile() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const groupedModules = useMemo(
-    () =>
-      MODULE_GROUPS.map((group) => ({
-        group,
-        items: APP_MODULES.filter((m) => m.group === group),
-      })).filter((g) => g.items.length > 0),
-    [],
-  );
-
-  /** 主负责模块仅展示 ownerable 模块；功能级权限（如心理访谈）不参与主负责配置 */
-  const groupedOwnerModules = useMemo(
-    () =>
-      MODULE_GROUPS.map((group) => ({
-        group,
-        items: APP_MODULES.filter((m) => m.group === group && m.ownerable !== false),
-      })).filter((g) => g.items.length > 0),
-    [],
-  );
-
   const openCreate = () => {
     setSheet({ open: true, mode: 'create', role: null });
     setDraft(emptyDraft());
@@ -106,9 +81,9 @@ export default function AdminRolesMobile() {
     setSheet({ open: true, mode: 'edit', role });
     setDraft({
       name: role.name,
+      key: role.key,
       description: role.description ?? '',
-      permissions: role.permissions.includes('*') ? [] : [...role.permissions],
-      ownerModules: [...(role.ownerModules ?? [])],
+      disabled: !!role.disabled,
     });
     setErrors({});
   };
@@ -118,38 +93,32 @@ export default function AdminRolesMobile() {
     setSheet({ open: false, mode: 'create', role: null });
   };
 
-  /** 勾选/取消可访问模块：取消时同步收回其主负责（与后端子集校验/静默 prune 同口径） */
-  const togglePerm = (key: string, next: boolean) => {
-    setDraft((d) => {
-      const permissions = next ? [...d.permissions, key] : d.permissions.filter((k) => k !== key);
-      const ownerModules = next ? d.ownerModules : d.ownerModules.filter((k) => k !== key);
-      return { ...d, permissions, ownerModules };
-    });
-    if (errors.permissions) setErrors({ ...errors, permissions: '' });
-  };
-
   const submit = async () => {
-    const errs: { name?: string; permissions?: string } = {};
-    if (!draft.name.trim()) errs.name = '请输入角色名称';
-    if (draft.permissions.length === 0) errs.permissions = '请至少勾选一个可访问模块';
-    if (errs.name || errs.permissions) {
+    const errs: { name?: string; key?: string } = {};
+    const name = draft.name.trim();
+    if (!name || name.length > 20) errs.name = '角色名称需为 1-20 个字';
+    const key = draft.key.trim();
+    if (key && !/^[a-z][a-z0-9_]{1,29}$/.test(key)) errs.key = '2-30 位小写字母/数字/下划线，字母开头';
+    if (errs.name || errs.key) {
       setErrors(errs);
       return;
     }
     setSaving(true);
     try {
-      const payload = {
-        name: draft.name.trim(),
-        description: draft.description.trim() || undefined,
-        permissions: draft.permissions,
-        ownerModules: draft.ownerModules,
-      };
       if (sheet.mode === 'edit' && sheet.role) {
-        await updateRole(sheet.role.id, payload);
-        showToast(`角色「${payload.name}」已更新，权限已实时生效`);
+        await updateRole(sheet.role.id, {
+          name,
+          description: draft.description.trim() || undefined,
+          disabled: draft.disabled,
+        });
+        showToast(`角色「${name}」已更新，实时生效`);
       } else {
-        await createRole(payload);
-        showToast(`角色「${payload.name}」已创建`);
+        await createRole({
+          name,
+          key: key || undefined,
+          description: draft.description.trim() || undefined,
+        });
+        showToast(`角色「${name}」已创建，请在桌面端配置权限`);
       }
       setSheet({ open: false, mode: 'create', role: null });
       await reload();
@@ -170,6 +139,17 @@ export default function AdminRolesMobile() {
     }
   };
 
+  /** 启用/停用：与桌面同口径，停用即时收回授权（无需重新登录） */
+  const toggleDisabled = async (role: Role) => {
+    try {
+      await updateRole(role.id, { disabled: !role.disabled });
+      showToast(`角色「${role.name}」已${role.disabled ? '启用' : '停用'}，实时生效`);
+      await reload();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '操作失败');
+    }
+  };
+
   return (
     <>
       {/* 说明卡（桌面端为 Alert，语义同 info） */}
@@ -177,8 +157,8 @@ export default function AdminRolesMobile() {
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
           <MIcon name="shield" size={16} style={{ flex: '0 0 auto', marginTop: 2 }} />
           <span className="m-t4" style={{ lineHeight: 1.7 }}>
-            内置「系统管理员」始终拥有全部权限且不可修改；可为角色按模块指定「主负责辅导员」（该模块最高权限）；
-            用户与角色/日志等系统管理模块仅管理员可访问。
+            内置「系统管理员」始终拥有全部权限且不可修改；移动端可查看角色权限概览，
+            模块—页面—操作权限与数据范围的调整请在桌面端「配置权限」页完成。
           </span>
         </div>
       </div>
@@ -200,11 +180,12 @@ export default function AdminRolesMobile() {
         </div>
       ) : (
         roles.map((r) => {
-          const owners = r.ownerModules ?? [];
-          const canEdit = r.key !== 'admin';
+          const s = summaryOf(r);
+          const locked = r.key === 'admin';
+          const canEdit = !locked;
           const canDelete = !r.isSystem && r.userCount === 0;
           return (
-            <div className="m-card" key={r.id}>
+            <div className="m-card" key={r.id} style={r.disabled ? { opacity: 0.62 } : undefined}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <span className="m-ava">
                   <MIcon name="shield" size={16} />
@@ -213,6 +194,9 @@ export default function AdminRolesMobile() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                     <span className="m-t1">{r.name}</span>
                     {r.isSystem && <span className="m-tag warning">内置</span>}
+                    <span className={`m-tag ${r.disabled ? 'neutral' : 'success'}`}>
+                      {r.disabled ? '已停用' : '启用'}
+                    </span>
                   </div>
                   <div className="m-t4" style={{ marginTop: 2, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>
                     {r.key}
@@ -222,26 +206,17 @@ export default function AdminRolesMobile() {
 
               {r.description && <div className="m-t4" style={{ marginTop: 8 }}>{r.description}</div>}
 
-              {/* 权限标签：可访问=neutral，主负责=info（信息层级与桌面 蓝色/紫色 同构） */}
+              {/* 权限概览标签：模块数/数据范围/主负责/操作数 */}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-                {r.permissions.includes('*') ? (
-                  <span className="m-tag warning">全部模块</span>
-                ) : r.permissions.length === 0 ? (
-                  <span className="m-t4">未分配模块</span>
+                {s.adminWide ? (
+                  <span className="m-tag warning">全部模块 · 全部操作 · 全量数据</span>
                 ) : (
                   <>
-                    {APP_MODULES.filter((m) => r.permissions.includes(m.key)).map((m) => (
-                      <span key={m.key} className="m-tag neutral">{m.name}</span>
-                    ))}
-                    {owners.map((key) => {
-                      const m = APP_MODULES.find((x) => x.key === key);
-                      return m ? (
-                        <span key={`owner-${key}`} className="m-tag info">
-                          <MIcon name="check" size={12} />
-                          {m.name}·主负责
-                        </span>
-                      ) : null;
-                    })}
+                    <span className="m-tag neutral">{s.modules} 个模块</span>
+                    {s.all > 0 && <span className="m-tag success">全量 {s.all}</span>}
+                    {s.managed > 0 && <span className="m-tag neutral">带班 {s.managed}</span>}
+                    {s.owners > 0 && <span className="m-tag info">主负责 {s.owners}</span>}
+                    <span className="m-tag neutral">{s.actions > 0 ? `操作 ${s.actions} 项` : '只读'}</span>
                   </>
                 )}
               </div>
@@ -250,7 +225,7 @@ export default function AdminRolesMobile() {
                 {r.userCount > 0 ? `${r.userCount} 名用户` : '暂无用户'} · 更新于 {r.updatedAt.slice(0, 10)}
               </div>
 
-              {/* 卡片操作行（护栏同桌面：admin 不可编辑；内置/有用户不可删除） */}
+              {/* 卡片操作行（护栏同桌面：admin 不可编辑/停用；内置/有用户不可删除） */}
               <div
                 style={{
                   display: 'flex',
@@ -260,6 +235,10 @@ export default function AdminRolesMobile() {
                   paddingTop: 4,
                 }}
               >
+                <a className="m-act" onClick={() => navigate(`/admin/roles/${r.id}/permissions`)} aria-label={`查看角色 ${r.name} 权限概览`}>
+                  <MIcon name="check" size={18} />
+                  权限概览
+                </a>
                 <a
                   className="m-act"
                   style={canEdit ? undefined : { opacity: 0.4, pointerEvents: 'none' }}
@@ -269,6 +248,25 @@ export default function AdminRolesMobile() {
                   <MIcon name="edit" size={18} />
                   编辑
                 </a>
+                <Popconfirm
+                  title={r.disabled ? `启用角色「${r.name}」？` : `停用角色「${r.name}」？`}
+                  description={r.disabled
+                    ? '启用后该角色授予的权限立即恢复生效。'
+                    : r.userCount > 0
+                      ? `该角色下有 ${r.userCount} 名用户，停用后将从下一次请求起失去该角色授予的全部权限。`
+                      : '停用后该角色不再授予任何权限。'}
+                  disabled={locked}
+                  onConfirm={() => void toggleDisabled(r)}
+                >
+                  <a
+                    className="m-act"
+                    style={locked ? { opacity: 0.4, pointerEvents: 'none' } : undefined}
+                    aria-label={`${r.disabled ? '启用' : '停用'}角色 ${r.name}`}
+                  >
+                    <MIcon name="shield" size={18} />
+                    {r.disabled ? '启用' : '停用'}
+                  </a>
+                </Popconfirm>
                 <Popconfirm
                   title={`删除角色「${r.name}」？`}
                   description={
@@ -303,7 +301,7 @@ export default function AdminRolesMobile() {
         </div>
       )}
 
-      {/* 新增 / 编辑角色：全屏长表单，防误触关闭 */}
+      {/* 新增 / 编辑角色：基础信息（权限配置在桌面端完成） */}
       <FilterSheet
         open={sheet.open}
         title={sheet.mode === 'edit' ? `编辑角色 · ${sheet.role?.name ?? ''}` : '新增角色'}
@@ -347,6 +345,33 @@ export default function AdminRolesMobile() {
         </div>
 
         <div className="m-field">
+          <label>角色标识（选填，创建后不可修改）</label>
+          <input
+            className="m-inp"
+            value={draft.key}
+            maxLength={30}
+            placeholder="如 gradeDirector，留空自动生成"
+            disabled={sheet.mode === 'edit'}
+            style={sheet.mode === 'edit' ? { opacity: 0.62 } : undefined}
+            onChange={(e) => {
+              setDraft({ ...draft, key: e.target.value });
+              if (errors.key) setErrors({ ...errors, key: '' });
+            }}
+          />
+          <div className="m-form-err">
+            {errors.key && (
+              <>
+                <MIcon name="alertCircle" size={13} />
+                {errors.key}
+              </>
+            )}
+          </div>
+          {sheet.mode === 'edit' && (
+            <div className="m-t4" style={{ marginTop: 4 }}>标识创建后不可修改（用户的角色分配按标识引用）。</div>
+          )}
+        </div>
+
+        <div className="m-field">
           <label>角色说明（选填）</label>
           <textarea
             className="m-inp"
@@ -358,73 +383,37 @@ export default function AdminRolesMobile() {
           />
         </div>
 
-        <div className="m-field">
-          <label>
-            可访问模块
-            <span className="m-req">*</span>
-          </label>
-          <div style={{ display: 'flex', gap: 12, marginBottom: 6 }}>
-            <a
-              className="m-t4"
-              style={{ color: 'var(--info-fg)' }}
-              onClick={() => {
-                setDraft((d) => ({ ...d, permissions: APP_MODULES.map((m) => m.key) }));
-                setErrors((e) => ({ ...e, permissions: '' }));
-              }}
-            >
-              全选
-            </a>
-            <a className="m-t4" style={{ color: 'var(--m-text-2)' }} onClick={() => setDraft((d) => ({ ...d, permissions: [], ownerModules: [] }))}>
-              清空
-            </a>
-          </div>
-          {groupedModules.map(({ group, items }) => (
-            <div key={group} style={{ marginBottom: 6 }}>
-              <div className="m-group-title">{group}</div>
-              {items.map((m) => (
-                <CbxRow
-                  key={m.key}
-                  label={m.name}
-                  checked={draft.permissions.includes(m.key)}
-                  onChange={(next) => togglePerm(m.key, next)}
+        {sheet.mode === 'edit' && (
+          <div className="m-field">
+            <label>状态</label>
+            <div style={{ display: 'flex', gap: 12 }}>
+              <label className="m-cbx-row">
+                <input
+                  type="radio"
+                  className="m-cbx"
+                  checked={!draft.disabled}
+                  onChange={() => setDraft({ ...draft, disabled: false })}
                 />
-              ))}
+                <span className="m-box" />
+                <span className="m-t3">启用</span>
+              </label>
+              <label className="m-cbx-row">
+                <input
+                  type="radio"
+                  className="m-cbx"
+                  checked={draft.disabled}
+                  onChange={() => setDraft({ ...draft, disabled: true })}
+                />
+                <span className="m-box" />
+                <span className="m-t3">停用（不授予任何权限）</span>
+              </label>
             </div>
-          ))}
-          <div className="m-form-err">
-            {errors.permissions && (
-              <>
-                <MIcon name="alertCircle" size={13} />
-                {errors.permissions}
-              </>
-            )}
           </div>
-        </div>
+        )}
 
-        <div className="m-field">
-          <label>主负责模块（该模块最高权限，选填）</label>
-          {groupedOwnerModules.map(({ group, items }) => (
-            <div key={group} style={{ marginBottom: 6 }}>
-              <div className="m-group-title">{group}</div>
-              {items.map((m) => (
-                <CbxRow
-                  key={m.key}
-                  label={m.name}
-                  checked={draft.ownerModules.includes(m.key)}
-                  disabled={!draft.permissions.includes(m.key)}
-                  onChange={(next) =>
-                    setDraft((d) => ({
-                      ...d,
-                      ownerModules: next ? [...d.ownerModules, m.key] : d.ownerModules.filter((k) => k !== m.key),
-                    }))
-                  }
-                />
-              ))}
-            </div>
-          ))}
-          <div className="m-t4" style={{ marginTop: 6, lineHeight: 1.7 }}>
-            主负责角色在该模块可查看全院学生数据并执行全部操作，须先勾选对应「可访问模块」；「心理访谈」为功能级权限（不承载菜单），入口在心理健康页。
-          </div>
+        <div className="m-t4" style={{ lineHeight: 1.7, marginTop: 8 }}>
+          模块访问、操作权限与数据范围请在桌面端「角色管理 → 配置权限」页调整；
+          保存后对相关用户实时生效（无需重新登录）。
         </div>
       </FilterSheet>
 

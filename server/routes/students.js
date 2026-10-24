@@ -11,7 +11,7 @@ const { canManageStudent, rosterScope, isAdmin } = require('../lib/scope');
 const { STUDENT_STATUSES, normalizeTarget, diffStudentFields } = require('../lib/studentDiff');
 const { mirrorStudentDorm, removeDormOfStudent, renameDormStudentNo, syncDormFromText } = require('../lib/dormitory');
 const { derivedTeachersOfClass } = require('../lib/teacherSync');
-const { requirePermission } = require('../lib/permissions');
+const { requirePermission, requireAction } = require('../lib/permissions');
 const { logAccess, nowStr } = require('../lib/audit');
 
 /**
@@ -170,8 +170,10 @@ function buildStudentFilter(query) {
   return { where: conds.join(' AND '), params };
 }
 
-/** 列表：关键字 + 年级/班级/专业/学籍状态筛选 + 分页（管理员/辅导员全员可见，其他角色仅所带班级） */
-router.get('/', (req, res) => {
+/** 列表：关键字 + 年级/班级/专业/学籍状态筛选 + 分页（管理员/辅导员全员可见，其他角色仅所带班级）。
+ *  本端点注册在模块门禁（requirePermission('students')）之前，必须内联挂载，
+ *  否则无「学生名册」权限的登录用户也能读取名册（/options、/nos 为跨模块参考数据保持开放）。 */
+router.get('/', requirePermission('students'), (req, res) => {
   const page = Math.max(1, parseInt(req.query.page) || 1);
   const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize) || 10));
   const { where, params } = buildStudentFilter(req.query);
@@ -347,7 +349,7 @@ router.get('/id/exists', (req, res) => {
 });
 
 /** 新增：辅导员默认自己为主责；管理员可指定归属与共管 */
-router.post('/', (req, res) => {
+router.post('/', requireAction('students', 'create'), (req, res) => {
   const body = req.body ?? {};
   const studentNo = String(body.studentNo ?? '').trim();
   const name = String(body.name ?? '').trim();
@@ -391,7 +393,7 @@ router.post('/', (req, res) => {
 });
 
 /** 编辑：仅所带班级的辅导员或管理员；共管关系与归属（仅管理员）可更新 */
-router.put('/:id', (req, res) => {
+router.put('/:id', requireAction('students', 'edit'), (req, res) => {
   if (!canManageStudent(req.user, req.params.id)) {
     return res.status(403).json({ message: '无权修改该学生（仅所带班级的学生或管理员可编辑）' });
   }
@@ -446,7 +448,7 @@ router.put('/:id', (req, res) => {
 });
 
 /** 删除：仅所带班级的辅导员或管理员（谈话/预警等历史记录保留，便于留档追溯） */
-router.delete('/:id', (req, res) => {
+router.delete('/:id', requireAction('students', 'delete'), (req, res) => {
   if (!canManageStudent(req.user, req.params.id)) {
     return res.status(403).json({ message: '无权删除该学生（仅所带班级的学生或管理员可删除）' });
   }
@@ -516,7 +518,7 @@ router.post('/batch-delete', auth.adminOnly, (req, res) => {
  * - 同一批文件内学号重复 → 判失败（两行数据可能不同，避免互相覆盖）。
  * 校验在事务外完成，写入包事务保证单次请求原子性。
  */
-router.post('/import', (req, res) => {
+router.post('/import', requireAction('students', 'import'), (req, res) => {
   const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
   const failures = [];
   const inserts = []; // 新增待写入 { row, studentNo, target }

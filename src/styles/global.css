@@ -718,6 +718,69 @@ body {
   margin-bottom: 6px;
 }
 
+/* ==================== 角色权限配置页（模块—页面—操作） ==================== */
+
+/* 折叠面板内模块块纵向排列 */
+.role-perm-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* 单个模块配置块 */
+.role-module-block {
+  border: 1px solid var(--app-border);
+  border-radius: 12px;
+  padding: 10px 14px 12px;
+  background: rgba(248, 250, 255, 0.6);
+}
+
+.role-module-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.role-module-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--app-border);
+}
+
+/* 数据范围行：标签 + Radio + 说明 */
+.role-scope-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* 模块内页面块 */
+.role-page-block {
+  border: 1px solid var(--app-border);
+  border-radius: 10px;
+  padding: 8px 12px 10px;
+  background: #fff;
+}
+
+.role-page-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+/* 已停用角色的表格行整体弱化 */
+.row-disabled td {
+  color: rgba(47, 62, 102, 0.45);
+}
+
 /* 表单内的分组标题（如「班级与家庭联系」） */
 .form-section-title {
   font-weight: 600;

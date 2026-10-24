@@ -14,7 +14,7 @@
  *   - 每次请求即时校验（authMiddleware 实时读库）。
  */
 const crypto = require('crypto');
-const { MODULE_KEYS, OWNERABLE_MODULE_KEYS } = require('./modules');
+const { MODULE_KEYS, OWNERABLE_MODULE_KEYS, SCOPEABLE_MODULE_KEYS } = require('./modules');
 
 const DEMO_USERNAME = 'demo';
 const DEMO_DISPLAY_NAME = '演示辅导员';
@@ -50,16 +50,19 @@ function ensureDemoAccount(dbx) {
   if (!isDemoMode()) return;
   const now = () => new Date().toISOString().slice(0, 16).replace('T', ' ');
 
-  // 演示角色（先于 userRoles 写入，满足外键）：全部模块权限 + 全部可主负责模块
+  // 演示角色（先于 userRoles 写入，满足外键）：全部模块权限 + 全部操作（通配）+ 全量数据范围
+  // + 全部可主负责模块；已存在时不覆盖（保留 INSERT OR IGNORE 语义）
   dbx.run(
-    `INSERT OR IGNORE INTO roles (key, name, description, isSystem, permissions, ownerModules, createdAt, updatedAt)
-     VALUES (?, ?, ?, 0, ?, ?, ?, ?)`,
+    `INSERT OR IGNORE INTO roles (key, name, description, isSystem, permissions, ownerModules, actions, dataScopes, disabled, createdAt, updatedAt)
+     VALUES (?, ?, ?, 0, ?, ?, ?, ?, 0, ?, ?)`,
     [
       DEMO_ROLE_KEY,
       '演示角色',
-      '体验环境专用：全部业务模块权限与主负责模块（不含系统管理）',
+      '体验环境专用：全部业务模块权限、操作与全量数据（不含系统管理）',
       JSON.stringify([...MODULE_KEYS]),
       JSON.stringify([...OWNERABLE_MODULE_KEYS]),
+      JSON.stringify(MODULE_KEYS.map((k) => `${k}:*`)),
+      JSON.stringify(Object.fromEntries(SCOPEABLE_MODULE_KEYS.map((k) => [k, 'all']))),
       now(), now(),
     ],
   );

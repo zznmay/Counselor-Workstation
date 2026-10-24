@@ -41,7 +41,7 @@ import ConversationFormFields, {
 } from '@/components/ConversationFormFields';
 import type { ConversationFormValues } from '@/components/ConversationFormFields';
 import PageHeader from '@/components/PageHeader';
-import { canExportStudents, canManageStudentFront, canViewAllStudents, getStoredUser, isSystemAdmin, subscribeSession } from '@/lib/auth';
+import { canAction, canExportStudents, canManageStudentFront, canViewAllStudents, getStoredUser, isSystemAdmin, subscribeSession } from '@/lib/auth';
 import {
   GENDERS,
   MAJORS,
@@ -223,15 +223,20 @@ function StudentsDesktop() {
   /* ---------- 批量选择 / 批量删除（仅管理员） ---------- */
   const isAdmin = isSystemAdmin(authUser);
   /**
-   * 批量导出入口：仅辅导员角色可用（admin 恒可见；其他角色如班主任、心理主负责不显示，
-   * 越权调用在 handleExportConfirm 里二次拦截并提示，与 canStartTalkRecord 同口径）。
+   * 批量导出入口：按「批量导出」操作权限（students:export）判定
+   * （admin 恒可见；越权调用在 handleExportConfirm 里二次拦截并提示）。
    */
   const canExport = canExportStudents(authUser);
   /**
-   * 新增/导入入口：管理员或至少带一个班（与后端 canManageStudent 同口径）。
-   * 角色只给了「学生名册」模块但未分配班级时，隐藏写入口，避免点了才被 403。
+   * 写入口（新增/导入/行内编辑删除）：操作权限（students:create/import/edit/delete）
+   * + 至少带一个班（与后端 canManageStudent 同口径）。角色只给了「学生名册」模块
+   * 但未分配班级时，隐藏写入口，避免点了才被 403。
    */
-  const canWrite = isAdmin || (authUser?.classIds ?? []).length > 0;
+  const hasClassCharge = isAdmin || (authUser?.classIds ?? []).length > 0;
+  const canWrite = hasClassCharge && canAction(authUser, 'students', 'create');
+  const canImport = hasClassCharge && canAction(authUser, 'students', 'import');
+  const canEditRow = hasClassCharge && canAction(authUser, 'students', 'edit');
+  const canDeleteRow = hasClassCharge && canAction(authUser, 'students', 'delete');
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   /** 已选学生摘要缓存：跨页选择时仍能展示姓名/学号/班级 */
   const [briefMap, setBriefMap] = useState<Record<string, StudentBrief>>({});
@@ -647,7 +652,7 @@ function StudentsDesktop() {
         const canManage = canManageStudentFront(authUser, record.classId);
         return (
           <Space size={0}>
-            {canManage && (
+            {canManage && canAction(authUser, 'conversations', 'create') && (
               <Button type="link" size="small" icon={<CommentOutlined />} onClick={() => openTalk(record)}>
                 记录谈话
               </Button>
@@ -655,12 +660,12 @@ function StudentsDesktop() {
             <Button type="link" size="small" onClick={() => setDetail(record)}>
               详情
             </Button>
-            {canManage && (
+            {canManage && canEditRow && (
               <Button type="link" size="small" onClick={() => openEdit(record)}>
                 编辑
               </Button>
             )}
-            {canManage && (
+            {canManage && canDeleteRow && (
               <Popconfirm
                 title="确定删除该学生吗？"
                 description="删除后不可恢复"
@@ -757,7 +762,7 @@ function StudentsDesktop() {
             批量删除{selectedKeys.length > 0 ? `（${selectedKeys.length}）` : ''}
           </Button>
         )}
-        {canWrite && (
+        {canImport && (
           <Button icon={<UploadOutlined />} onClick={openImport}>
             批量导入
           </Button>

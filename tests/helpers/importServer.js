@@ -33,8 +33,23 @@ const dormitoriesRoute = serverRequire('./routes/dormitories');
 const usersRoute = serverRequire('./routes/users');
 const fundingRoute = serverRequire('./routes/funding');
 const dashboardRoute = serverRequire('./routes/dashboard');
+const rolesRoute = serverRequire('./routes/roles');
+const conversationsRoute = serverRequire('./routes/conversations');
+const gradesRoute = serverRequire('./routes/grades');
 
-export { dbx, DATA_DIR, studentsRoute, classesRoute, dormitoriesRoute, usersRoute, fundingRoute, dashboardRoute };
+export {
+  dbx,
+  DATA_DIR,
+  studentsRoute,
+  classesRoute,
+  dormitoriesRoute,
+  usersRoute,
+  fundingRoute,
+  dashboardRoute,
+  rolesRoute,
+  conversationsRoute,
+  gradesRoute,
+};
 
 /** 密码校验（bcrypt，与账号体系同口径） */
 export function verifyPassword(password, hash) {

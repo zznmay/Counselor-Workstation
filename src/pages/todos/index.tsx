@@ -24,6 +24,8 @@ import { createTodo, deleteTodo, getTodos, updateTodo } from '@/api/todo';
 import PageHeader from '@/components/PageHeader';
 import { TODO_PRIORITIES, TODO_PRIORITY_COLOR, TODO_STATUSES, TODO_TYPES, TODO_TYPE_COLOR, toOptions } from '@/constants';
 import { useIsMobile } from '@/hooks/useIsMobile';
+import { useAuthUser } from '@/hooks/useAuthUser';
+import { canAction } from '@/lib/auth';
 import { useList } from '@/hooks/useList';
 import { useStudentOptions } from '@/hooks/useStudentOptions';
 import type { StudentOption, Todo, TodoInput, TodoPriority, TodoQuery, TodoStatus, TodoType } from '@/types';
@@ -43,6 +45,7 @@ interface TodoFormValues {
 function TodosDesktop() {
   const isMobile = useIsMobile();
   const { message } = App.useApp();
+  const authUser = useAuthUser();
   const [form] = Form.useForm<TodoFormValues>();
 
   const { query, patchQuery, data, loading, refresh } = useList<Todo, TodoQuery>(getTodos, {
@@ -219,18 +222,24 @@ function TodosDesktop() {
       fixed: 'right',
       render: (_, record) => (
         <Space size={0}>
-          <Button type="link" size="small" onClick={() => toggleStatus(record)}>
-            {record.status === '未完成' ? <CheckOutlined /> : <UndoOutlined />}
-            {record.status === '未完成' ? '完成' : '恢复'}
-          </Button>
-          <Button type="link" size="small" onClick={() => openEdit(record)}>
-            编辑
-          </Button>
-          <Popconfirm title="确定删除该待办吗？" onConfirm={() => handleDelete(record.id)}>
-            <Button type="link" size="small" danger>
-              删除
+          {canAction(authUser, 'todos', 'edit') && (
+            <Button type="link" size="small" onClick={() => toggleStatus(record)}>
+              {record.status === '未完成' ? <CheckOutlined /> : <UndoOutlined />}
+              {record.status === '未完成' ? '完成' : '恢复'}
             </Button>
-          </Popconfirm>
+          )}
+          {canAction(authUser, 'todos', 'edit') && (
+            <Button type="link" size="small" onClick={() => openEdit(record)}>
+              编辑
+            </Button>
+          )}
+          {canAction(authUser, 'todos', 'delete') && (
+            <Popconfirm title="确定删除该待办吗？" onConfirm={() => handleDelete(record.id)}>
+              <Button type="link" size="small" danger>
+                删除
+              </Button>
+            </Popconfirm>
+          )}
         </Space>
       ),
     },
@@ -284,9 +293,11 @@ function TodosDesktop() {
           重置
         </Button>
         <div className="toolbar-spacer" />
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-          新增待办
-        </Button>
+        {canAction(authUser, 'todos', 'create') && (
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+            新增待办
+          </Button>
+        )}
       </div>
 
       <Table

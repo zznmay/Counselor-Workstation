@@ -55,6 +55,16 @@ export default function AdminUsersMobile() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** 角色下拉选项：停用角色标注「已停用」且不可新选（存量已分配的仍展示） */
+  const roleSelectOptions = useMemo(
+    () => roleOptions.map((r) => ({
+      value: r.key,
+      label: r.disabled ? `${r.name}（已停用）` : r.name,
+      disabled: !!r.disabled,
+    })),
+    [roleOptions],
+  );
+
   const enabledAdminCount = useMemo(
     () => users.filter((u) => u.role === 'admin' && !u.disabled).length,
     [users],
@@ -386,7 +396,7 @@ export default function AdminUsersMobile() {
               mode="multiple"
               disabled={editing?.id === currentUser?.id}
               placeholder="选择角色"
-              options={roleOptions.map((r) => ({ value: r.key, label: r.name }))}
+              options={roleSelectOptions}
             />
           </Form.Item>
           {!editing && !(roleKeysWatch ?? []).includes('admin') && (

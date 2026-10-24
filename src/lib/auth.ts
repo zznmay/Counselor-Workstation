@@ -1,5 +1,5 @@
 /** 登录会话：token 与当前用户信息（localStorage 持久化） */
-import { APP_MODULES, MODULE_HOME } from '@/constants/modules';
+import { APP_MODULES, MODULE_HOME, MODULE_INDEX } from '@/constants/modules';
 
 export interface AuthUser {
   id: number;
@@ -13,6 +13,10 @@ export interface AuthUser {
   roleKeys?: string[];
   /** 有效模块权限（服务端按角色集合实时解析并集；admin 为 ['*']） */
   permissions?: string[];
+  /** 有效操作权限（并集，紧凑形式含 `module:*` 通配；admin 为 ['*']；旧会话缓存可能缺失） */
+  actions?: string[];
+  /** 各可配模块的有效数据范围（all=全量查看/导出，managed=仅带班；旧会话缓存可能缺失） */
+  dataScopes?: Record<string, 'all' | 'managed'>;
   /** 主负责模块（服务端按角色集合实时解析并集；admin 为 ['*']；旧会话缓存可能缺失） */
   ownerModules?: string[];
   mustChangePassword?: boolean;
@@ -37,35 +41,42 @@ export function roleKeysOf(user: AuthUser | null): string[] {
 
 /**
  * 名册「全员可见」口径（与服务端 rosterScope 同源）：
- * 系统管理员，或角色集合（多角色并集）含辅导员角色（counselor）。
- * 其他用户（单一班主任、班主任+非辅导员角色、心理健康主负责、自定义角色等）仅可见所带班级学生。
+ * 学生模块（students）数据范围为全量（管理员、主负责或角色配置全量）即全员可见；
+ * 其他角色仅可见所带班级学生。旧会话缓存没有 dataScopes 字段时按升级前口径回退
+ * （管理员或辅导员角色），待 /auth/me 刷新后收敛。
  */
+export function scopeOf(user: AuthUser | null, moduleKey: string): 'all' | 'managed' {
+  if (!user) return 'managed';
+  if (isSystemAdmin(user)) return 'all';
+  if (isModuleOwner(user, moduleKey)) return 'all';
+  if (!user.dataScopes || typeof user.dataScopes !== 'object') {
+    // 升级过渡：旧会话缓存仅名册/寝室对辅导员角色放行（与原 rosterScope 一致）
+    return moduleKey === 'students' || moduleKey === 'dormitories'
+      ? (roleKeysOf(user).includes('counselor') ? 'all' : 'managed')
+      : 'managed';
+  }
+  return user.dataScopes[moduleKey] === 'all' ? 'all' : 'managed';
+}
+
 export function canViewAllStudents(user: AuthUser | null): boolean {
-  if (isSystemAdmin(user)) return true;
-  return roleKeysOf(user).includes('counselor');
+  return scopeOf(user, 'students') === 'all';
 }
 
 /**
  * 「新增谈话」外链显隐口径（心理健康列表三类关注学生行内）：
- * - 系统管理员：恒可见（与站内 isSystemAdmin 全量权限口径一致）；
- * - 其他用户：角色列表（多角色并集）含 counselor 才可见——单一班主任与心理健康主负责等其他角色一律隐藏，
- *   与主角色展示无关；叠加辅导员角色后即按辅导员口径展示。
+ * 判定 conversations 模块的「新增谈话」操作权限（conversations:create）——
+ * 内置辅导员（conversations:*）与系统管理员恒可见；班主任、只读角色等一律隐藏。
  */
 export function canStartTalkRecord(user: AuthUser | null): boolean {
-  if (isSystemAdmin(user)) return true;
-  return roleKeysOf(user).includes('counselor');
+  return canAction(user, 'conversations', 'create');
 }
 
 /**
- * 学生名册「批量导出」按钮显隐口径（与 canStartTalkRecord 同源）：
- * - 系统管理员：恒可见（管理员本就全员可见名册，且批量删除已依赖同样的选择机制）；
- * - 其他用户：角色列表（多角色并集）含 counselor 才可见——单一班主任、心理健康主负责等
- *   其他角色一律隐藏；叠加辅导员角色后即按辅导员口径展示。
- * 导出为纯前端生成文件，无独立后端接口，页面挂载时二次校验该口径并给出明确提示。
+ * 学生名册「批量导出」按钮显隐口径：判定 students 模块的「批量导出」操作权限
+ * （students:export）。导出为纯前端生成文件，无独立后端接口，页面挂载时二次校验并提示。
  */
 export function canExportStudents(user: AuthUser | null): boolean {
-  if (isSystemAdmin(user)) return true;
-  return roleKeysOf(user).includes('counselor');
+  return canAction(user, 'students', 'export');
 }
 
 /**
@@ -79,6 +90,34 @@ export function canAccessModule(user: AuthUser | null, moduleKey: string): boole
   if (isSystemAdmin(user)) return true;
   if (!Array.isArray(user.permissions)) return true;
   return user.permissions.includes('*') || user.permissions.includes(moduleKey);
+}
+
+/**
+ * 操作权限判定：与服务端 hasAction 同口径——
+ * 模块可访问前提下，操作命中 `module:*` 通配或 `module:<actionKey>` 精确键。
+ * 未勾选任何操作 = 只读角色（模块可访问但无写操作），是有意支持的状态。
+ * 旧会话缓存没有 actions 字段时按放行处理（升级前模块可访问即全操作），
+ * 待 /auth/me 刷新后收紧，避免升级瞬间把已登录用户的写按钮全部藏掉。
+ */
+export function canAction(user: AuthUser | null, moduleKey: string, actionKey: string): boolean {
+  if (!user) return false;
+  if (isSystemAdmin(user)) return true;
+  if (!canAccessModule(user, moduleKey)) return false;
+  if (!Array.isArray(user.actions)) return true;
+  return user.actions.includes('*')
+    || user.actions.includes(`${moduleKey}:*`)
+    || user.actions.includes(`${moduleKey}:${actionKey}`);
+}
+
+/**
+ * 页面访问判定：与服务端 canAccessPage 同口径——
+ * 模块可访问 + 非 gated 页面直接放行；gated 页面（如年级管理页）需 `module:page-<key>` 权限。
+ */
+export function canAccessPage(user: AuthUser | null, moduleKey: string, pageKey: string): boolean {
+  if (!canAccessModule(user, moduleKey)) return false;
+  const page = (MODULE_INDEX[moduleKey]?.pages ?? []).find((p) => p.key === pageKey);
+  if (!page || !page.gated) return true;
+  return canAction(user, moduleKey, `page-${pageKey}`);
 }
 
 /**
@@ -150,8 +189,10 @@ function sessionFingerprint(user: AuthUser | null): string {
     role: user.role,
     roleKeys: user.roleKeys ?? [],
     permissions: user.permissions ?? [],
+    actions: user.actions ?? [],
     classIds: user.classIds ?? [],
     ownerModules: user.ownerModules ?? [],
+    dataScopes: user.dataScopes ?? {},
   });
 }
 

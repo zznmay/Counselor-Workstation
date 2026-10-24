@@ -122,6 +122,16 @@ function AdminUsersDesktop() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** 角色下拉选项：停用角色标注「已停用」且不可新选（存量已分配的仍展示） */
+  const roleSelectOptions = useMemo(
+    () => roleOptions.map((r) => ({
+      value: r.key,
+      label: r.disabled ? `${r.name}（已停用）` : r.name,
+      disabled: !!r.disabled,
+    })),
+    [roleOptions],
+  );
+
   /** 角色展示名：优先服务端 JOIN 出的 roleName，其次角色字典，最后回退标识 */
   const roleNameOf = (user: ManagedUser) =>
     user.roleName ?? roleOptions.find((r) => r.key === user.role)?.name ?? user.role;
@@ -560,7 +570,7 @@ function AdminUsersDesktop() {
             <Select
               mode="multiple"
               placeholder="选择角色"
-              options={roleOptions.map((r) => ({ value: r.key, label: r.name }))}
+              options={roleSelectOptions}
             />
           </Form.Item>
           {!(roleKeysWatch ?? []).includes('admin') && (
@@ -611,7 +621,7 @@ function AdminUsersDesktop() {
             <Select
               mode="multiple"
               disabled={editTarget?.id === currentUser?.id}
-              options={roleOptions.map((r) => ({ value: r.key, label: r.name }))}
+              options={roleSelectOptions}
             />
           </Form.Item>
         </Form>

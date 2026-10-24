@@ -713,7 +713,12 @@ export interface RoleOption {
   key: string;
   name: string;
   isSystem: boolean;
+  /** 已停用角色：用户管理下拉中标注且不可新选（存量分配保留展示） */
+  disabled?: boolean;
 }
+
+/** 模块数据范围：all=全量查看/导出，managed=仅带班（写操作仍按带班收口） */
+export type DataScope = 'all' | 'managed';
 
 /** 角色（管理端完整信息） */
 export interface Role extends RoleOption {
@@ -721,19 +726,29 @@ export interface Role extends RoleOption {
   description: string;
   /** 可访问的模块 key 列表 */
   permissions: string[];
-  /** 主负责的模块 key 列表（该模块最高权限：查看全院数据 + 全部操作；必须 ⊆ permissions） */
+  /** 主负责的模块 key 列表（该模块最高权限：查看全院数据 + 全部管理操作；必须 ⊆ permissions） */
   ownerModules: string[];
+  /** 操作权限键列表（`module:*` 通配或 `module:<actionKey>` 精确键；必须 ⊆ permissions） */
+  actions: string[];
+  /** 各模块数据范围（仅 scopeable 模块；未配置的模块默认 managed） */
+  dataScopes: Record<string, DataScope>;
   /** 该角色下的用户数（删除护栏提示） */
   userCount: number;
   createdAt: string;
   updatedAt: string;
 }
 
+/** 角色信息（新增传基础字段；编辑/权限配置按需传，未传字段服务端保持现状） */
 export interface RoleInput {
   name: string;
+  /** 自定义角色标识（仅创建时生效；2-30 位小写字母/数字/下划线，字母开头；留空自动生成） */
+  key?: string;
   description?: string;
-  permissions: string[];
+  disabled?: boolean;
+  permissions?: string[];
   ownerModules?: string[];
+  actions?: string[];
+  dataScopes?: Record<string, DataScope>;
 }
 
 /** Excel 解析出的一行用户数据（row 为含表头的实际行号，从 2 开始） */

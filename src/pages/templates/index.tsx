@@ -43,6 +43,8 @@ import {
 } from '@/api/templateLibrary';
 import PageHeader from '@/components/PageHeader';
 import { useIsMobile } from '@/hooks/useIsMobile';
+import { useAuthUser } from '@/hooks/useAuthUser';
+import { canAction } from '@/lib/auth';
 import { TEMPLATE_MAX_SIZE, extFormat, FORMAT_META, formatSize, saveBlob, TEMPLATE_ACCEPT } from '@/utils/templateFile';
 import type { TemplateCategoryWithCount, TemplateFile } from '@/types';
 
@@ -194,6 +196,7 @@ function UploadModal({
 export default function Templates() {
   const isMobile = useIsMobile();
   const { message, modal } = App.useApp();
+  const authUser = useAuthUser();
 
   const [loading, setLoading] = useState(true);
   const [categories, setCategories] = useState<TemplateCategoryWithCount[]>([]);
@@ -486,9 +489,11 @@ export default function Templates() {
         title="申请表模板汇总库"
         subtitle="集中管理学生工作中常用的申请表模板，支持分类浏览、按需下载与自主上传"
         extra={
-          <Button type="primary" icon={<UploadOutlined />} onClick={() => setUploadOpen(true)}>
-            上传模板
-          </Button>
+          canAction(authUser, 'templates', 'upload') ? (
+            <Button type="primary" icon={<UploadOutlined />} onClick={() => setUploadOpen(true)}>
+              上传模板
+            </Button>
+          ) : undefined
         }
       />
 
@@ -602,10 +607,10 @@ export default function Templates() {
                             trigger={['click']}
                             menu={{
                               items: [
-                                { key: 'download', icon: <DownloadOutlined />, label: '下载' },
-                                { key: 'rename', icon: <EditOutlined />, label: '重命名' },
-                                { key: 'desc', icon: <FileTextOutlined />, label: '编辑说明' },
-                                { key: 'delete', icon: <DeleteOutlined />, label: '删除', danger: true },
+                                { key: 'download', icon: <DownloadOutlined />, label: '下载', disabled: !canAction(authUser, 'templates', 'download') },
+                                { key: 'rename', icon: <EditOutlined />, label: '重命名', disabled: !canAction(authUser, 'templates', 'rename') },
+                                { key: 'desc', icon: <FileTextOutlined />, label: '编辑说明', disabled: !canAction(authUser, 'templates', 'rename') },
+                                { key: 'delete', icon: <DeleteOutlined />, label: '删除', danger: true, disabled: !canAction(authUser, 'templates', 'delete') },
                               ],
                               onClick: ({ key }) => {
                                 if (key === 'download') void handleDownload(t);

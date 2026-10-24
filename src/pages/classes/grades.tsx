@@ -7,15 +7,18 @@ import { Navigate } from 'react-router-dom';
 import { createGrade, deleteGrade, getGrades, updateGrade } from '@/api/classes';
 import PageHeader from '@/components/PageHeader';
 import { useIsMobile } from '@/hooks/useIsMobile';
+import { useAuthUser } from '@/hooks/useAuthUser';
+import { canAction } from '@/lib/auth';
 import type { Grade } from '@/types';
 
 interface GradeFormValues {
   name: string;
 }
 
-/** 年级管理（桌面端）：列表 / 新增 / 编辑 / 删除 */
+/** 年级管理（桌面端）：列表 / 新增 / 编辑 / 删除（页面访问与操作均为独立权限） */
 function GradesDesktop() {
   const { message } = App.useApp();
+  const authUser = useAuthUser();
   const [form] = Form.useForm<GradeFormValues>();
 
   const [grades, setGrades] = useState<Grade[]>([]);
@@ -90,25 +93,29 @@ function GradesDesktop() {
       width: 130,
       render: (_, record) => (
         <Space size={0}>
-          <Button
-            type="link"
-            size="small"
-            onClick={() => {
-              setEditing(record);
-              setModalOpen(true);
-            }}
-          >
-            编辑
-          </Button>
-          <Popconfirm
-            title="确定删除该年级吗？"
-            description="年级下存在班级时无法删除"
-            onConfirm={() => handleDelete(record.id)}
-          >
-            <Button type="link" size="small" danger>
-              删除
+          {canAction(authUser, 'classes', 'gradeEdit') && (
+            <Button
+              type="link"
+              size="small"
+              onClick={() => {
+                setEditing(record);
+                setModalOpen(true);
+              }}
+            >
+              编辑
             </Button>
-          </Popconfirm>
+          )}
+          {canAction(authUser, 'classes', 'gradeDelete') && (
+            <Popconfirm
+              title="确定删除该年级吗？"
+              description="年级下存在班级时无法删除"
+              onConfirm={() => handleDelete(record.id)}
+            >
+              <Button type="link" size="small" danger>
+                删除
+              </Button>
+            </Popconfirm>
+          )}
         </Space>
       ),
     },
@@ -120,17 +127,19 @@ function GradesDesktop() {
         title="年级管理"
         subtitle="维护年级字典；班级须归属年级，年级下存在班级时不可删除"
         extra={
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={() => {
-              form.resetFields();
-              setEditing(null);
-              setModalOpen(true);
-            }}
-          >
-            新增年级
-          </Button>
+          canAction(authUser, 'classes', 'gradeCreate') ? (
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => {
+                form.resetFields();
+                setEditing(null);
+                setModalOpen(true);
+              }}
+            >
+              新增年级
+            </Button>
+          ) : undefined
         }
       />
 

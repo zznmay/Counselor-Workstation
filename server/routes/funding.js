@@ -5,7 +5,7 @@ const dayjs = require('dayjs');
 const dbx = require('../lib/db');
 const auth = require('../lib/auth');
 const { isAdmin, sensitiveScope, canManageStudent } = require('../lib/scope');
-const { requirePermission } = require('../lib/permissions');
+const { requirePermission, requireAction, hasAction } = require('../lib/permissions');
 const { logAccess, nowStr } = require('../lib/audit');
 
 const router = express.Router();
@@ -245,7 +245,7 @@ function activeRecordOf(studentId, academicYear, excludeId = null) {
 }
 
 function scopedRecord(id, user) {
-  const scope = sensitiveScope(user, 'x');
+  const scope = sensitiveScope(user, 'funding', 'x');
   return dbx.get(
     `SELECT x.*, s.name AS studentName, s.studentNo, s.className, s.grade, s.gender,
             s.status AS studentStatus, s.origin, s.phone
@@ -316,7 +316,7 @@ router.get('/identifications', (req, res) => {
   const page = Math.max(1, parseInt(req.query.page) || 1);
   const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize) || 10));
   const { conds, params } = buildFilters(req);
-  const scope = sensitiveScope(req.user, 'x');
+  const scope = sensitiveScope(req.user, 'funding', 'x');
   const where = `${conds.join(' AND ')} ${scope.where}`;
   const join = 'FROM fundingIdentifications x JOIN students s ON s.id = x.studentId';
 
@@ -373,6 +373,10 @@ router.get('/identifications/:id/logs', (req, res) => {
 
 router.post('/identifications', (req, res) => {
   const body = req.body ?? {};
+  // 同一端点承载「新增认定」与「重新认定」（携带 previousId）：按入参区分操作权限
+  if (!hasAction(req.user, 'funding', body.previousId ? 'redo' : 'create')) {
+    return res.status(403).json({ message: body.previousId ? '当前角色无权重新认定' : '当前角色无权新增认定' });
+  }
   const studentId = String(body.studentId ?? '');
   if (!studentId || !canManageStudent(req.user, studentId)) {
     return res.status(403).json({ message: '无权为该学生建立认定（仅所带班级的学生）' });
@@ -423,7 +427,7 @@ router.post('/identifications', (req, res) => {
   res.json({ id, ok: true });
 });
 
-router.put('/identifications/:id', (req, res) => {
+router.put('/identifications/:id', requireAction('funding', 'edit'), (req, res) => {
   const target = dbx.get('SELECT * FROM fundingIdentifications WHERE id = ?', [req.params.id]);
   if (!target) return res.status(404).json({ message: '认定记录不存在' });
   if (!canManageStudent(req.user, target.studentId)) {
@@ -470,6 +474,11 @@ router.put('/identifications/:id', (req, res) => {
 });
 
 router.post('/identifications/:id/status', (req, res) => {
+  // 状态流转端点：confirm=复核确认、cancel=取消认定，按入参区分操作权限
+  const statusAction = req.body?.action === 'confirm' ? 'confirm' : req.body?.action === 'cancel' ? 'cancel' : null;
+  if (!statusAction || !hasAction(req.user, 'funding', statusAction)) {
+    return res.status(403).json({ message: statusAction ? '当前角色无权执行该状态变更' : '不支持的状态变更操作' });
+  }
   const target = dbx.get('SELECT * FROM fundingIdentifications WHERE id = ?', [req.params.id]);
   if (!target) return res.status(404).json({ message: '认定记录不存在' });
   if (!canManageStudent(req.user, target.studentId)) {
@@ -540,7 +549,7 @@ router.post('/identifications/:id/status', (req, res) => {
 
 /* ==================== 批量操作 ==================== */
 
-router.post('/identifications/batch', (req, res) => {
+router.post('/identifications/batch', requireAction('funding', 'batch'), (req, res) => {
   const body = req.body ?? {};
   const ids = Array.isArray(body.ids) ? [...new Set(body.ids.map(String))].slice(0, 500) : [];
   const action = String(body.action ?? '');
@@ -674,7 +683,7 @@ function nextAcademicYear(year) {
 }
 
 function rolloverCandidates(user, fromYear, toYear) {
-  const scope = sensitiveScope(user, 'x');
+  const scope = sensitiveScope(user, 'funding', 'x');
   const sourceRows = dbx.all(
     `SELECT x.*, s.name AS studentName, s.studentNo, s.className, s.grade, s.status AS studentStatus
      FROM fundingIdentifications x JOIN students s ON s.id = x.studentId
@@ -711,7 +720,7 @@ router.get('/rollover/preview', (req, res) => {
   });
 });
 
-router.post('/rollover', (req, res) => {
+router.post('/rollover', requireAction('funding', 'rollover'), (req, res) => {
   const body = req.body ?? {};
   const fromYear = String(body.fromYear ?? '').trim();
   const toYear = String(body.toYear ?? '').trim();
@@ -789,7 +798,7 @@ router.post('/rollover', (req, res) => {
 /* ==================== 批量导入 ==================== */
 
 /** 导入预览：按学号从学生名册回填姓名、班级、年级，并标记名册缺失/无权限 */
-router.post('/identifications/import/preview', (req, res) => {
+router.post('/identifications/import/preview', requireAction('funding', 'import'), (req, res) => {
   const raw = Array.isArray(req.body?.studentNos) ? req.body.studentNos : [];
   const studentNos = [...new Set(raw.map((v) => String(v ?? '').trim()).filter(Boolean))].slice(0, 2000);
   if (studentNos.length === 0) {
@@ -820,7 +829,7 @@ router.post('/identifications/import/preview', (req, res) => {
   res.json({ students, notFound });
 });
 
-router.post('/identifications/import', (req, res) => {
+router.post('/identifications/import', requireAction('funding', 'import'), (req, res) => {
   if (Array.isArray(req.body?.rows) && req.body.rows.length > 2000) {
     return res.status(400).json({ message: '单次最多导入 2000 行，请分批导入' });
   }
@@ -956,7 +965,7 @@ router.post('/identifications/import', (req, res) => {
 
 router.get('/stats', (req, res) => {
   const { conds, params, year } = buildFilters(req);
-  const scope = sensitiveScope(req.user, 'x');
+  const scope = sensitiveScope(req.user, 'funding', 'x');
   const where = `${conds.join(' AND ')} ${scope.where}`;
   const join = 'FROM fundingIdentifications x JOIN students s ON s.id = x.studentId';
   const rows = dbx.all(`SELECT x.*, s.grade, s.className ${join} WHERE ${where}`, [...params, ...scope.params]);
@@ -1018,7 +1027,7 @@ router.get('/stats', (req, res) => {
   // 学年对比：沿用班级/年级范围，统计各学年已认定人数
   const yearConds = ["x.status = '已认定'"];
   const yearParams = [];
-  const yearScope = sensitiveScope(req.user, 'x');
+  const yearScope = sensitiveScope(req.user, 'funding', 'x');
   if (gradeValue) { yearConds.push('s.grade = ?'); yearParams.push(gradeValue); }
   if (classIds.length > 0) {
     yearConds.push(`s.classId IN (${classIds.map(() => '?').join(',')})`);

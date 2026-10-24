@@ -34,7 +34,7 @@ import DailyGreeting from '@/components/DailyGreeting';
 import ProfileModal from '@/components/ProfileModal';
 import { moduleForPath } from '@/constants/modules';
 import { TOOLS } from '@/pages/tools/registry';
-import { canAccessModule, clearAuth, getStoredUser, isSystemAdmin, setStoredUser } from '@/lib/auth';
+import { canAccessModule, canAccessPage, clearAuth, getStoredUser, isSystemAdmin, setStoredUser } from '@/lib/auth';
 import type { AuthUser } from '@/lib/auth';
 import {
   hasGreetedToday,
@@ -296,14 +296,18 @@ export default function BasicLayout() {
       system.push({ key: '/admin/users', icon: <TeamOutlined />, label: '用户管理' });
     }
     if (can('classes')) {
+      // 年级管理为 gated 页面：需额外勾选「班级管理页—年级管理页」页面权限
+      const classChildren = [
+        { key: '/classes', icon: <TeamOutlined />, label: '班级管理' },
+        ...(canAccessPage(authUser, 'classes', 'grades')
+          ? [{ key: '/classes/grades', icon: <TagsOutlined />, label: '年级管理' }]
+          : []),
+      ];
       system.push({
         key: 'group-classes',
         icon: <ApartmentOutlined />,
         label: '班级管理',
-        children: [
-          { key: '/classes', icon: <TeamOutlined />, label: '班级管理' },
-          { key: '/classes/grades', icon: <TagsOutlined />, label: '年级管理' },
-        ],
+        children: classChildren,
       });
     }
     if (isAdmin) {
@@ -337,6 +341,11 @@ export default function BasicLayout() {
     return keys;
   }, [location.pathname]);
 
+  /** 菜单选中键：次级页面（权限配置）回落到所属菜单项 */
+  const menuSelectedKey = location.pathname.startsWith('/admin/roles/')
+    ? '/admin/roles'
+    : location.pathname;
+
   const handleMenuClick: MenuProps['onClick'] = ({ key }) => {
     navigate(key);
     setMobileOpen(false);
@@ -347,7 +356,7 @@ export default function BasicLayout() {
       theme="light"
       mode={mode}
       items={menuItems}
-      selectedKeys={[location.pathname]}
+      selectedKeys={[menuSelectedKey]}
       defaultOpenKeys={defaultOpenKeys}
       onClick={handleMenuClick}
     />
@@ -355,7 +364,8 @@ export default function BasicLayout() {
 
   const tool = TOOLS.find((t) => t.path === location.pathname);
   const detailTitle = location.pathname.startsWith('/students/') ? '学生详情' : null;
-  const title = detailTitle ?? TITLES[location.pathname] ?? tool?.title ?? '知行辅导员工作台';
+  const rolePermTitle = /^\/admin\/roles\/\d+\/permissions$/.test(location.pathname) ? '权限配置' : null;
+  const title = rolePermTitle ?? detailTitle ?? TITLES[location.pathname] ?? tool?.title ?? '知行辅导员工作台';
   const totalAlert = badges.warnings + badges.todos;
   const roleLabel = authUser?.roleName ?? (authUser?.role === 'admin' ? '管理员' : '辅导员');
 

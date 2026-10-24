@@ -12,7 +12,7 @@ const express = require('express');
 const dbx = require('../lib/db');
 const auth = require('../lib/auth');
 const { canManageStudent, rosterScope } = require('../lib/scope');
-const { requirePermission, isModuleOwner } = require('../lib/permissions');
+const { requirePermission, requireAction, isModuleOwner } = require('../lib/permissions');
 const {
   MAX_BUILDING,
   MAX_ROOM,
@@ -155,7 +155,7 @@ router.get('/:id', (req, res) => {
 });
 
 /** 新增分配：学号必须存在于名册且在维护权限内；一名学生仅一条分配 */
-router.post('/', (req, res) => {
+router.post('/', requireAction('dormitories', 'create'), (req, res) => {
   const body = req.body ?? {};
   const studentNo = String(body.studentNo ?? '').trim();
   const building = String(body.building ?? '').trim();
@@ -193,7 +193,7 @@ router.post('/', (req, res) => {
 });
 
 /** 编辑分配：仅调整宿舍楼/房间号（学号归属不允许改，避免与名册脱节） */
-router.put('/:id', (req, res) => {
+router.put('/:id', requireAction('dormitories', 'edit'), (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: '无效的寝室记录' });
   const target = byId(id);
@@ -224,7 +224,7 @@ router.put('/:id', (req, res) => {
 });
 
 /** 删除分配：同步清空学生表镜像，名册「宿舍」随之显示为未分配 */
-router.delete('/:id', (req, res) => {
+router.delete('/:id', requireAction('dormitories', 'delete'), (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: '无效的寝室记录' });
   const target = byId(id);
@@ -243,7 +243,7 @@ router.delete('/:id', (req, res) => {
  * 批量删除：先校验全部记录存在且在维护权限内，再在一个事务里删除并同步名册镜像。
  * 任一条不满足则整批拒绝，避免出现「删了一半」的中间状态。
  */
-router.post('/batch-delete', (req, res) => {
+router.post('/batch-delete', requireAction('dormitories', 'delete'), (req, res) => {
   const raw = Array.isArray(req.body?.ids) ? req.body.ids : [];
   const ids = [...new Set(
     raw.map((v) => Number(v)).filter((n) => Number.isInteger(n) && n > 0),

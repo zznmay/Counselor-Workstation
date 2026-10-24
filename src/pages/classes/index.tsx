@@ -44,6 +44,8 @@ import {
 import type { ClassQuery } from '@/api/classes';
 import PageHeader from '@/components/PageHeader';
 import { useIsMobile } from '@/hooks/useIsMobile';
+import { useAuthUser } from '@/hooks/useAuthUser';
+import { canAction } from '@/lib/auth';
 import { useList } from '@/hooks/useList';
 import { downloadClassTemplate, exportClassImportFailures, parseClassExcel, validateClassRows } from '@/utils/classImport';
 import type {
@@ -75,6 +77,7 @@ export const EMPLOYEE_NO_RE = /^[a-zA-Z0-9_]{3,20}$/;
 /** 班级管理（桌面端）：班级列表 + 工号绑定人员 + 同步用户管理 */
 function ClassesDesktop() {
   const { message } = App.useApp();
+  const authUser = useAuthUser();
   const [form] = Form.useForm<ClassFormValues>();
 
   const { query, patchQuery, data, loading, refresh } = useList<SchoolClass, ClassQuery>(getClasses, {
@@ -435,10 +438,12 @@ function ClassesDesktop() {
       fixed: 'right',
       render: (_, record) => (
         <Space size={0}>
-          <Button type="link" size="small" onClick={() => openEdit(record)}>
-            编辑
-          </Button>
-          {(record.pendingStaffCount ?? 0) > 0 && (
+          {canAction(authUser, 'classes', 'edit') && (
+            <Button type="link" size="small" onClick={() => openEdit(record)}>
+              编辑
+            </Button>
+          )}
+          {(record.pendingStaffCount ?? 0) > 0 && canAction(authUser, 'classes', 'syncStaff') && (
             <Popconfirm
               title="同步该班待同步人员？"
               description="将按工号为本班待同步的辅导员/班主任创建账号（用户名=工号）并绑定本班；工号已有账号的只绑定本班并补齐身份。"
@@ -449,15 +454,17 @@ function ClassesDesktop() {
               </Button>
             </Popconfirm>
           )}
-          <Popconfirm
-            title="确定删除该班级吗？"
-            description="班级与辅导员/班主任的关联及待同步人员将一并移除；班级下仍有学生时无法删除"
-            onConfirm={() => handleDelete(record.id)}
-          >
-            <Button type="link" size="small" danger icon={<DeleteOutlined />}>
-              删除
-            </Button>
-          </Popconfirm>
+          {canAction(authUser, 'classes', 'delete') && (
+            <Popconfirm
+              title="确定删除该班级吗？"
+              description="班级与辅导员/班主任的关联及待同步人员将一并移除；班级下仍有学生时无法删除"
+              onConfirm={() => handleDelete(record.id)}
+            >
+              <Button type="link" size="small" danger icon={<DeleteOutlined />}>
+                删除
+              </Button>
+            </Popconfirm>
+          )}
         </Space>
       ),
     },
@@ -508,25 +515,31 @@ function ClassesDesktop() {
           重置
         </Button>
         <div className="toolbar-spacer" />
-        <Badge count={pendingCount} size="small" offset={[-4, 2]}>
-          <Button icon={<SyncOutlined />} onClick={openSync} disabled={pendingCount === 0}>
-            同步用户管理
+        {canAction(authUser, 'classes', 'syncStaff') && (
+          <Badge count={pendingCount} size="small" offset={[-4, 2]}>
+            <Button icon={<SyncOutlined />} onClick={openSync} disabled={pendingCount === 0}>
+              同步用户管理
+            </Button>
+          </Badge>
+        )}
+        {canAction(authUser, 'classes', 'import') && (
+          <Button icon={<UploadOutlined />} onClick={openImport}>
+            批量导入
           </Button>
-        </Badge>
-        <Button icon={<UploadOutlined />} onClick={openImport}>
-          批量导入
-        </Button>
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => {
-            form.resetFields();
-            setEditing(null);
-            setModalOpen(true);
-          }}
-        >
-          新增班级
-        </Button>
+        )}
+        {canAction(authUser, 'classes', 'create') && (
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => {
+              form.resetFields();
+              setEditing(null);
+              setModalOpen(true);
+            }}
+          >
+            新增班级
+          </Button>
+        )}
       </div>
       <Table
         rowKey="id"

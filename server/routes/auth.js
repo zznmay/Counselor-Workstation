@@ -5,15 +5,24 @@ const dbx = require('../lib/db');
 const auth = require('../lib/auth');
 const demo = require('../lib/demo');
 const { classIdsOfUser } = require('../lib/scope');
-const { permissionsOfUser, ownerModulesOfUser, isSystemAdmin, roleKeysOfUserId } = require('../lib/permissions');
+const {
+  permissionsOfUser,
+  ownerModulesOfUser,
+  isSystemAdmin,
+  roleKeysOfUserId,
+  actionsOfUser,
+  dataScopesOfUser,
+} = require('../lib/permissions');
 const { logAccess } = require('../lib/audit');
 
 const router = express.Router();
 
 /**
  * 会话用户输出：safeUser 白名单 + 所辖班级 + 角色集合 + 主角色名 + 有效权限（并集）
+ * + 操作权限（actions 并集，紧凑形式含 `module:*` 通配；admin 为 ['*']）
+ * + 数据范围（dataScopes：各可配模块的有效范围 all/managed）
  * + 主负责模块（并集；管理员为 ['*']，与 permissions 口径一致）。
- * 前端菜单与路由守卫直接消费 permissions；权限变更后重新拉取 /auth/me 即可生效。
+ * 前端菜单、路由守卫与按钮显隐直接消费；权限变更后重新拉取 /auth/me 即可生效。
  */
 const withSession = (row) => {
   // 先取角色集合再解析权限/班级（登录行的原始记录不含 roleKeys）
@@ -26,6 +35,8 @@ const withSession = (row) => {
     roleKeys,
     roleName: role?.name ?? (rowWithRoles.role === 'admin' ? '系统管理员' : rowWithRoles.role),
     permissions: permissionsOfUser(rowWithRoles),
+    actions: actionsOfUser(rowWithRoles),
+    dataScopes: dataScopesOfUser(rowWithRoles),
     ownerModules: isSystemAdmin(rowWithRoles) ? ['*'] : ownerModulesOfUser(rowWithRoles),
   };
 };

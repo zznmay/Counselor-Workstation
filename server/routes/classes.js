@@ -7,7 +7,7 @@ const express = require('express');
 
 const dbx = require('../lib/db');
 const auth = require('../lib/auth');
-const { requirePermission } = require('../lib/permissions');
+const { requirePermission, requireAction } = require('../lib/permissions');
 const { logAccess, nowStr } = require('../lib/audit');
 const { diffCounselorIds } = require('../lib/studentDiff');
 const { refillStudentsByClass } = require('../lib/teacherSync');
@@ -259,7 +259,7 @@ router.get('/pending-staff', (req, res) => {
  *   （按班分次同步时账号可能来自更早一次同步，缺本次身份会造成模块权限与带班身份漂移）；
  * - 停用/管理员账号 → 跳过并提示，待同步行保留（处理后可再次同步）。
  */
-router.post('/pending-staff/sync', (req, res) => {
+router.post('/pending-staff/sync', requireAction('classes', 'syncStaff'), (req, res) => {
   const scopeId = Number(req.body?.classId);
   const hasScope = Number.isInteger(scopeId) && scopeId > 0;
   if (hasScope && !dbx.get('SELECT id FROM classes WHERE id = ?', [scopeId])) {
@@ -376,7 +376,7 @@ router.get('/staff-users', (req, res) => {
   res.json(rows);
 });
 
-router.post('/', (req, res) => {
+router.post('/', requireAction('classes', 'create'), (req, res) => {
   const gradeId = Number(req.body?.gradeId);
   const name = String(req.body?.name ?? '').trim();
   if (!Number.isInteger(gradeId) || gradeId <= 0) return res.status(400).json({ message: '请选择所属年级' });
@@ -415,7 +415,7 @@ router.post('/', (req, res) => {
   res.json(byId(classId));
 });
 
-router.put('/:id', (req, res) => {
+router.put('/:id', requireAction('classes', 'edit'), (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: '无效的班级' });
   const target = byId(id);
@@ -473,7 +473,7 @@ router.put('/:id', (req, res) => {
   res.json(byId(id));
 });
 
-router.delete('/:id', (req, res) => {
+router.delete('/:id', requireAction('classes', 'delete'), (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: '无效的班级' });
   const target = byId(id);
@@ -516,7 +516,7 @@ router.get('/:id/staff', (req, res) => {
  * 人员按工号匹配在职账号：命中 → 正式绑定；未命中 → 待同步（不判失败，导入后可「同步用户管理」建号）。
  * 前端已完成预检，服务端逐条兜底校验；事务写入保证单次请求原子性。
  */
-router.post('/import', (req, res) => {
+router.post('/import', requireAction('classes', 'import'), (req, res) => {
   const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
   const failures = [];
   const writeItems = []; // 校验通过的待写入项

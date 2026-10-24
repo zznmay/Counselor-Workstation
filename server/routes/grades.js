@@ -3,7 +3,7 @@ const express = require('express');
 
 const dbx = require('../lib/db');
 const auth = require('../lib/auth');
-const { requirePermission } = require('../lib/permissions');
+const { requirePermission, requireAction, requirePage } = require('../lib/permissions');
 const { logAccess, nowStr } = require('../lib/audit');
 
 const router = express.Router();
@@ -27,7 +27,7 @@ router.get('/', (req, res) => {
   res.json(dbx.all(`${LIST_SELECT} ORDER BY g.name DESC`));
 });
 
-router.post('/', (req, res) => {
+router.post('/', requirePage('classes', 'grades'), requireAction('classes', 'gradeCreate'), (req, res) => {
   const name = String(req.body?.name ?? '').trim();
   if (!name || name.length > 20) return res.status(400).json({ message: '年级名称需为 1-20 个字' });
   if (dbx.get('SELECT id FROM grades WHERE name = ?', [name])) {
@@ -40,7 +40,7 @@ router.post('/', (req, res) => {
   res.json(row);
 });
 
-router.put('/:id', (req, res) => {
+router.put('/:id', requirePage('classes', 'grades'), requireAction('classes', 'gradeEdit'), (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: '无效的年级' });
   const target = dbx.get('SELECT * FROM grades WHERE id = ?', [id]);
@@ -61,7 +61,7 @@ router.put('/:id', (req, res) => {
   res.json(row);
 });
 
-router.delete('/:id', (req, res) => {
+router.delete('/:id', requirePage('classes', 'grades'), requireAction('classes', 'gradeDelete'), (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: '无效的年级' });
   const target = dbx.get('SELECT * FROM grades WHERE id = ?', [id]);

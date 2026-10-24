@@ -32,6 +32,8 @@ import {
   WARNING_TYPE_COLOR,
 } from '@/constants';
 import { useIsMobile } from '@/hooks/useIsMobile';
+import { useAuthUser } from '@/hooks/useAuthUser';
+import { canAction } from '@/lib/auth';
 import { useList } from '@/hooks/useList';
 import type {
   StudentOption,
@@ -58,6 +60,7 @@ interface WarningFormValues {
 function WarningsDesktop() {
   const isMobile = useIsMobile();
   const { message } = App.useApp();
+  const authUser = useAuthUser();
   const [form] = Form.useForm<WarningFormValues>();
   const [searchParams] = useSearchParams();
 
@@ -191,14 +194,19 @@ function WarningsDesktop() {
           <Button type="link" size="small" onClick={() => setDetail(record)}>
             详情
           </Button>
-          <Button type="link" size="small" onClick={() => openEdit(record)}>
-            {record.status === '待处理' ? '处理' : '编辑'}
-          </Button>
-          <Popconfirm title="确定删除该条预警吗？" onConfirm={() => handleDelete(record.id)}>
-            <Button type="link" size="small" danger>
-              删除
+          {/* 待处理行的「处理」按 resolve 权限显隐，其余按 edit；同一弹窗承载两种流转 */}
+          {canAction(authUser, 'warnings', record.status === '待处理' ? 'resolve' : 'edit') && (
+            <Button type="link" size="small" onClick={() => openEdit(record)}>
+              {record.status === '待处理' ? '处理' : '编辑'}
             </Button>
-          </Popconfirm>
+          )}
+          {canAction(authUser, 'warnings', 'delete') && (
+            <Popconfirm title="确定删除该条预警吗？" onConfirm={() => handleDelete(record.id)}>
+              <Button type="link" size="small" danger>
+                删除
+              </Button>
+            </Popconfirm>
+          )}
         </Space>
       ),
     },
@@ -252,9 +260,11 @@ function WarningsDesktop() {
           重置
         </Button>
         <div className="toolbar-spacer" />
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-          录入预警
-        </Button>
+        {canAction(authUser, 'warnings', 'create') && (
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+            录入预警
+          </Button>
+        )}
       </div>
 
       <Table
@@ -306,7 +316,8 @@ function WarningsDesktop() {
                 {detail.handledAt ?? '—'}
               </Descriptions.Item>
             </Descriptions>
-            {detail.status !== '已解除' && (
+            {detail.status !== '已解除'
+              && canAction(authUser, 'warnings', detail.status === '待处理' ? 'resolve' : 'edit') && (
               <Button
                 type="primary"
                 onClick={() => {

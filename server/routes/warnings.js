@@ -4,7 +4,7 @@ const express = require('express');
 const dbx = require('../lib/db');
 const auth = require('../lib/auth');
 const { sensitiveScope, canManageStudent } = require('../lib/scope');
-const { requirePermission } = require('../lib/permissions');
+const { requirePermission, requireAction, hasAction } = require('../lib/permissions');
 const { logAccess, nowStr } = require('../lib/audit');
 
 const router = express.Router();
@@ -18,7 +18,7 @@ router.get('/', (req, res) => {
   const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize) || 10));
   const kw = String(keyword).trim();
 
-  const scope = sensitiveScope(req.user, 'x');
+  const scope = sensitiveScope(req.user, 'warnings', 'x');
   const conds = ['1 = 1'];
   const params = [];
   if (kw) {
@@ -52,7 +52,7 @@ router.get('/', (req, res) => {
  * 原实现拉取「待处理」「处理中」各 100 条完整预警再在前端归并，数据量与请求数都偏大。
  */
 router.get('/active-map', (req, res) => {
-  const scope = sensitiveScope(req.user, 'x');
+  const scope = sensitiveScope(req.user, 'warnings', 'x');
   const rows = dbx.all(
     `SELECT x.studentId,
             CASE MAX(CASE x.level WHEN '红色' THEN 3 WHEN '橙色' THEN 2 WHEN '黄色' THEN 1 ELSE 0 END)
@@ -70,7 +70,7 @@ function resolveStudent(studentId) {
 }
 
 /** 新增：录入预警（仅所带班级的学生） */
-router.post('/', (req, res) => {
+router.post('/', requireAction('warnings', 'create'), (req, res) => {
   const body = req.body ?? {};
   const studentId = String(body.studentId ?? '');
   if (!studentId || !canManageStudent(req.user, studentId)) {
@@ -94,6 +94,11 @@ router.post('/', (req, res) => {
 router.put('/:id', (req, res) => {
   const target = dbx.get('SELECT * FROM warnings WHERE id = ?', [req.params.id]);
   if (!target) return res.status(404).json({ message: '记录不存在' });
+  // 同一端点承载「编辑」与「处理（状态流转）」：按是否变更状态区分操作权限
+  const statusChanged = req.body?.status !== undefined && req.body.status !== target.status;
+  if (!hasAction(req.user, 'warnings', statusChanged ? 'resolve' : 'edit')) {
+    return res.status(403).json({ message: statusChanged ? '当前角色无权处理预警' : '当前角色无权编辑预警' });
+  }
   if (!canManageStudent(req.user, target.studentId)) {
     return res.status(403).json({ message: '无权处理该预警（仅所带班级学生的预警）' });
   }
@@ -110,7 +115,7 @@ router.put('/:id', (req, res) => {
   res.json({ ok: true });
 });
 
-router.delete('/:id', (req, res) => {
+router.delete('/:id', requireAction('warnings', 'delete'), (req, res) => {
   const target = dbx.get('SELECT * FROM warnings WHERE id = ?', [req.params.id]);
   if (!target) return res.status(404).json({ message: '记录不存在' });
   if (!canManageStudent(req.user, target.studentId)) {

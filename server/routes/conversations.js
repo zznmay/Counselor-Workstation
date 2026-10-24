@@ -4,7 +4,7 @@ const express = require('express');
 const dbx = require('../lib/db');
 const auth = require('../lib/auth');
 const { sensitiveScope, canManageStudent } = require('../lib/scope');
-const { requirePermission } = require('../lib/permissions');
+const { requirePermission, requireAction } = require('../lib/permissions');
 const { logAccess } = require('../lib/audit');
 
 const router = express.Router();
@@ -20,7 +20,7 @@ router.get('/', (req, res) => {
   const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize) || 10));
   const kw = String(keyword).trim();
 
-  const scope = sensitiveScope(req.user, 'x');
+  const scope = sensitiveScope(req.user, 'conversations', 'x');
   const conds = ['1 = 1'];
   const params = [];
   if (kw) {
@@ -64,7 +64,7 @@ router.get('/timeline', (req, res) => {
 
 /** 时间线学生选项：有谈话记录的学生（可见范围内，按最近谈话倒序） */
 router.get('/talked-students', (req, res) => {
-  const scope = sensitiveScope(req.user, 'x');
+  const scope = sensitiveScope(req.user, 'conversations', 'x');
   const rows = dbx.all(
     `SELECT s.id, s.name, s.studentNo, s.className, COUNT(*) AS count,
             MAX(x.talkTime) AS lastTime,
@@ -82,7 +82,7 @@ function resolveStudent(studentId) {
 }
 
 /** 新增：仅所带班级的学生 */
-router.post('/', async (req, res) => {
+router.post('/', requireAction('conversations', 'create'), async (req, res) => {
   const body = req.body ?? {};
   const studentId = String(body.studentId ?? '');
   if (!studentId || !canManageStudent(req.user, studentId)) {
@@ -102,7 +102,7 @@ router.post('/', async (req, res) => {
   res.json({ id });
 });
 
-router.put('/:id', (req, res) => {
+router.put('/:id', requireAction('conversations', 'edit'), (req, res) => {
   const target = dbx.get('SELECT * FROM conversations WHERE id = ?', [req.params.id]);
   if (!target) return res.status(404).json({ message: '记录不存在' });
   if (!canManageStudent(req.user, target.studentId)) {
@@ -121,7 +121,7 @@ router.put('/:id', (req, res) => {
   res.json({ ok: true });
 });
 
-router.delete('/:id', (req, res) => {
+router.delete('/:id', requireAction('conversations', 'delete'), (req, res) => {
   const target = dbx.get('SELECT * FROM conversations WHERE id = ?', [req.params.id]);
   if (!target) return res.status(404).json({ message: '记录不存在' });
   if (!canManageStudent(req.user, target.studentId)) {

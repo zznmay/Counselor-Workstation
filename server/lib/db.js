@@ -3,7 +3,14 @@ const { DatabaseSync } = require('node:sqlite');
 const bcrypt = require('bcryptjs');
 
 const { DB_PATH, ensureDirs } = require('./config');
-const { COUNSELOR_DEFAULT_KEYS, COUNSELOR_LEGACY_KEYS, HEAD_TEACHER_DEFAULT_KEYS } = require('./modules');
+const {
+  COUNSELOR_DEFAULT_KEYS,
+  COUNSELOR_LEGACY_KEYS,
+  COUNSELOR_DEFAULT_ACTIONS,
+  HEAD_TEACHER_DEFAULT_KEYS,
+  HEAD_TEACHER_DEFAULT_ACTIONS,
+  COUNSELOR_DEFAULT_SCOPES,
+} = require('./modules');
 const SEED = require('./seed-data');
 const demo = require('./demo');
 
@@ -33,7 +40,10 @@ const SCHEMA_STATEMENTS = [
     teacherSource TEXT
   )`,
   /* 角色：users.role 存 roles.key；permissions 为模块 key 的 JSON 数组；
-     ownerModules 为「主负责辅导员」模块 key 的 JSON 数组（该模块最高权限：全院数据 + 全部操作） */
+     ownerModules 为「主负责辅导员」模块 key 的 JSON 数组（该模块最高权限：全院数据 + 全部操作）；
+     actions 为操作权限键的 JSON 数组（`module:*` 或 `module:<actionKey>` 精确键）；
+     dataScopes 为 `{moduleKey: 'all'|'managed'}` 的 JSON 对象（未配置模块默认带班）；
+     disabled=1 的角色停止贡献一切授权（不删除用户分配关系） */
   `CREATE TABLE IF NOT EXISTS roles (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     key TEXT NOT NULL UNIQUE,
@@ -42,6 +52,9 @@ const SCHEMA_STATEMENTS = [
     isSystem INTEGER NOT NULL DEFAULT 0,
     permissions TEXT NOT NULL DEFAULT '[]',
     ownerModules TEXT NOT NULL DEFAULT '[]',
+    actions TEXT NOT NULL DEFAULT '[]',
+    dataScopes TEXT NOT NULL DEFAULT '{}',
+    disabled INTEGER NOT NULL DEFAULT 0,
     createdAt TEXT NOT NULL,
     updatedAt TEXT NOT NULL
   )`,
@@ -431,6 +444,37 @@ if (!roleCols.includes('ownerModules')) {
 }
 
 /**
+ * 老库升级：roles 补加操作权限/数据范围/停用状态三列（新库建表语句已含，幂等跳过）。
+ * 回填仅在列首次补加时执行一次，保证与升级前的运行时行为逐点一致：
+ * - actions：按存量模块权限回填 `module:*`（模块可访问 = 该模块全部操作，升级前口径）；
+ * - dataScopes：内置「辅导员」回填默认范围（名册/寝室全量，其余带班，对应原 rosterScope 放行）；
+ *   其他角色不写非默认值（缺省即带班，与原敏感口径一致）。
+ */
+const actionsColNew = !roleCols.includes('actions');
+const dataScopesColNew = !roleCols.includes('dataScopes');
+if (actionsColNew) {
+  db.prepare("ALTER TABLE roles ADD COLUMN actions TEXT NOT NULL DEFAULT '[]'").run();
+}
+if (dataScopesColNew) {
+  db.prepare("ALTER TABLE roles ADD COLUMN dataScopes TEXT NOT NULL DEFAULT '{}'").run();
+}
+if (!roleCols.includes('disabled')) {
+  db.prepare('ALTER TABLE roles ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0').run();
+}
+if (actionsColNew || dataScopesColNew) {
+  const backfill = db.prepare('UPDATE roles SET actions = ?, dataScopes = ? WHERE id = ?');
+  for (const role of db.prepare('SELECT id, key, permissions FROM roles').all()) {
+    let perms = [];
+    try { perms = JSON.parse(role.permissions ?? '[]'); } catch { perms = []; }
+    // admin（permissions=['*']）由解析层短路为全部权限，无需回填操作键，跳过通配避免产生 `*:*` 脏键
+    const actions = JSON.stringify((Array.isArray(perms) ? perms : []).filter((k) => k !== '*').map((k) => `${k}:*`));
+    const scopes = role.key === 'counselor' ? JSON.stringify(COUNSELOR_DEFAULT_SCOPES) : '{}';
+    backfill.run(actions, scopes, role.id);
+  }
+  console.log('[db] 角色操作权限与数据范围列已补加并按存量权限回填（模块可访问=全部操作，辅导员名册/寝室全量）。');
+}
+
+/**
  * 老库升级：mentalInterviews 补加模板相关列（新库建表语句已含，此处幂等跳过）。
  * templateId/templateVersion/formSnapshot：记录填写时所用的记录单模板与题目快照，
  * 模板后续改题不影响历史记录的问答渲染。
@@ -514,11 +558,22 @@ for (const sql of INDEX_STATEMENTS) {
 function ensureBuiltinRoles() {
   const now = () => new Date().toISOString().slice(0, 16).replace('T', ' ');
   const ins = db.prepare(
-    `INSERT OR IGNORE INTO roles (key, name, description, isSystem, permissions, ownerModules, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR IGNORE INTO roles (key, name, description, isSystem, permissions, ownerModules, actions, dataScopes, disabled, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
   );
-  ins.run('admin', '系统管理员', '内置角色，拥有全部模块权限', 1, JSON.stringify(['*']), '[]', now(), now());
-  ins.run('counselor', '辅导员', '内置角色，可访问日常业务模块', 1, JSON.stringify(COUNSELOR_DEFAULT_KEYS), '[]', now(), now());
+  ins.run('admin', '系统管理员', '内置角色，拥有全部模块权限', 1, JSON.stringify(['*']), '[]', '["*"]', '{}', now(), now());
+  ins.run(
+    'counselor',
+    '辅导员',
+    '内置角色，可访问日常业务模块（名册/寝室全量数据，其余按带班）',
+    1,
+    JSON.stringify(COUNSELOR_DEFAULT_KEYS),
+    '[]',
+    JSON.stringify(COUNSELOR_DEFAULT_ACTIONS),
+    JSON.stringify(COUNSELOR_DEFAULT_SCOPES),
+    now(),
+    now(),
+  );
   ins.run(
     'headTeacher',
     '班主任',
@@ -526,6 +581,8 @@ function ensureBuiltinRoles() {
     1,
     JSON.stringify(HEAD_TEACHER_DEFAULT_KEYS),
     '[]',
+    JSON.stringify(HEAD_TEACHER_DEFAULT_ACTIONS),
+    '{}',
     now(),
     now(),
   );
@@ -535,17 +592,24 @@ function ensureBuiltinRoles() {
   }
 
   // 老库无痕升级：counselor 权限仍为初始默认集（管理员未自定义过）时，补配后加模块。
+  // 判定「未自定义」需同时满足：模块集合仍等于初始默认集，且操作权限全是 `module:*` 通配
+  // （从未做过逐操作收窄）。补配时模块与操作权限一并升级；数据范围保持现状不覆盖。
   // 权限一经管理员调整则保持现状，由管理员在「角色管理」自行勾选新模块。
-  const counselor = db.prepare("SELECT permissions FROM roles WHERE key = 'counselor'").get();
+  const counselor = db.prepare("SELECT permissions, actions FROM roles WHERE key = 'counselor'").get();
   if (counselor) {
     let perms = [];
+    let actions = [];
     try { perms = JSON.parse(counselor.permissions ?? '[]'); } catch { perms = []; }
+    try { actions = JSON.parse(counselor.actions ?? '[]'); } catch { actions = []; }
     const untouched = Array.isArray(perms)
       && perms.length === COUNSELOR_LEGACY_KEYS.length
-      && COUNSELOR_LEGACY_KEYS.every((k) => perms.includes(k));
+      && COUNSELOR_LEGACY_KEYS.every((k) => perms.includes(k))
+      && Array.isArray(actions)
+      && actions.length > 0
+      && actions.every((a) => typeof a === 'string' && a.endsWith(':*'));
     if (untouched) {
-      db.prepare("UPDATE roles SET permissions = ?, updatedAt = ? WHERE key = 'counselor'")
-        .run(JSON.stringify(COUNSELOR_DEFAULT_KEYS), now());
+      db.prepare("UPDATE roles SET permissions = ?, actions = ?, updatedAt = ? WHERE key = 'counselor'")
+        .run(JSON.stringify(COUNSELOR_DEFAULT_KEYS), JSON.stringify(COUNSELOR_DEFAULT_ACTIONS), now());
       console.log(`[db] 已为内置「辅导员」角色补配新增模块（${COUNSELOR_DEFAULT_KEYS.filter((k) => !COUNSELOR_LEGACY_KEYS.includes(k)).join('、')}）权限。`);
     }
   }

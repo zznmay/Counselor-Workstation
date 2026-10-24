@@ -3,7 +3,7 @@ const express = require('express');
 
 const dbx = require('../lib/db');
 const auth = require('../lib/auth');
-const { requirePermission } = require('../lib/permissions');
+const { requirePermission, requireAction } = require('../lib/permissions');
 const { logAccess, nowStr } = require('../lib/audit');
 
 const router = express.Router();
@@ -63,7 +63,7 @@ router.get('/', (req, res) => {
   res.json({ list: rows, total, page, pageSize });
 });
 
-router.post('/', (req, res) => {
+router.post('/', requireAction('todos', 'create'), (req, res) => {
   const body = req.body ?? {};
   const title = String(body.title ?? '').trim();
   if (!title) return res.status(400).json({ message: '请输入待办事项' });
@@ -85,7 +85,7 @@ router.post('/', (req, res) => {
   res.json({ id });
 });
 
-router.put('/:id', (req, res) => {
+router.put('/:id', requireAction('todos', 'edit'), (req, res) => {
   const target = ownedTodo(req, res);
   if (!target) return;
   const body = req.body ?? {};
@@ -121,7 +121,7 @@ router.put('/:id', (req, res) => {
   res.json({ ok: true });
 });
 
-router.delete('/:id', (req, res) => {
+router.delete('/:id', requireAction('todos', 'delete'), (req, res) => {
   const target = ownedTodo(req, res);
   if (!target) return;
   dbx.run('DELETE FROM todos WHERE id = ?', [req.params.id]);

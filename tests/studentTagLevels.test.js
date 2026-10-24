@@ -14,10 +14,10 @@ import {
 
 /**
  * 学生名册「关注等级 / 困难等级」标签的数据层权限测试：
- * - 带班用户（classCounselors）仅本班学生的响应含 mentalLevel / fundingLevel；
+ * - 有名册权限且带班（classCounselors）的用户仅本班学生的响应含 mentalLevel / fundingLevel；
  * - 非本班学生（即使可见）不回传这两个字段；
  * - 无带班的辅导员角色（可见全员）同样不回传任何等级字段；
- * - 管理员全量可见。
+ * - 管理员全量可见；无「学生名册」模块权限的用户（如单一班主任）列表 403。
  * 困难等级口径：最近学年（同年按认定月份）的「已认定」记录，已取消不计。
  */
 
@@ -68,7 +68,24 @@ describe('学生名册等级标签权限（students 列表 mentalLevel / funding
     const { classId: classA } = seedGradeAndClass(GRADE, CLASS_A);
     const { classId: classB } = seedGradeAndClass(GRADE, CLASS_B);
 
-    // 班主任仅带 A 班；另造一名不带班的辅导员角色用户
+    // 自定义角色用户：有「学生名册」模块权限但仅带 A 班（带班收口 + 等级标签可见的主体）
+    dbx.run(
+      `INSERT INTO roles (key, name, isSystem, permissions, ownerModules, actions, dataScopes, disabled, createdAt, updatedAt)
+       VALUES ('tagScopedRole', '标签范围角色', 0, '["students"]', '[]', '["students:*"]', '{}', 0, ?, ?)`,
+      [nowStr(), nowStr()],
+    );
+    dbx.run(
+      `INSERT INTO users (username, displayName, role, passwordHash, mustChangePassword, disabled, createdAt)
+       VALUES ('tag_scoped', '带班范围用户', 'tagScopedRole', 'x', 0, 0, ?)`,
+      [nowStr()],
+    );
+    dbx.run("INSERT OR IGNORE INTO userRoles (userId, roleKey) SELECT id, 'tagScopedRole' FROM users WHERE username = 'tag_scoped'");
+    const scoped = dbx.get("SELECT id FROM users WHERE username = 'tag_scoped'");
+    dbx.run(
+      "INSERT OR IGNORE INTO classCounselors (classId, userId, roleType, createdAt) VALUES (?, ?, 'counselor', ?)",
+      [classA, scoped.id, nowStr()],
+    );
+    // 单一班主任：无「学生名册」模块权限，列表应 403（模块门禁）
     const ht = seedHeadTeacher('tag_ht', '标签班主任');
     dbx.run(
       "INSERT OR IGNORE INTO classCounselors (classId, userId, roleType, createdAt) VALUES (?, ?, 'headTeacher', ?)",
@@ -107,8 +124,8 @@ describe('学生名册等级标签权限（students 列表 mentalLevel / funding
     return byNo;
   };
 
-  it('带班班主任：本班学生回传等级字段，可见范围仅本班', async () => {
-    const byNo = await listAs('tag_ht');
+  it('带名册权限且带班：本班学生回传等级字段，可见范围仅本班', async () => {
+    const byNo = await listAs('tag_scoped');
     const sa1 = byNo['2026011101'];
     const sa2 = byNo['2026011102'];
 
@@ -118,6 +135,11 @@ describe('学生名册等级标签权限（students 列表 mentalLevel / funding
     assert.equal(sa1.fundingLevel, '特别困难'); // 最近学年优先于旧学年
     assert.equal(sa2.fundingLevel, '困难'); // 已取消的「特别困难」不计
     assert.equal(sa2.mentalLevel, undefined);
+  });
+
+  it('无「学生名册」模块权限的用户（单一班主任）：列表 403', async () => {
+    const res = await requestAs(base, 'GET', '/api/students?page=1&pageSize=50', undefined, 'tag_ht');
+    assert.equal(res.status, 403, '模块门禁应拒绝无名册权限用户访问列表');
   });
 
   it('无带班的辅导员角色：可见全员但任何学生均不回传等级字段', async () => {
